@@ -7,8 +7,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:trair_app/backend/demo_backend.dart';
+import 'package:trair_app/core/vault.dart';
 import 'package:trair_app/main.dart';
 import 'package:trair_app/widgets/common.dart';
+
+import 'support/fake_door.dart';
+
+const pw = 'mein langes passwort';
 
 /// Loads the bundled fonts so text has the real width, as in the app.
 Future<void> _loadFonts() async {
@@ -30,169 +35,328 @@ Future<void> _loadFonts() async {
   await (FontLoader('Lucide')..addFont(bytes('Lucide.ttf'))).load();
 }
 
-Future<void> _start(WidgetTester tester, {Size size = const Size(1440, 900)}) async {
+/// Start the app. Without [door]: a vault exists and Trair is locked.
+Future<FakeDoor> _start(WidgetTester tester, {FakeDoor? door, Size size = const Size(1440, 900)}) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
-  await tester.pumpWidget(TrairApp(backend: DemoBackend()));
+  final d = door ?? FakeDoor(password: pw, profile: {'name': 'Julian'});
+  await tester.pumpWidget(TrairApp(backend: DemoBackend(), vault: TrairVault(d)));
+  await tester.pumpAndSettle();
+  return d;
+}
+
+Future<void> _type(WidgetTester tester, String password) async {
+  await tester.enterText(find.byType(TextField).first, password);
+  await tester.tap(find.text('Entsperren'));
   await tester.pumpAndSettle();
 }
 
-Future<void> _unlock(WidgetTester tester) async {
-  await tester.enterText(find.byType(TextField), 'irgendwas');
-  await tester.tap(find.text('Entsperren'));
+Future<void> _unlock(WidgetTester tester) => _type(tester, pw);
+
+Future<void> _ctrl(WidgetTester tester, LogicalKeyboardKey key) async {
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+  await tester.sendKeyEvent(key);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+  await tester.pumpAndSettle();
+}
+
+Future<void> _openSettings(WidgetTester tester) async {
+  await tester.tap(find.textContaining('Strenger Modus'));
   await tester.pumpAndSettle();
 }
 
 TextField _composer(WidgetTester tester) => tester.widget<TextField>(find.byKey(const Key('composer')));
 
+/// A text field, found by its hint (shown while the field is empty).
+Finder _field(String hint) => find.widgetWithText(TextField, hint);
+
 void main() {
   setUpAll(_loadFonts);
 
-  testWidgets('starts locked and always shows the demo badge', (tester) async {
-    await _start(tester);
-    expect(find.text('Willkommen zurück'), findsOneWidget);
-    expect(find.text('Demo – nicht verschlüsselt'), findsOneWidget);
+  group('Tresor und Sperre', () {
+    testWidgets('first start without a vault shows the setup, with no way back', (tester) async {
+      await _start(tester, door: FakeDoor());
+      expect(find.text('Einladungscode eingeben'), findsOneWidget);
+      expect(find.text('Zurück'), findsNothing);
+      expect(find.text('Willkommen zurück'), findsNothing);
+    });
 
-    await _unlock(tester);
-    expect(find.text('Demo – nicht verschlüsselt'), findsOneWidget);
-  });
-
-  testWidgets('unlocking opens the chats', (tester) async {
-    await _start(tester);
-    await _unlock(tester);
-    expect(find.text('Lena'), findsWidgets);
-    expect(find.text('Verschlüsselt · bestätigt'), findsOneWidget);
-  });
-
-  testWidgets('sending a message shows it in the chat', (tester) async {
-    await _start(tester);
-    await _unlock(tester);
-    await tester.enterText(find.byKey(const Key('composer')), 'Hallo aus dem Test');
-    await tester.tap(find.byTooltip('Senden'));
-    await tester.pumpAndSettle();
-    expect(find.text('Hallo aus dem Test'), findsOneWidget);
-    expect(_composer(tester).controller!.text, isEmpty);
-  });
-
-  testWidgets('strict mode blocks sending after a safety number change', (tester) async {
-    await _start(tester);
-    await _unlock(tester);
-    await tester.tap(find.text('Malik').first);
-    await tester.pumpAndSettle();
-
-    expect(_composer(tester).enabled, isFalse);
-    expect(find.textContaining('Senden ist blockiert'), findsOneWidget);
-
-    await tester.tap(find.text('Verglichen, stimmt'));
-    await tester.pumpAndSettle();
-    expect(_composer(tester).enabled, isTrue);
-    expect(find.textContaining('Senden ist blockiert'), findsNothing);
-  });
-
-  testWidgets('without strict mode the change only warns', (tester) async {
-    await _start(tester);
-    await _unlock(tester);
-
-    await tester.tap(find.text('Strenger Modus an'));
-    await tester.pumpAndSettle();
-    final strictSwitch = find.byType(PillSwitch).first;
-    await tester.ensureVisible(strictSwitch);
-    await tester.pumpAndSettle();
-    await tester.tap(strictSwitch);
-    await tester.pumpAndSettle();
-    expect(find.textContaining('Ohne strengen Modus warnt Trair nur noch'), findsOneWidget);
-
-    await tester.tap(find.text('Chats'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Malik').first);
-    await tester.pumpAndSettle();
-    expect(_composer(tester).enabled, isTrue);
-    expect(find.textContaining('Der strenge Modus ist aus'), findsOneWidget);
-  });
-
-  testWidgets('first start: no way forward without the no-recovery rules', (tester) async {
-    await _start(tester);
-    await tester.tap(find.text('Neu hier? Mit Einladungscode starten'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Weiter'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Weiter'));
-    await tester.pumpAndSettle();
-
-    PillButton start() => tester.widget<PillButton>(find.widgetWithText(PillButton, 'Trair starten'));
-    Future<void> tick() async {
-      await tester.ensureVisible(find.byType(Checkbox));
+    testWidgets('first start creates the vault and opens Trair', (tester) async {
+      final door = await _start(tester, door: FakeDoor());
+      await tester.tap(find.text('Weiter'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byType(Checkbox));
+      await tester.enterText(find.byType(TextField), 'Lena');
+      await tester.tap(find.text('Weiter'));
       await tester.pumpAndSettle();
-    }
 
-    final fields = find.byType(TextField);
-    expect(fields, findsNWidgets(2));
-    expect(start().onPressed, isNull);
+      PillButton start() => tester.widget<PillButton>(find.widgetWithText(PillButton, 'Trair starten'));
+      Future<void> tick() async {
+        await tester.ensureVisible(find.byType(Checkbox));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byType(Checkbox));
+        await tester.pumpAndSettle();
+      }
 
-    // Too short, even with the box ticked.
-    await tester.enterText(fields.at(0), 'kurz');
-    await tester.enterText(fields.at(1), 'kurz');
-    await tick();
-    expect(start().onPressed, isNull);
+      final fields = find.byType(TextField);
+      expect(fields, findsNWidgets(2));
+      expect(start().onPressed, isNull);
+      // Too short, even with the box ticked.
+      await tester.enterText(fields.at(0), 'kurz');
+      await tester.enterText(fields.at(1), 'kurz');
+      await tick();
+      expect(start().onPressed, isNull);
+      // Long enough but not the same twice.
+      await tester.enterText(fields.at(0), 'ein langer satz mit 7');
+      await tester.enterText(fields.at(1), 'ein langer satz mit 8');
+      await tester.pumpAndSettle();
+      expect(start().onPressed, isNull);
+      expect(find.text('Die Passwörter stimmen nicht überein.'), findsOneWidget);
+      // Same twice, box unticked, then ticked.
+      await tester.enterText(fields.at(1), 'ein langer satz mit 7');
+      await tick();
+      expect(start().onPressed, isNull);
+      await tick();
+      expect(start().onPressed, isNotNull);
+      await tester.ensureVisible(find.text('Trair starten'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Trair starten'));
+      await tester.pumpAndSettle();
 
-    // Long enough but not the same twice.
-    await tester.enterText(fields.at(0), 'ein langer satz mit 7');
-    await tester.enterText(fields.at(1), 'ein langer satz mit 8');
-    await tester.pumpAndSettle();
-    expect(start().onPressed, isNull);
-    expect(find.text('Die Passwörter stimmen nicht überein.'), findsOneWidget);
+      expect(door.password, 'ein langer satz mit 7');
+      expect(door.profile['name'], 'Lena');
+      expect(find.text('Demo-Chats – nicht verschlüsselt'), findsOneWidget);
+      expect(find.text('Strenger Modus an'), findsOneWidget);
+    });
 
-    // Same twice, but the box unticked.
-    await tester.enterText(fields.at(1), 'ein langer satz mit 7');
-    await tick();
-    expect(start().onPressed, isNull);
+    testWidgets('a wrong password opens nothing, the right one restores the profile', (tester) async {
+      await _start(tester);
+      expect(find.text('Willkommen zurück'), findsOneWidget);
+      expect(find.text('Julian'), findsNothing, reason: 'nothing personal on the lock screen');
+      await _type(tester, 'falsches passwort');
+      expect(find.text('Passwort falsch.'), findsOneWidget);
+      expect(find.text('Willkommen zurück'), findsOneWidget);
+      final field = tester.widget<TextField>(find.byType(TextField).first);
+      expect(field.controller!.text, isEmpty, reason: 'the password leaves the field');
+      await _unlock(tester);
+      expect(find.text('Julian'), findsOneWidget);
+    });
 
-    await tick();
-    expect(start().onPressed, isNotNull);
-    await tester.ensureVisible(find.text('Trair starten'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Trair starten'));
-    await tester.pumpAndSettle();
-    expect(find.text('Lena'), findsWidgets);
+    testWidgets('after three wrong passwords Trair makes you wait', (tester) async {
+      await _start(tester);
+      for (var i = 0; i < 3; i++) {
+        await _type(tester, 'falsches passwort $i');
+      }
+      expect(find.textContaining('bitte 5 Sekunden warten'), findsOneWidget);
+      expect(tester.widget<PillButton>(find.byType(PillButton)).onPressed, isNull);
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpAndSettle();
+      expect(find.text('Entsperren'), findsOneWidget);
+      await _unlock(tester);
+      expect(find.text('Julian'), findsOneWidget);
+    });
+
+    testWidgets('Ctrl+L locks at once and the profile leaves the screen', (tester) async {
+      final door = await _start(tester);
+      await _unlock(tester);
+      await _ctrl(tester, LogicalKeyboardKey.keyL);
+      expect(find.text('Willkommen zurück'), findsOneWidget);
+      expect(find.text('Julian'), findsNothing);
+      expect(door.ops, contains('lock'));
+      expect(door.unlocked, isFalse);
+    });
+
+    testWidgets('Trair locks itself after the chosen time without use', (tester) async {
+      await _start(tester);
+      await _unlock(tester);
+      await tester.pump(const Duration(minutes: 14));
+      expect(find.text('Willkommen zurück'), findsNothing);
+      await tester.pump(const Duration(minutes: 1, seconds: 1));
+      await tester.pumpAndSettle();
+      expect(find.text('Willkommen zurück'), findsOneWidget);
+    });
+
+    testWidgets('settings are stored in the vault and survive locking', (tester) async {
+      final door = await _start(tester);
+      await _unlock(tester);
+      await _openSettings(tester);
+      await tester.ensureVisible(find.text('5 Min.'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('5 Min.'));
+      final strictSwitch = find.byType(PillSwitch).first;
+      await tester.ensureVisible(strictSwitch);
+      await tester.pumpAndSettle();
+      await tester.tap(strictSwitch);
+      await tester.pump(const Duration(seconds: 1));
+      expect(door.profile['strict'], isFalse);
+      expect(door.profile['autoLockMinutes'], 5);
+
+      await _ctrl(tester, LogicalKeyboardKey.keyL);
+      await _unlock(tester);
+      expect(find.text('Strenger Modus aus'), findsOneWidget);
+      // The new auto-lock time is used.
+      await tester.pump(const Duration(minutes: 5, seconds: 1));
+      await tester.pumpAndSettle();
+      expect(find.text('Willkommen zurück'), findsOneWidget);
+    });
+
+    testWidgets('changing the password needs the old one', (tester) async {
+      final door = await _start(tester);
+      await _unlock(tester);
+      await _openSettings(tester);
+      Future<void> fill(String label, String text) async {
+        await tester.ensureVisible(_field(label));
+        await tester.enterText(_field(label), text);
+      }
+
+      await fill('Altes Passwort', 'nicht das alte');
+      await fill('Neues Passwort (mind. 12 Zeichen)', 'ein neues passwort');
+      await fill('Neues Passwort wiederholen', 'ein neues passwort');
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Passwort ändern'));
+      await tester.pumpAndSettle();
+      expect(find.text('Passwort falsch.'), findsOneWidget);
+      expect(door.password, pw);
+
+      await fill('Altes Passwort', pw);
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Passwort ändern'));
+      await tester.pumpAndSettle();
+      expect(find.text('Neues Passwort gilt ab jetzt.'), findsOneWidget);
+      expect(door.password, 'ein neues passwort');
+    });
+
+    testWidgets('deleting the account needs the password and ends at the setup', (tester) async {
+      final door = await _start(tester);
+      await _unlock(tester);
+      await _openSettings(tester);
+      final delete = find.text('Konto endgültig löschen');
+      await tester.ensureVisible(delete);
+      await tester.pumpAndSettle();
+      await tester.tap(delete);
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(_field('Passwort'));
+      await tester.enterText(_field('Passwort'), 'falsch falsch');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Endgültig löschen'));
+      await tester.pumpAndSettle();
+      expect(door.password, pw, reason: 'a wrong password deletes nothing');
+      expect(find.text('Passwort falsch.'), findsOneWidget);
+      await tester.enterText(_field('Passwort'), pw);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Endgültig löschen'));
+      await tester.pumpAndSettle();
+      expect(door.password, isNull);
+      expect(find.text('Einladungscode eingeben'), findsOneWidget);
+    });
+
+    testWidgets('copied codes leave the clipboard after 60 seconds', (tester) async {
+      String? clipboard;
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') {
+          clipboard = (call.arguments as Map<Object?, Object?>)['text'] as String?;
+        }
+        if (call.method == 'Clipboard.getData') return {'text': clipboard};
+        return null;
+      });
+      addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
+      await _start(tester);
+      await _unlock(tester);
+      await tester.tap(find.text('Trair Beta'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Leute einladen'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Kopieren (verschwindet nach 60 Sekunden)'));
+      await tester.pump();
+      expect(clipboard, 'TRAIR-7KQ2-M9XD');
+      await tester.pump(const Duration(seconds: 61));
+      expect(clipboard, isEmpty);
+    });
+
+    testWidgets('a missing core shows an error, never the demo', (tester) async {
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(TrairApp(backend: DemoBackend(), vault: null, startupError: 'nicht gefunden'));
+      await tester.pumpAndSettle();
+      expect(find.text('Sicherheitskern fehlt'), findsOneWidget);
+      expect(find.text('Willkommen zurück'), findsNothing);
+      expect(find.text('Lena'), findsNothing);
+    });
   });
 
-  testWidgets('community shows open and closed channels', (tester) async {
-    await _start(tester);
-    await _unlock(tester);
-    await tester.tap(find.text('Trair Beta'));
-    await tester.pumpAndSettle();
-    expect(find.text('Geschlossen · Ende-zu-Ende'), findsOneWidget);
+  group('Chats', () {
+    testWidgets('sending a message shows it in the chat', (tester) async {
+      await _start(tester);
+      await _unlock(tester);
+      await tester.enterText(find.byKey(const Key('composer')), 'Hallo aus dem Test');
+      await tester.tap(find.byTooltip('Senden'));
+      await tester.pumpAndSettle();
+      expect(find.text('Hallo aus dem Test'), findsOneWidget);
+      expect(_composer(tester).controller!.text, isEmpty);
+    });
 
-    await tester.tap(find.text('memes'));
-    await tester.pumpAndSettle();
-    expect(find.text('Offen · für Moderation lesbar'), findsOneWidget);
-  });
+    testWidgets('strict mode blocks sending after a safety number change', (tester) async {
+      await _start(tester);
+      await _unlock(tester);
+      await tester.tap(find.text('Malik').first);
+      await tester.pumpAndSettle();
+      expect(_composer(tester).enabled, isFalse);
+      expect(find.textContaining('Senden ist blockiert'), findsOneWidget);
+      await tester.tap(find.text('Verglichen, stimmt'));
+      await tester.pumpAndSettle();
+      expect(_composer(tester).enabled, isTrue);
+      expect(find.textContaining('Senden ist blockiert'), findsNothing);
+    });
 
-  testWidgets('Ctrl+K jumps into the chat search', (tester) async {
-    await _start(tester);
-    await _unlock(tester);
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
-    await tester.pumpAndSettle();
-    final search = tester.widget<TextField>(
-      find.descendant(of: find.byType(PillField), matching: find.byType(TextField)).first,
-    );
-    expect(search.focusNode!.hasFocus, isTrue);
-  });
+    testWidgets('without strict mode the change only warns', (tester) async {
+      await _start(tester);
+      await _unlock(tester);
+      await _openSettings(tester);
+      final strictSwitch = find.byType(PillSwitch).first;
+      await tester.ensureVisible(strictSwitch);
+      await tester.pumpAndSettle();
+      await tester.tap(strictSwitch);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Ohne strengen Modus warnt Trair nur noch'), findsOneWidget);
+      await tester.tap(find.text('Chats'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Malik').first);
+      await tester.pumpAndSettle();
+      expect(_composer(tester).enabled, isTrue);
+      expect(find.textContaining('Der strenge Modus ist aus'), findsOneWidget);
+    });
 
-  testWidgets('every screen fits a small window without overflow', (tester) async {
-    await _start(tester, size: const Size(1024, 640));
-    await _unlock(tester);
-    await tester.tap(find.text('Trair Beta'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Chats'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Strenger Modus an'));
-    await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull);
+    testWidgets('community shows open and closed channels', (tester) async {
+      await _start(tester);
+      await _unlock(tester);
+      await tester.tap(find.text('Trair Beta'));
+      await tester.pumpAndSettle();
+      expect(find.text('Geschlossen · Ende-zu-Ende'), findsOneWidget);
+      await tester.tap(find.text('memes'));
+      await tester.pumpAndSettle();
+      expect(find.text('Offen · für Moderation lesbar'), findsOneWidget);
+    });
+
+    testWidgets('Ctrl+K jumps into the chat search', (tester) async {
+      await _start(tester);
+      await _unlock(tester);
+      await _ctrl(tester, LogicalKeyboardKey.keyK);
+      final search = tester.widget<TextField>(
+        find.descendant(of: find.byType(PillField), matching: find.byType(TextField)).first,
+      );
+      expect(search.focusNode!.hasFocus, isTrue);
+    });
+
+    testWidgets('every screen fits a small window without overflow', (tester) async {
+      await _start(tester, size: const Size(1024, 640));
+      await _unlock(tester);
+      await tester.tap(find.text('Trair Beta'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Chats'));
+      await tester.pumpAndSettle();
+      await _openSettings(tester);
+      expect(tester.takeException(), isNull);
+    });
   });
 }

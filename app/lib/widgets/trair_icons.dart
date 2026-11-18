@@ -15,6 +15,7 @@ abstract final class TrairIcons {
   static const check = IconData(0xE06C, fontFamily: _font);
   static const chevronDown = IconData(0xE06D, fontFamily: _font);
   static const chevronLeft = IconData(0xE06E, fontFamily: _font);
+  static const copy = IconData(0xE09E, fontFamily: _font);
   static const ellipsis = IconData(0xE0B6, fontFamily: _font);
   static const eye = IconData(0xE0BA, fontFamily: _font);
   static const eyeOff = IconData(0xE0BB, fontFamily: _font);

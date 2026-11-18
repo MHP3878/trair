@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 The Trair contributors
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
@@ -8,11 +10,14 @@ import 'package:material_ui/material_ui.dart';
 import 'app_state.dart';
 import 'backend/backend.dart';
 import 'backend/demo_backend.dart';
+import 'core/door.dart';
+import 'core/vault.dart';
 import 'screens/chats_screen.dart';
 import 'screens/community_screen.dart';
 import 'screens/lock_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/profile_screen.dart';
+import 'screens/start_screen.dart';
 import 'theme.dart';
 import 'widgets/common.dart';
 
@@ -26,23 +31,55 @@ void main() {
     final icons = await rootBundle.loadString('assets/fonts/LUCIDE-LICENSE.txt');
     yield LicenseEntryWithLineBreaks(const ['Lucide'], icons);
   });
-  runApp(TrairApp(backend: DemoBackend()));
+  TrairVault? vault;
+  var problem = '';
+  try {
+    vault = TrairVault(NativeDoor.load());
+  } on CoreMissing catch (e) {
+    problem = e.message;
+  }
+  runApp(TrairApp(backend: DemoBackend(), vault: vault, startupError: problem));
 }
 
 class TrairApp extends StatefulWidget {
-  const TrairApp({super.key, required this.backend});
+  const TrairApp({super.key, required this.backend, required this.vault, this.startupError = ''});
 
   final TrairBackend backend;
+
+  /// The security core. Null if it could not be loaded: the app then only
+  /// shows [startupError] and never falls back to demo data.
+  final TrairVault? vault;
+  final String startupError;
 
   @override
   State<TrairApp> createState() => _TrairAppState();
 }
 
 class _TrairAppState extends State<TrairApp> {
-  late final AppState _state = AppState(widget.backend);
+  late final AppState _state = AppState(widget.backend, widget.vault)..startupError = widget.startupError;
+
+  @override
+  void initState() {
+    super.initState();
+    HardwareKeyboard.instance.addHandler(_onKey);
+    unawaited(_state.start());
+  }
+
+  /// Every key counts as activity; Ctrl+L locks at once, wherever the
+  /// focus is.
+  bool _onKey(KeyEvent event) {
+    _state.noteActivity();
+    final control = HardwareKeyboard.instance.isControlPressed;
+    if (event is KeyDownEvent && control && event.logicalKey == LogicalKeyboardKey.keyL && _state.unlocked) {
+      unawaited(_state.lock());
+      return true;
+    }
+    return false;
+  }
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onKey);
     _state.dispose();
     super.dispose();
   }
@@ -57,11 +94,16 @@ class _TrairAppState extends State<TrairApp> {
         theme: trairTheme(),
         home: const _Router(),
         builder: (context, child) {
-          return Column(
-            children: [
-              if (_state.backend.isDemo) const DemoBar(),
-              Expanded(child: MinSizeScaler(child: child ?? const SizedBox.shrink())),
-            ],
+          return Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerDown: (_) => _state.noteActivity(),
+            onPointerSignal: (_) => _state.noteActivity(),
+            child: Column(
+              children: [
+                if (_state.backend.isDemo) const DemoBar(),
+                Expanded(child: MinSizeScaler(child: child ?? const SizedBox.shrink())),
+              ],
+            ),
           );
         },
       ),
@@ -76,6 +118,8 @@ class _Router extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
     final Widget page = switch (state.screen) {
+      TrairScreen.starting => const StartScreen(),
+      TrairScreen.coreMissing => const CoreMissingScreen(),
       TrairScreen.lock => const LockScreen(),
       TrairScreen.onboarding => const OnboardingScreen(),
       TrairScreen.chats => const ChatsScreen(),

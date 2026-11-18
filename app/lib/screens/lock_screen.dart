@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 The Trair contributors
 
+import 'dart:async';
+
 import 'package:material_ui/material_ui.dart';
 
 import '../app_state.dart';
+import '../core/vault.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/trair_icons.dart';
 
-/// Launcher: nothing is decrypted while this screen is shown.
+/// Launcher: nothing is decrypted while this screen is shown. The password
+/// goes straight to the Rust core; a wrong one opens nothing.
 class LockScreen extends StatefulWidget {
   const LockScreen({super.key});
 
@@ -19,17 +23,57 @@ class LockScreen extends StatefulWidget {
 class _LockScreenState extends State<LockScreen> {
   final _pw = TextEditingController();
   bool _show = false;
+  bool _busy = false;
+  String _error = '';
+  int _wait = 0;
+  Timer? _countdown;
 
   @override
   void dispose() {
+    _countdown?.cancel();
     _pw.dispose();
     super.dispose();
+  }
+
+  Future<void> _unlock(AppState state) async {
+    if (_busy || _wait > 0 || _pw.text.isEmpty) return;
+    setState(() {
+      _busy = true;
+      _error = '';
+    });
+    final answer = await state.unlock(_pw.text);
+    if (!mounted) return;
+    // The password leaves the field either way.
+    _pw.clear();
+    setState(() {
+      _busy = false;
+      if (!answer.ok) {
+        _error = vaultErrorText(answer);
+        _startWait(answer.wait);
+      }
+    });
+  }
+
+  void _startWait(int seconds) {
+    _countdown?.cancel();
+    _wait = seconds;
+    if (seconds <= 0) return;
+    _countdown = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) return;
+      setState(() {
+        _wait -= 1;
+        if (_wait <= 0) {
+          t.cancel();
+          _error = '';
+        }
+      });
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
-    void unlock() => state.go(TrairScreen.chats);
+    final blocked = _busy || _wait > 0;
     return Backdrop(
       child: Center(
         child: SingleChildScrollView(
@@ -59,8 +103,9 @@ class _LockScreenState extends State<LockScreen> {
                         controller: _pw,
                         hint: 'Passwort eingeben',
                         obscure: !_show,
+                        autofocus: true,
                         semanticLabel: 'Launcher-Passwort',
-                        onSubmitted: (_) => unlock(),
+                        onSubmitted: (_) => _unlock(state),
                         trailing: RoundIconButton(
                           icon: _show ? TrairIcons.eyeOff : TrairIcons.eye,
                           tooltip: _show ? 'Passwort verbergen' : 'Passwort anzeigen',
@@ -70,33 +115,32 @@ class _LockScreenState extends State<LockScreen> {
                       ),
                       const SizedBox(height: 14),
                       PillButton(
-                        label: 'Entsperren',
+                        label: _busy ? 'Entsperre …' : (_wait > 0 ? 'Noch $_wait s warten' : 'Entsperren'),
                         icon: TrairIcons.arrowRight,
                         height: 50,
                         expand: true,
-                        onPressed: unlock,
+                        onPressed: blocked ? null : () => _unlock(state),
                       ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        'Demo: Es gibt noch kein echtes Passwort, jede Eingabe öffnet.',
-                        textAlign: TextAlign.center,
-                        style: TrairText.small,
+                      AnimatedSize(
+                        duration: const Duration(milliseconds: 200),
+                        child: _error.isEmpty
+                            ? const SizedBox(width: double.infinity)
+                            : Padding(
+                                padding: const EdgeInsets.only(top: 12),
+                                child: Text(
+                                  _error,
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(fontSize: 13.5, height: 1.45, color: TrairColors.amber),
+                                ),
+                              ),
                       ),
                       const SizedBox(height: 18),
                       const Center(
-                        child: SecurityCapsule(text: 'Gesperrt · nichts wird entschlüsselt', tone: CapsuleTone.locked),
+                        child: SecurityCapsule(text: 'Gesperrt · nichts ist entschlüsselt', tone: CapsuleTone.locked),
                       ),
                       const SizedBox(height: 18),
                       const Divider(color: TrairColors.borderSoft, height: 1),
-                      const SizedBox(height: 12),
-                      TextButton(
-                        onPressed: () => state.go(TrairScreen.onboarding),
-                        child: const Text(
-                          'Neu hier? Mit Einladungscode starten',
-                          style: TextStyle(color: TrairColors.accentPale, fontWeight: FontWeight.w500),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 14),
                       const Text(
                         'Passwort vergessen? Dann ist dieses Konto für immer weg. Es gibt keine Wiederherstellung.',
                         textAlign: TextAlign.center,
@@ -116,7 +160,12 @@ class _LockScreenState extends State<LockScreen> {
                     decoration: const BoxDecoration(color: TrairColors.mint, shape: BoxShape.circle),
                   ),
                   const SizedBox(width: 8),
-                  const Text('Strenger Modus an · Open Source unter AGPL-3.0', style: TrairText.small),
+                  Text(
+                    state.screenProtectionSupported
+                        ? 'Geschützt vor Bildschirmfotos · Open Source unter AGPL-3.0'
+                        : 'Open Source unter AGPL-3.0',
+                    style: TrairText.small,
+                  ),
                 ],
               ),
             ],

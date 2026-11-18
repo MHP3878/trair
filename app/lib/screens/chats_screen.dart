@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 
 import '../app_state.dart';
+import '../core/clipboard.dart';
 import '../backend/backend.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -471,6 +472,17 @@ class _ChatsScreenState extends State<ChatsScreen> {
                       for (final g in groups)
                         Text(g, style: TrairText.mono.copyWith(color: const Color(0xFFE2DCFF), letterSpacing: 0.6)),
                     ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: PillButton(
+                    label: 'Kopieren',
+                    icon: TrairIcons.copy,
+                    kind: PillKind.ghost,
+                    height: 36,
+                    onPressed: () => copySensitive(groups.join(' ')),
                   ),
                 ),
               ],

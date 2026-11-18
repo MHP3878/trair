@@ -4,7 +4,7 @@
 
 Trair wird ein Messenger, der sich so einfach bedienen lässt wie WhatsApp oder Discord, bei dem Sicherheit und Privatsphäre aber an erster Stelle stehen. Private Nachrichten sind Ende-zu-Ende-verschlüsselt mit MLS (RFC 9420). Der Server stellt nur zu und kann private Inhalte nicht lesen.
 
-> **Status: Krypto-Kern (M1) und App-Oberfläche mit Demo-Daten.** Die App verschlüsselt noch nichts und verbindet sich mit keinem Server; jedes Fenster zeigt das Schild „Demo – nicht verschlüsselt“. Bitte nichts davon für echte Kommunikation verwenden.
+> **Status: Krypto-Kern (M1), App mit echtem Tresor.** Konto, Launcher-Passwort, Sperre und Einstellungen sind echt und verschlüsselt (siehe `SECURITY.md`). Chats und Kontakte sind noch ausgedacht, weil es noch keinen Server gibt; jedes Fenster zeigt deshalb „Demo-Chats – nicht verschlüsselt“. Bitte noch nicht für echte Kommunikation verwenden.
 
 ## Grundsätze
 
@@ -18,6 +18,7 @@ Trair wird ein Messenger, der sich so einfach bedienen lässt wie WhatsApp oder 
 | Ordner | Inhalt |
 | --- | --- |
 | `crates/trair-core` | Rust-Kern der App: Konten, Geräte-Zertifikate, MLS-Gruppen, strenger Modus. Die Angriffstests liegen in `tests/angriffe.rs` |
+| `crates/trair-ffi` | Die schmale Tür zwischen App und Kern: vier C-Funktionen, JSON-Nachrichten, unter Windows DPAPI und Bildschirmfoto-Schutz |
 | `crates/trair-server` | Rust-Server: Konten, Zustellung, Communities (ab M3) |
 | `app/` | Flutter-App für Windows im Pro-Look. Zeigt bis zur Anbindung an den Rust-Kern nur Demo-Daten (`lib/backend/demo_backend.dart`) |
 | `tools/` | Prüfskripte für CI: Lizenzliste, Datei-Kopfzeilen, DCO. `make_branding.py` erzeugt Logo, Windows-Symbol und Symbol-Schrift neu |
@@ -25,7 +26,7 @@ Trair wird ein Messenger, der sich so einfach bedienen lässt wie WhatsApp oder 
 
 ## Windows-Demo herunterladen
 
-GitHub baut die App bei jedem Push. Unter **Actions → App → letzter grüner Lauf → Artifacts → Trair-Windows-Demo** liegt eine ZIP-Datei. Entpacken und `Trair.exe` starten. Die Datei ist noch nicht signiert, deshalb warnt Windows beim ersten Start („Weitere Informationen → Trotzdem ausführen“).
+GitHub baut die App bei jedem Push. Unter **Actions → App → letzter grüner Lauf → Artifacts → Trair-Windows-Demo** liegt eine ZIP-Datei. Entpacken und `Trair.exe` starten (`trair_ffi.dll` muss daneben liegen, das ist der Sicherheitskern). Die Datei ist noch nicht signiert, deshalb warnt Windows beim ersten Start („Weitere Informationen → Trotzdem ausführen“).
 
 ## Prüfungen
 

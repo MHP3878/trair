@@ -4,6 +4,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../app_state.dart';
+import '../core/vault.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/trair_icons.dart';
@@ -20,11 +21,13 @@ class OnboardingScreen extends StatefulWidget {
 class _OnboardingScreenState extends State<OnboardingScreen> {
   int _step = 1;
   final _code = TextEditingController();
-  final _name = TextEditingController(text: 'Julian');
+  final _name = TextEditingController();
   final _pw1 = TextEditingController();
   final _pw2 = TextEditingController();
   Color _glow = TrairColors.accentLight;
   bool _understood = false;
+  bool _busy = false;
+  String _error = '';
 
   @override
   void dispose() {
@@ -37,14 +40,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   int get _score {
     final p = _pw1.text;
     var s = 0;
-    if (p.length >= 8) s++;
-    if (p.length >= 12) s++;
+    final length = p.runes.length;
+    if (length >= 8) s++;
+    if (length >= 12) s++;
     if (RegExp(r'[0-9]').hasMatch(p) && RegExp(r'[A-Za-z]').hasMatch(p)) s++;
-    if (p.length >= 16 || RegExp(r'[^A-Za-z0-9]').hasMatch(p)) s++;
+    if (length >= 16 || RegExp(r'[^A-Za-z0-9]').hasMatch(p)) s++;
     return s;
   }
 
-  bool get _canStart => _understood && _pw1.text.length >= 12 && _pw1.text == _pw2.text;
+  bool get _canStart => _understood && _pw1.text.runes.length >= 12 && _pw1.text == _pw2.text;
 
   @override
   Widget build(BuildContext context) {
@@ -94,7 +98,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     child: KeyedSubtree(
                       key: ValueKey(_step),
                       child: switch (_step) {
-                        1 => _stepInvite(state),
+                        1 => _stepInvite(),
                         2 => _stepProfile(),
                         _ => _stepPassword(state),
                       },
@@ -109,24 +113,40 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     );
   }
 
-  Widget _nav({required VoidCallback onBack, required Widget next}) {
+  Widget _nav({required VoidCallback? onBack, required Widget next}) {
     return Row(
       children: [
-        PillButton(label: 'Zurück', kind: PillKind.ghost, onPressed: onBack),
+        if (onBack != null) PillButton(label: 'Zurück', kind: PillKind.ghost, onPressed: onBack),
         const Spacer(),
         next,
       ],
     );
   }
 
-  Widget _stepInvite(AppState state) {
+  Future<void> _start(AppState state) async {
+    setState(() {
+      _busy = true;
+      _error = '';
+    });
+    final answer = await state.createAccount(name: _name.text, glowColor: _glow, password: _pw1.text);
+    if (!mounted) return;
+    if (!answer.ok) {
+      setState(() {
+        _busy = false;
+        _error = vaultErrorText(answer);
+      });
+    }
+  }
+
+  Widget _stepInvite() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const Text('Einladungscode eingeben', style: TrairText.title),
         const SizedBox(height: 8),
         const Text(
-          'Trair ist im Moment eine geschlossene Beta. Jeden Code kann man nur einmal benutzen.',
+          'Trair ist im Moment eine geschlossene Beta. Jeden Code kann man nur einmal benutzen. '
+          'Geprüft wird er, sobald der Trair-Server läuft.',
           style: TextStyle(fontSize: 15, height: 1.55, color: TrairColors.textMuted),
         ),
         const SizedBox(height: 22),
@@ -134,7 +154,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         PillField(controller: _code, hint: 'TRAIR-XXXX-XXXX', mono: true, height: 52, semanticLabel: 'Einladungscode'),
         const SizedBox(height: 24),
         _nav(
-          onBack: () => state.go(TrairScreen.lock),
+          onBack: null,
           next: PillButton(label: 'Weiter', onPressed: () => setState(() => _step = 2)),
         ),
       ],
@@ -259,7 +279,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 child: Text(
                   _pw1.text.isEmpty
                       ? 'Tipp: ein Satz aus mehreren Wörtern'
-                      : labels[score] + (_pw1.text.length < 12 ? ' · mind. 12 Zeichen' : ''),
+                      : labels[score] + (_pw1.text.runes.length < 12 ? ' · mind. 12 Zeichen' : ''),
                   style: TrairText.small,
                 ),
               ),
@@ -302,13 +322,18 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ),
           ),
         ),
+        if (_error.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 14),
+            child: Text(_error, style: const TextStyle(fontSize: 13.5, color: TrairColors.amber)),
+          ),
         const SizedBox(height: 22),
         _nav(
-          onBack: () => setState(() => _step = 2),
+          onBack: _busy ? null : () => setState(() => _step = 2),
           next: PillButton(
-            label: 'Trair starten',
+            label: _busy ? 'Schlüssel wird erzeugt …' : 'Trair starten',
             icon: TrairIcons.arrowRight,
-            onPressed: _canStart ? () => state.finishOnboarding(name: _name.text, glowColor: _glow) : null,
+            onPressed: _canStart && !_busy ? () => _start(state) : null,
           ),
         ),
       ],
