@@ -17,6 +17,25 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 TARGET = ROOT / "THIRD_PARTY_LICENSES.md"
 
 
+# The app uses no packages from pub.dev yet, so this part is written by
+# hand. Once the first pub.dev package arrives, it must be generated from
+# pubspec.lock like the Rust part.
+FLUTTER = [
+    "## Flutter / Dart (app/)",
+    "",
+    "| Component | License | Source |",
+    "| --- | --- | --- |",
+    "| Flutter SDK | BSD-3-Clause | https://github.com/flutter/flutter |",
+    "| Material Icons font (bundled by Flutter) | Apache-2.0 | https://github.com/google/material-design-icons |",
+    "| Geist and Geist Mono fonts (app/assets/fonts) | OFL-1.1 | https://github.com/vercel/geist-font |",
+    "",
+    "No packages from pub.dev are used yet. The Dart packages that the Flutter SDK",
+    "pulls in carry their own licenses; Flutter writes all of their license texts",
+    "into the built app. The app shows them, together with the font license, under",
+    "Einstellungen > Konto > Open-Source-Lizenzen.",
+]
+
+
 def collect():
     meta = json.loads(
         subprocess.run(
@@ -53,7 +72,7 @@ def render(rows):
     else:
         out += ["| Package | Version | License | Source |", "| --- | --- | --- | --- |"]
         out += [f"| {n} | {v} | {l} | {r} |" for n, v, l, r in rows]
-    out += ["", "## Flutter / Dart", "", "Not part of the project yet (planned for milestone M5).", ""]
+    out += ["", *FLUTTER, ""]
     return "\n".join(out)
 
 

@@ -205,6 +205,15 @@ This file lists every third-party component and its license.
 | zeroize_derive | 1.5.0 | Apache-2.0 OR MIT | https://github.com/RustCrypto/utils |
 | zmij | 1.0.23 | MIT | https://github.com/dtolnay/zmij |
 
-## Flutter / Dart
+## Flutter / Dart (app/)
 
-Not part of the project yet (planned for milestone M5).
+| Component | License | Source |
+| --- | --- | --- |
+| Flutter SDK | BSD-3-Clause | https://github.com/flutter/flutter |
+| Material Icons font (bundled by Flutter) | Apache-2.0 | https://github.com/google/material-design-icons |
+| Geist and Geist Mono fonts (app/assets/fonts) | OFL-1.1 | https://github.com/vercel/geist-font |
+
+No packages from pub.dev are used yet. The Dart packages that the Flutter SDK
+pulls in carry their own licenses; Flutter writes all of their license texts
+into the built app. The app shows them, together with the font license, under
+Einstellungen > Konto > Open-Source-Lizenzen.

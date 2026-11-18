@@ -1,0 +1,317 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 The Trair contributors
+
+import 'package:flutter/material.dart';
+
+import '../app_state.dart';
+import '../theme.dart';
+import '../widgets/common.dart';
+
+/// First start: invite code, profile, launcher password. No recovery key:
+/// losing the password means losing the account (decision 2).
+class OnboardingScreen extends StatefulWidget {
+  const OnboardingScreen({super.key});
+
+  @override
+  State<OnboardingScreen> createState() => _OnboardingScreenState();
+}
+
+class _OnboardingScreenState extends State<OnboardingScreen> {
+  int _step = 1;
+  final _code = TextEditingController();
+  final _name = TextEditingController(text: 'Julian');
+  final _pw1 = TextEditingController();
+  final _pw2 = TextEditingController();
+  Color _glow = TrairColors.accentLight;
+  bool _understood = false;
+
+  @override
+  void dispose() {
+    for (final c in [_code, _name, _pw1, _pw2]) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  int get _score {
+    final p = _pw1.text;
+    var s = 0;
+    if (p.length >= 8) s++;
+    if (p.length >= 12) s++;
+    if (RegExp(r'[0-9]').hasMatch(p) && RegExp(r'[A-Za-z]').hasMatch(p)) s++;
+    if (p.length >= 16 || RegExp(r'[^A-Za-z0-9]').hasMatch(p)) s++;
+    return s;
+  }
+
+  bool get _canStart => _understood && _pw1.text.length >= 12 && _pw1.text == _pw2.text;
+
+  @override
+  Widget build(BuildContext context) {
+    final state = AppScope.of(context);
+    return Backdrop(
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 20),
+          child: SizedBox(
+            width: 560,
+            child: GlassPanel(
+              radius: 32,
+              padding: const EdgeInsets.all(36),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      const TrairLogo(size: 34),
+                      const SizedBox(width: 12),
+                      const Text('Trair einrichten', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                      const Spacer(),
+                      Semantics(
+                        label: 'Schritt $_step von 3',
+                        child: Row(
+                          children: [
+                            for (var i = 1; i <= 3; i++)
+                              AnimatedContainer(
+                                duration: const Duration(milliseconds: 350),
+                                curve: Curves.easeOutCubic,
+                                margin: const EdgeInsets.only(left: 6),
+                                width: i == _step ? 28 : 8,
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  color: i <= _step ? const Color(0xFF8B70FF) : const Color(0x1FFFFFFF),
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 28),
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 250),
+                    child: KeyedSubtree(
+                      key: ValueKey(_step),
+                      child: switch (_step) {
+                        1 => _stepInvite(state),
+                        2 => _stepProfile(),
+                        _ => _stepPassword(state),
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _nav({required VoidCallback onBack, required Widget next}) {
+    return Row(
+      children: [
+        PillButton(label: 'Zurück', kind: PillKind.ghost, onPressed: onBack),
+        const Spacer(),
+        next,
+      ],
+    );
+  }
+
+  Widget _stepInvite(AppState state) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text('Einladungscode eingeben', style: TrairText.title),
+        const SizedBox(height: 8),
+        const Text(
+          'Trair ist im Moment eine geschlossene Beta. Jeden Code kann man nur einmal benutzen.',
+          style: TextStyle(fontSize: 15, height: 1.55, color: TrairColors.textMuted),
+        ),
+        const SizedBox(height: 22),
+        const FieldLabel('Einladungscode'),
+        PillField(controller: _code, hint: 'TRAIR-XXXX-XXXX', mono: true, height: 52, semanticLabel: 'Einladungscode'),
+        const SizedBox(height: 24),
+        _nav(
+          onBack: () => state.go(TrairScreen.lock),
+          next: PillButton(label: 'Weiter', onPressed: () => setState(() => _step = 2)),
+        ),
+      ],
+    );
+  }
+
+  Widget _stepProfile() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text('Wie sollen dich andere sehen?', style: TrairText.title),
+        const SizedBox(height: 8),
+        const Text(
+          'Name und Leuchtfarbe kannst du später jederzeit ändern.',
+          style: TextStyle(fontSize: 15, height: 1.55, color: TrairColors.textMuted),
+        ),
+        const SizedBox(height: 22),
+        Container(
+          height: 128,
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          decoration: BoxDecoration(color: TrairColors.field, borderRadius: BorderRadius.circular(24)),
+          child: GlowName(name: _name.text.trim().isEmpty ? 'Dein Name' : _name.text.trim(), color: _glow),
+        ),
+        const SizedBox(height: 20),
+        const FieldLabel('Anzeigename'),
+        PillField(
+          controller: _name,
+          hint: 'Dein Name',
+          semanticLabel: 'Anzeigename',
+          onChanged: (_) => setState(() {}),
+        ),
+        const SizedBox(height: 20),
+        const FieldLabel('Leuchtfarbe'),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: GlowSwatches(selected: _glow, onPick: (c) => setState(() => _glow = c)),
+        ),
+        const SizedBox(height: 24),
+        _nav(
+          onBack: () => setState(() => _step = 1),
+          next: PillButton(label: 'Weiter', onPressed: () => setState(() => _step = 3)),
+        ),
+      ],
+    );
+  }
+
+  Widget _stepPassword(AppState state) {
+    const labels = ['Noch zu kurz', 'Schwach', 'Okay', 'Gut', 'Stark'];
+    const colors = [TrairColors.amber, TrairColors.amber, TrairColors.accentLight, TrairColors.mint];
+    final score = _score;
+    final mismatch = _pw2.text.isNotEmpty && _pw1.text != _pw2.text;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text('Launcher-Passwort festlegen', style: TrairText.title),
+        const SizedBox(height: 8),
+        const Text(
+          'Es schützt Trair auf diesem PC. Es verlässt dein Gerät nie, der Server kennt es nicht.',
+          style: TextStyle(fontSize: 15, height: 1.55, color: TrairColors.textMuted),
+        ),
+        const SizedBox(height: 20),
+        Container(
+          padding: const EdgeInsets.fromLTRB(16, 16, 18, 16),
+          decoration: BoxDecoration(
+            color: const Color(0x12FF5C70),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: const Color(0x3DFF8A98)),
+          ),
+          child: const Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.warning_amber_rounded, color: TrairColors.rose, size: 22),
+              SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Es gibt kein Zurück.',
+                      style: TextStyle(color: Color(0xFFFFE9EC), fontWeight: FontWeight.w600, fontSize: 15),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'Vergisst du dieses Passwort, ist dein Konto für immer weg. Dasselbe gilt bei kaputter '
+                      'Festplatte oder neu installiertem Windows. Niemand kann es wiederherstellen. '
+                      'Ein zweites gekoppeltes Gerät rettet dein Konto.',
+                      style: TextStyle(color: TrairColors.roseText, fontSize: 14, height: 1.5),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+        const FieldLabel('Passwort'),
+        PillField(
+          controller: _pw1,
+          hint: 'Mindestens 12 Zeichen',
+          obscure: true,
+          semanticLabel: 'Passwort',
+          onChanged: (_) => setState(() {}),
+        ),
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 18),
+          child: Row(
+            children: [
+              for (var i = 0; i < 4; i++)
+                Container(
+                  width: 32,
+                  height: 4,
+                  margin: const EdgeInsets.only(right: 4),
+                  decoration: BoxDecoration(
+                    color: i < score ? colors[score - 1] : const Color(0x1AFFFFFF),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  _pw1.text.isEmpty
+                      ? 'Tipp: ein Satz aus mehreren Wörtern'
+                      : labels[score] + (_pw1.text.length < 12 ? ' · mind. 12 Zeichen' : ''),
+                  style: TrairText.small,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        const FieldLabel('Passwort wiederholen'),
+        PillField(
+          controller: _pw2,
+          hint: 'Noch einmal',
+          obscure: true,
+          semanticLabel: 'Passwort wiederholen',
+          onChanged: (_) => setState(() {}),
+        ),
+        if (mismatch)
+          const Padding(
+            padding: EdgeInsets.only(left: 18, top: 6),
+            child: Text(
+              'Die Passwörter stimmen nicht überein.',
+              style: TextStyle(fontSize: 12, color: TrairColors.amber),
+            ),
+          ),
+        const SizedBox(height: 16),
+        Container(
+          decoration: BoxDecoration(
+            color: TrairColors.field,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: TrairColors.borderSoft),
+          ),
+          child: CheckboxListTile(
+            value: _understood,
+            onChanged: (v) => setState(() => _understood = v ?? false),
+            controlAffinity: ListTileControlAffinity.leading,
+            dense: true,
+            shape: const StadiumBorder(),
+            activeColor: TrairColors.accent,
+            title: const Text(
+              'Verstanden: Passwort weg heißt Konto für immer weg.',
+              style: TextStyle(fontSize: 14, color: TrairColors.text),
+            ),
+          ),
+        ),
+        const SizedBox(height: 22),
+        _nav(
+          onBack: () => setState(() => _step = 2),
+          next: PillButton(
+            label: 'Trair starten',
+            icon: Icons.arrow_forward_rounded,
+            onPressed: _canStart ? () => state.finishOnboarding(name: _name.text, glowColor: _glow) : null,
+          ),
+        ),
+      ],
+    );
+  }
+}
