@@ -33,6 +33,19 @@ void main() {
       expect(file.existsSync(), isTrue);
       expect(String.fromCharCodes(file.readAsBytesSync()).contains('Julian'), isFalse);
 
+      // M2: the vault has this device, signed by the account, with a name.
+      expect(created.devices, hasLength(1));
+      final me = created.devices.single;
+      expect(me.isThis, isTrue);
+      expect(me.label, 'Dieser PC');
+      expect(me.id, matches(RegExp(r'^d-[0-9a-f]{8}$')));
+      expect(created.raw['device'], me.id);
+      expect((await vault.renameDevice(me.id, ' vorne')).error, 'refused');
+      final renamed = await vault.renameDevice(me.id, 'Julians Laptop');
+      expect(renamed.devices.single.label, 'Julians Laptop');
+      expect((await vault.withdrawDevice(me.id, 'ein sehr langes passwort')).error, 'refused');
+      expect(String.fromCharCodes(file.readAsBytesSync()).contains('Julians Laptop'), isFalse);
+
       expect((await vault.saveProfile({'name': 'Jule'})).ok, isTrue);
       expect((await vault.lock()).ok, isTrue);
       expect((await vault.saveProfile({})).error, 'locked');
@@ -43,6 +56,8 @@ void main() {
       expect(right.ok, isTrue);
       expect(right.profile['name'], 'Jule');
       expect(right.fingerprint, created.fingerprint);
+      expect(right.devices.single.label, 'Julians Laptop');
+      expect(right.upgraded, isFalse);
 
       expect((await vault.changePassword('nicht das alte!', 'neues langes passwort')).error, 'wrong_password');
       expect((await vault.changePassword('ein sehr langes passwort', 'neues langes passwort')).ok, isTrue);

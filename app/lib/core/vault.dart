@@ -23,6 +23,35 @@ class CoreAnswer {
     final p = raw['profile'];
     return p is Map<String, Object?> ? p : const {};
   }
+
+  /// The account's devices (after unlock, rename and withdraw).
+  List<TrairDevice> get devices {
+    final list = raw['devices'];
+    if (list is! List<Object?>) return const [];
+    return list.whereType<Map<String, Object?>>().map(TrairDevice.fromJson).toList();
+  }
+
+  /// True once, when a vault from before devices existed was upgraded.
+  bool get upgraded => raw['upgraded'] == true;
+}
+
+/// One device of the account. The name is only stored on this device.
+class TrairDevice {
+  const TrairDevice({required this.id, required this.label, required this.fingerprint, required this.isThis});
+
+  factory TrairDevice.fromJson(Map<String, Object?> j) => TrairDevice(
+    id: j['id'] as String? ?? '',
+    label: j['label'] as String?,
+    fingerprint: j['fingerprint'] as String? ?? '',
+    isThis: j['this'] == true,
+  );
+
+  final String id;
+  final String? label;
+  final String fingerprint;
+  final bool isThis;
+
+  String get name => label ?? 'Gerät ohne Namen';
 }
 
 /// The vault as the app sees it: typed calls through the [CoreDoor]. The
@@ -50,6 +79,13 @@ class TrairVault {
       _call({'op': 'change_password', 'old': old, 'new': fresh});
 
   Future<CoreAnswer> deleteAccount(String password) => _call({'op': 'delete_account', 'password': password});
+
+  /// Give a device a name (1 to 40 characters). Only stored on this device.
+  Future<CoreAnswer> renameDevice(String id, String label) => _call({'op': 'rename_device', 'id': id, 'label': label});
+
+  /// Withdraw another device of the account for good. Needs the password.
+  Future<CoreAnswer> withdrawDevice(String id, String password) =>
+      _call({'op': 'withdraw_device', 'id': id, 'password': password});
 
   /// Hide the window from screenshots. Returns false where unsupported.
   Future<bool> protectWindow(bool on) async => (await _call({'op': 'protect_window', 'on': on})).ok;

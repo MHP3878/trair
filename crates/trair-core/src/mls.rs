@@ -18,6 +18,7 @@ use openmls_traits::OpenMlsProvider;
 use serde::{Deserialize, Serialize};
 
 use crate::account::{Account, DeviceCertificate, Fingerprint, SCHEME};
+use crate::devices::DeviceIdentity;
 use crate::error::{CoreError, Result, internal};
 use crate::policy::{Policy, Trust};
 
@@ -132,8 +133,17 @@ pub struct Device {
 impl Device {
     /// Create a device with a fresh device key, certified by the account.
     pub fn new(account: &Account, device: &str) -> Result<Self> {
-        let provider = OpenMlsRustCrypto::default();
         let keys = SignatureKeyPair::new(SCHEME).map_err(internal)?;
+        Self::with_keys(account, device, keys)
+    }
+
+    /// This device as stored in the vault: same id, same key.
+    pub fn from_identity(account: &Account, identity: &DeviceIdentity) -> Result<Self> {
+        Self::with_keys(account, &identity.id, identity.keys.clone())
+    }
+
+    fn with_keys(account: &Account, device: &str, keys: SignatureKeyPair) -> Result<Self> {
+        let provider = OpenMlsRustCrypto::default();
         keys.store(provider.storage()).map_err(internal)?;
         let cert = account.certify_device(device, keys.public())?;
         let credential = CredentialWithKey {
@@ -169,6 +179,12 @@ impl Device {
     /// The policy (strict mode and verified contacts).
     pub fn policy(&self) -> &Policy {
         &self.policy
+    }
+
+    /// Take note of a verified device list (own or a contact's): its
+    /// withdrawn devices are refused from now on.
+    pub fn apply_device_list(&mut self, list: &crate::devices::DeviceList) {
+        self.policy.apply_device_list(list);
     }
 
     /// Switch strict mode.
@@ -277,9 +293,12 @@ impl Device {
         }
         match DeviceCertificate::check(identity, signature_key) {
             Ok(c) => {
-                let trust = self
-                    .policy
-                    .classify(&self.user, &self.account, &c.user, &c.account);
+                let trust = if self.policy.is_withdrawn(&c.id) {
+                    Trust::Withdrawn
+                } else {
+                    self.policy
+                        .classify(&self.user, &self.account, &c.user, &c.account)
+                };
                 Member {
                     id: c.id,
                     user: c.user,
@@ -507,6 +526,14 @@ impl Device {
         if !forged.is_empty() {
             return Err(CoreError::Forged(forged.join(", ")));
         }
+        let withdrawn: Vec<String> = members
+            .iter()
+            .filter(|m| m.trust == Trust::Withdrawn)
+            .map(|m| m.id.clone())
+            .collect();
+        if !withdrawn.is_empty() {
+            return Err(CoreError::Withdrawn(withdrawn.join(", ")));
+        }
         let blocked = self
             .policy
             .blocking(members.iter().map(|m| (m.id.as_str(), m.trust)));
@@ -580,6 +607,9 @@ impl Device {
         if let Some(f) = members.iter().find(|m| m.trust == Trust::Forged) {
             return Err(CoreError::Forged(format!("group contains {}", f.id)));
         }
+        if let Some(w) = members.iter().find(|m| m.trust == Trust::Withdrawn) {
+            return Err(CoreError::Withdrawn(format!("group contains {}", w.id)));
+        }
         let g = staged
             .into_group(&self.provider)
             .map_err(|e| CoreError::Rejected(format!("{e:?}")))?;
@@ -643,6 +673,12 @@ impl Device {
                         // Do not follow a group that now contains a forged device.
                         return Err(CoreError::Forged(format!(
                             "{sender} tried to add a forged device"
+                        )));
+                    }
+                    if m.trust == Trust::Withdrawn {
+                        return Err(CoreError::Withdrawn(format!(
+                            "{sender} tried to add {}",
+                            m.id
                         )));
                     }
                     added.push(m);

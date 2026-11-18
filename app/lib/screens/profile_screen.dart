@@ -29,6 +29,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Color _pwMessageColor = TrairColors.mintText;
   bool _deleteBusy = false;
   String _deleteError = '';
+  final _deviceName = TextEditingController();
+  final _withdrawPw = TextEditingController();
+  String? _renaming;
+  String? _withdrawing;
+  bool _deviceBusy = false;
+  String _deviceError = '';
   final _keys = {
     'Profil': GlobalKey(),
     'Trust': GlobalKey(),
@@ -55,7 +61,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void dispose() {
     if (_nameReady) _name.dispose();
-    for (final c in [_oldPw, _newPw1, _newPw2, _deletePw]) {
+    for (final c in [_oldPw, _newPw1, _newPw2, _deletePw, _deviceName, _withdrawPw]) {
       c.dispose();
     }
     super.dispose();
@@ -92,25 +98,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         children: [
                           _profileCard(state),
                           const SizedBox(height: 14),
-                          LayoutBuilder(
-                            builder: (context, c) {
-                              final trust = _trustCard();
-                              final devices = _devicesCard();
-                              if (c.maxWidth < 700) {
-                                return Column(children: [trust, const SizedBox(height: 14), devices]);
-                              }
-                              return IntrinsicHeight(
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                                  children: [
-                                    Expanded(child: trust),
-                                    const SizedBox(width: 14),
-                                    Expanded(child: devices),
-                                  ],
-                                ),
-                              );
-                            },
-                          ),
+                          _trustCard(),
+                          const SizedBox(height: 14),
+                          _devicesCard(state),
                           const SizedBox(height: 14),
                           _securityCard(state),
                           const SizedBox(height: 14),
@@ -322,58 +312,239 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _devicesCard() {
+  Widget _devicesCard(AppState state) {
+    final devices = state.devices;
     return SoftCard(
       key: _keys['Geräte'],
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _title('Geräte'),
-          Container(
-            padding: const EdgeInsets.fromLTRB(12, 12, 14, 12),
-            decoration: BoxDecoration(color: TrairColors.field, borderRadius: BorderRadius.circular(18)),
-            child: Row(
-              children: [
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: const BoxDecoration(color: Color(0x246E4FF6), shape: BoxShape.circle),
-                  child: const Icon(TrairIcons.monitor, size: 19, color: TrairColors.accentPale),
-                ),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Dieser PC', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                      Text('Windows · vom Konto unterschrieben', style: TrairText.small),
-                    ],
-                  ),
-                ),
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: const BoxDecoration(color: TrairColors.mint, shape: BoxShape.circle),
-                ),
-              ],
-            ),
+          _title(
+            'Geräte',
+            trailing: Text(devices.length == 1 ? '1 Gerät' : '${devices.length} Geräte', style: TrairText.small),
           ),
-          const SizedBox(height: 12),
-          PillButton(
-            label: 'Gerät per QR-Code koppeln',
+          for (final d in devices) ...[_deviceTile(state, d), const SizedBox(height: 8)],
+          if (_deviceError.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(_deviceError, style: const TextStyle(fontSize: 13, color: TrairColors.amber)),
+            ),
+          const SizedBox(height: 4),
+          const PillButton(
+            label: 'Gerät koppeln · kommt mit dem Server',
             icon: TrairIcons.qrCode,
             kind: PillKind.dashed,
             expand: true,
-            onPressed: () {},
+            onPressed: null,
           ),
           const SizedBox(height: 10),
           const Text(
-            'Nur von einem entsperrten Gerät aus. Ein zweites Gerät rettet dein Konto, wenn dieser PC ausfällt.',
+            'Koppeln geht nur von einem entsperrten Gerät aus, mit einem kurzen Code. Der Knopf wird frei, sobald der '
+            'Trair-Server läuft. Ein zweites Gerät rettet dein Konto, wenn dieser PC ausfällt.',
             style: TrairText.small,
           ),
         ],
       ),
     );
+  }
+
+  Widget _deviceTile(AppState state, TrairDevice d) {
+    final renaming = _renaming == d.id;
+    final withdrawing = _withdrawing == d.id;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 12, 10, 12),
+      decoration: BoxDecoration(
+        color: TrairColors.field,
+        borderRadius: BorderRadius.circular(18),
+        border: withdrawing ? Border.all(color: const Color(0x42FF8A98)) : null,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: const BoxDecoration(color: Color(0x246E4FF6), shape: BoxShape.circle),
+                child: Icon(
+                  d.isThis ? TrairIcons.monitor : TrairIcons.monitorSmartphone,
+                  size: 19,
+                  color: TrairColors.accentPale,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      d.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      d.isThis ? 'Dieses Gerät · vom Konto unterschrieben' : 'Vom Konto unterschrieben',
+                      style: TrairText.small,
+                    ),
+                    const SizedBox(height: 4),
+                    SelectableText(
+                      d.fingerprint,
+                      style: TrairText.mono.copyWith(fontSize: 11.5, letterSpacing: 0.4, color: TrairColors.textMuted),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              if (d.isThis)
+                RoundIconButton(
+                  icon: TrairIcons.squarePen,
+                  tooltip: 'Gerät umbenennen',
+                  filled: false,
+                  onPressed: _deviceBusy ? null : () => _startRename(d, renaming),
+                )
+              else
+                PillButton(
+                  label: 'Entziehen',
+                  kind: PillKind.danger,
+                  height: 34,
+                  onPressed: _deviceBusy || withdrawing ? null : () => _startWithdraw(d),
+                ),
+            ],
+          ),
+          if (renaming) ...[
+            const SizedBox(height: 10),
+            PillField(
+              controller: _deviceName,
+              hint: 'Name, z. B. Julians Laptop',
+              height: 42,
+              autofocus: true,
+              semanticLabel: 'Gerätename',
+              onChanged: (_) => setState(() {}),
+              onSubmitted: (_) => _renameDevice(state, d),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 10,
+              runSpacing: 8,
+              children: [
+                PillButton(
+                  label: 'Abbrechen',
+                  kind: PillKind.ghost,
+                  height: 38,
+                  onPressed: () => setState(() {
+                    _renaming = null;
+                    _deviceError = '';
+                  }),
+                ),
+                PillButton(
+                  label: _deviceBusy ? 'Speichere …' : 'Name speichern',
+                  height: 38,
+                  onPressed: _deviceBusy || _deviceName.text.trim().isEmpty ? null : () => _renameDevice(state, d),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            const Text('Der Name bleibt auf diesem Gerät. Andere sehen ihn nie.', style: TrairText.small),
+          ],
+          if (withdrawing) ...[
+            const SizedBox(height: 12),
+            Text(
+              '„${d.name}“ entziehen? Das Gerät wird danach überall abgelehnt und kann nichts mehr lesen oder senden. '
+              'Rückgängig geht nicht. Hat jemand das Gerät und sein Passwort, hilft Entziehen nicht ganz: Dann besser '
+              'ein neues Konto anlegen. Zur Sicherheit dein Passwort:',
+              style: const TextStyle(fontSize: 13.5, height: 1.5, color: TrairColors.roseText),
+            ),
+            const SizedBox(height: 10),
+            PillField(
+              controller: _withdrawPw,
+              hint: 'Dein Passwort',
+              obscure: true,
+              height: 42,
+              semanticLabel: 'Passwort zum Entziehen',
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 10,
+              runSpacing: 8,
+              children: [
+                PillButton(
+                  label: 'Abbrechen',
+                  kind: PillKind.ghost,
+                  height: 38,
+                  onPressed: () => setState(() {
+                    _withdrawing = null;
+                    _withdrawPw.clear();
+                    _deviceError = '';
+                  }),
+                ),
+                PillButton(
+                  label: _deviceBusy ? 'Entziehe …' : 'Endgültig entziehen',
+                  kind: PillKind.danger,
+                  height: 38,
+                  onPressed: _deviceBusy || _withdrawPw.text.isEmpty ? null : () => _withdrawDevice(state, d),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  void _startRename(TrairDevice d, bool open) => setState(() {
+    _renaming = open ? null : d.id;
+    _withdrawing = null;
+    _deviceName.text = d.label ?? '';
+    _deviceError = '';
+  });
+
+  void _startWithdraw(TrairDevice d) => setState(() {
+    _withdrawing = d.id;
+    _renaming = null;
+    _withdrawPw.clear();
+    _deviceError = '';
+  });
+
+  Future<void> _renameDevice(AppState state, TrairDevice d) async {
+    if (_deviceBusy || _deviceName.text.trim().isEmpty) return;
+    setState(() {
+      _deviceBusy = true;
+      _deviceError = '';
+    });
+    final answer = await state.renameDevice(d.id, _deviceName.text);
+    if (!mounted) return;
+    setState(() {
+      _deviceBusy = false;
+      if (answer.ok) {
+        _renaming = null;
+      } else {
+        _deviceError = answer.error == 'refused'
+            ? 'Der Name braucht 1 bis 40 Zeichen, ohne Steuerzeichen.'
+            : vaultErrorText(answer);
+      }
+    });
+  }
+
+  Future<void> _withdrawDevice(AppState state, TrairDevice d) async {
+    setState(() {
+      _deviceBusy = true;
+      _deviceError = '';
+    });
+    final answer = await state.withdrawDevice(d.id, _withdrawPw.text);
+    if (!mounted) return;
+    setState(() {
+      _deviceBusy = false;
+      _withdrawPw.clear();
+      if (answer.ok) {
+        _withdrawing = null;
+      } else {
+        _deviceError = answer.error == 'refused' ? 'Dieses Gerät kann nicht entzogen werden.' : vaultErrorText(answer);
+      }
+    });
   }
 
   Widget _row({required String title, required String hint, Widget? leading, Widget? trailing, bool divider = true}) {

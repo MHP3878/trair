@@ -359,4 +359,67 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   });
+
+  group('Geräte', () {
+    testWidgets('the devices card shows this device from the vault and renames it', (tester) async {
+      final door = await _start(tester);
+      await _unlock(tester);
+      await _openSettings(tester);
+      final card = find.text('Dieses Gerät · vom Konto unterschrieben');
+      await tester.ensureVisible(card);
+      await tester.pumpAndSettle();
+      expect(find.text('Dieser PC'), findsOneWidget);
+      expect(find.text('1 Gerät'), findsOneWidget);
+      // Pairing needs the server: the button is there but cannot be pressed.
+      final pairing = find.widgetWithText(PillButton, 'Gerät koppeln · kommt mit dem Server');
+      expect(tester.widget<PillButton>(pairing).onPressed, isNull);
+
+      await tester.tap(find.byTooltip('Gerät umbenennen'));
+      await tester.pumpAndSettle();
+      await tester.enterText(_field('Dieser PC'), '  Julians Laptop  ');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Name speichern'));
+      await tester.pumpAndSettle();
+      expect(find.text('Julians Laptop'), findsOneWidget);
+      expect(door.devices.first['label'], 'Julians Laptop', reason: 'trimmed and stored in the vault');
+      expect(door.ops, contains('rename_device'));
+
+      await _ctrl(tester, LogicalKeyboardKey.keyL);
+      expect(find.text('Julians Laptop'), findsNothing, reason: 'devices leave the screen when locked');
+      await _unlock(tester);
+      await _openSettings(tester);
+      expect(find.text('Julians Laptop'), findsOneWidget);
+    });
+
+    testWidgets('withdrawing another device needs the password', (tester) async {
+      final door = await _start(
+        tester,
+        door: FakeDoor(password: pw, profile: {}, otherDevices: ['Altes Handy']),
+      );
+      await _unlock(tester);
+      await _openSettings(tester);
+      await tester.ensureVisible(find.text('Altes Handy'));
+      await tester.pumpAndSettle();
+      expect(find.text('2 Geräte'), findsOneWidget);
+      // This device has no withdraw button, only the other one.
+      expect(find.widgetWithText(PillButton, 'Entziehen'), findsOneWidget);
+      await tester.tap(find.widgetWithText(PillButton, 'Entziehen'));
+      await tester.pumpAndSettle();
+      await tester.enterText(_field('Dein Passwort'), 'falsch falsch');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Endgültig entziehen'));
+      await tester.pumpAndSettle();
+      expect(find.text('Passwort falsch.'), findsOneWidget);
+      expect(door.devices, hasLength(2), reason: 'a wrong password withdraws nothing');
+
+      await tester.enterText(_field('Dein Passwort'), pw);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Endgültig entziehen'));
+      await tester.pumpAndSettle();
+      expect(find.text('Altes Handy'), findsNothing);
+      expect(find.text('1 Gerät'), findsOneWidget);
+      expect(door.devices, hasLength(1));
+      expect(door.devices.single['this'], isTrue);
+    });
+  });
 }

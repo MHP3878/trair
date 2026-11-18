@@ -38,6 +38,9 @@ class AppState extends ChangeNotifier {
   bool screenProtection = true;
   String fingerprint = '';
 
+  /// The account's devices, from the vault. Empty while locked.
+  List<TrairDevice> devices = const [];
+
   /// Privacy switches; all off by default (decision 10).
   final Map<String, bool> privacy = {'lese': false, 'tippt': false, 'online': false, 'vorschau': false};
 
@@ -86,6 +89,7 @@ class AppState extends ChangeNotifier {
   void _unlocked(CoreAnswer answer) {
     _applyProfile(answer.profile);
     fingerprint = answer.fingerprint;
+    devices = answer.devices;
     go(TrairScreen.chats);
     noteActivity();
     unawaited(_applyScreenProtection());
@@ -99,6 +103,7 @@ class AppState extends ChangeNotifier {
     await vault?.lock();
     _applyProfile(const {});
     fingerprint = '';
+    devices = const [];
     go(TrairScreen.lock);
     // The lock screen is always protected, whatever the setting says.
     screenProtectionSupported = await vault?.protectWindow(true) ?? false;
@@ -121,7 +126,24 @@ class AppState extends ChangeNotifier {
       _saveSoon?.cancel();
       _applyProfile(const {});
       fingerprint = '';
+      devices = const [];
       go(TrairScreen.onboarding);
+    }
+    return answer;
+  }
+
+  /// Name a device. The name stays on this device, never in the list
+  /// other people see.
+  Future<CoreAnswer> renameDevice(String id, String label) => _devices(vault!.renameDevice(id, label.trim()));
+
+  /// Withdraw another device for good. Needs the password again.
+  Future<CoreAnswer> withdrawDevice(String id, String password) => _devices(vault!.withdrawDevice(id, password));
+
+  Future<CoreAnswer> _devices(Future<CoreAnswer> call) async {
+    final answer = await call;
+    if (answer.ok) {
+      devices = answer.devices;
+      notifyListeners();
     }
     return answer;
   }

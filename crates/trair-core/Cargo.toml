@@ -16,7 +16,8 @@ workspace = true
 # MLS (RFC 9420). MIT licensed. Exact versions: crypto updates are
 # reviewed by hand, never pulled in silently.
 openmls = "=0.9.2"
-openmls_basic_credential = "=0.6.0"
+# "clonable": a device restored from the vault needs its own copy of the key.
+openmls_basic_credential = { version = "=0.6.0", features = ["clonable"] }
 openmls_rust_crypto = "=0.6.0"
 openmls_traits = "=0.6.0"
 hex = "0.4.3"
@@ -30,3 +31,5 @@ argon2 = "=0.6.0"
 chacha20poly1305 = "=0.10.1"
 getrandom = "=0.4.3"
 zeroize = "=1.9.2"
+# Pairing (M2): SPAKE2 from RustCrypto, MIT OR Apache-2.0.
+spake2 = "=0.4.0"
