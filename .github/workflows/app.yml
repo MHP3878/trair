@@ -58,6 +58,17 @@ jobs:
           path: app/build/screenshots/
           retention-days: 14
           if-no-files-found: warn
+      # Also into the log as base64: lets reviewers (and Claude, whose
+      # sandbox cannot download artifacts) look at the pictures.
+      - name: Bildschirmfotos ins Protokoll
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: |
+          for f in build/screenshots/*.png; do
+            [ -e "$f" ] || continue
+            echo "=====BEGIN $(basename "$f")====="
+            base64 -w 2000 "$f"
+            echo "=====END====="
+          done
       - name: Formatierung
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: |

@@ -24,7 +24,9 @@ Future<void> _font(String family, List<String> files) async {
 }
 
 Future<void> _loadFonts() async {
-  await _font('Geist', [for (final w in ['Regular', 'Medium', 'SemiBold', 'Bold']) 'assets/fonts/Geist-$w.ttf']);
+  await _font('Geist', [
+    for (final w in ['Regular', 'Medium', 'SemiBold', 'Bold']) 'assets/fonts/Geist-$w.ttf',
+  ]);
   await _font('GeistMono', ['assets/fonts/GeistMono-Regular.ttf', 'assets/fonts/GeistMono-Medium.ttf']);
   // Icons: the font ships with the Flutter SDK. Without it icons are boxes.
   final root = Platform.environment['FLUTTER_ROOT'];
@@ -51,7 +53,12 @@ Future<void> _start(WidgetTester tester, Size size) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
-  await tester.pumpWidget(RepaintBoundary(key: _shotKey, child: TrairApp(backend: DemoBackend())));
+  await tester.pumpWidget(
+    RepaintBoundary(
+      key: _shotKey,
+      child: TrairApp(backend: DemoBackend()),
+    ),
+  );
   await tester.pumpAndSettle();
 }
 
