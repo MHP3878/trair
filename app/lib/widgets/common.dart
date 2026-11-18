@@ -309,10 +309,12 @@ class PillField extends StatelessWidget {
     this.mono = false,
     this.semanticLabel,
     this.focusNode,
+    this.autofocus = false,
   });
 
   final TextEditingController controller;
   final FocusNode? focusNode;
+  final bool autofocus;
   final String hint;
   final Widget? leading;
   final Widget? trailing;
@@ -344,6 +346,7 @@ class PillField extends StatelessWidget {
               child: TextField(
                 controller: controller,
                 focusNode: focusNode,
+                autofocus: autofocus,
                 obscureText: obscure,
                 enabled: enabled,
                 onChanged: onChanged,
@@ -611,7 +614,7 @@ class DemoBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Semantics(
-      label: 'Demo-Version, nicht verschlüsselt',
+      label: 'Demo-Chats, nicht verschlüsselt. Konto und Sperre sind echt.',
       container: true,
       child: const Material(
         color: Color(0xFF15120C),
@@ -627,12 +630,12 @@ class DemoBar extends StatelessWidget {
                 Icon(TrairIcons.flaskConical, size: 14, color: TrairColors.amber),
                 SizedBox(width: 8),
                 Text(
-                  'Demo – nicht verschlüsselt',
+                  'Demo-Chats – nicht verschlüsselt',
                   style: TextStyle(fontSize: 12, color: TrairColors.amber, fontWeight: FontWeight.w600),
                 ),
                 Flexible(
                   child: Text(
-                    ' · ausgedachte Daten, nichts wird gesendet',
+                    ' · Konto, Passwort und Sperre sind echt, Chats und Kontakte noch ausgedacht',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 12, color: TrairColors.amberText),

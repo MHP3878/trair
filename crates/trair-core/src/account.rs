@@ -106,6 +106,31 @@ impl Account {
         Fingerprint::of(self.keys.public())
     }
 
+    /// Rebuild an account from stored keys (see [`crate::vault`]). Signs
+    /// and verifies a probe, so a private key that does not belong to the
+    /// public key is refused.
+    pub(crate) fn from_keys(user: &str, keys: SignatureKeyPair) -> Result<Self> {
+        validate_name(user)?;
+        if keys.signature_scheme() != SCHEME {
+            return Err(CoreError::Internal("unexpected signature scheme".into()));
+        }
+        let probe = b"trair/account-probe/v1";
+        let signature = keys.sign(probe).map_err(internal)?;
+        OpenMlsRustCrypto::default()
+            .crypto()
+            .verify_signature(SCHEME, probe, keys.public(), &signature)
+            .map_err(|_| CoreError::Internal("account keys do not match".into()))?;
+        Ok(Account {
+            user: user.to_string(),
+            keys,
+        })
+    }
+
+    /// The key pair, only for sealing it into the vault.
+    pub(crate) fn keys(&self) -> &SignatureKeyPair {
+        &self.keys
+    }
+
     /// Sign a certificate for one of this account's devices.
     pub fn certify_device(
         &self,

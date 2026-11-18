@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[package]
+name = "trair-ffi"
+description = "Trair: the narrow door between the app and the core (C ABI, JSON messages)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# Not the workspace lints: this crate needs a few `unsafe` blocks for the
+# C ABI and Windows calls. They are denied by default and allowed only on
+# the items that need them, each with a SAFETY comment.
+[lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "warn"
+
+[dependencies]
+trair-core = { path = "../trair-core" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+zeroize = { version = "=1.9.2", features = ["serde"] }
+getrandom = "=0.4.3"
+
+# Windows only: DPAPI (binds the vault to the Windows user) and the
+# screenshot block. Microsoft, MIT OR Apache-2.0.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Cryptography",
+  "Win32_System_Threading",
+  "Win32_UI_WindowsAndMessaging",
+] }

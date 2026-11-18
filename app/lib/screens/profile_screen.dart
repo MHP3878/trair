@@ -4,6 +4,8 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../app_state.dart';
+import '../core/clipboard.dart';
+import '../core/vault.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/trair_icons.dart';
@@ -18,6 +20,15 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   late final TextEditingController _name;
   bool _askDelete = false;
+  final _oldPw = TextEditingController();
+  final _newPw1 = TextEditingController();
+  final _newPw2 = TextEditingController();
+  final _deletePw = TextEditingController();
+  bool _pwBusy = false;
+  String _pwMessage = '';
+  Color _pwMessageColor = TrairColors.mintText;
+  bool _deleteBusy = false;
+  String _deleteError = '';
   final _keys = {
     'Profil': GlobalKey(),
     'Trust': GlobalKey(),
@@ -44,6 +55,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void dispose() {
     if (_nameReady) _name.dispose();
+    for (final c in [_oldPw, _newPw1, _newPw2, _deletePw]) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -415,9 +429,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
           _row(
+            title: 'Automatisch sperren',
+            hint: 'Nach so vielen Minuten ohne Benutzung. Strg+L sperrt sofort.',
+            trailing: Wrap(
+              spacing: 6,
+              children: [
+                for (final m in autoLockChoices)
+                  PillButton(
+                    label: '$m Min.',
+                    kind: m == state.autoLockMinutes ? PillKind.primary : PillKind.ghost,
+                    height: 36,
+                    onPressed: () => state.setAutoLock(m),
+                  ),
+              ],
+            ),
+          ),
+          _row(
+            title: 'Bildschirmfotos blockieren',
+            hint: state.screenProtectionSupported || !state.screenProtection
+                ? 'Andere Programme und Bildschirmaufnahmen sehen das Trair-Fenster nur schwarz.'
+                : 'Gibt es nur unter Windows. Hier wirkt der Schalter nicht.',
+            trailing: PillSwitch(
+              value: state.screenProtection,
+              onChanged: state.setScreenProtection,
+              label: 'Bildschirmfotos blockieren',
+            ),
+          ),
+          _row(
+            title: 'Jetzt sperren',
+            hint: 'Trair vergisst den Schlüssel sofort. Zum Öffnen braucht es wieder das Passwort.',
+            trailing: PillButton(label: 'Sperren', icon: TrairIcons.lock, height: 42, onPressed: state.lock),
+          ),
+          _passwordChange(state),
+          _row(
             title: 'Keine Wiederherstellung',
             hint:
                 'Passwort vergessen und kein zweites Gerät gekoppelt heißt: Konto für immer weg. Niemand kann es zurückholen.',
+            divider: false,
             leading: Container(
               width: 34,
               height: 34,
@@ -425,15 +473,99 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: const Icon(TrairIcons.lock, size: 16, color: TrairColors.rose),
             ),
           ),
-          _row(
-            title: 'Automatisch sperren',
-            hint: 'Nach 15 Minuten ohne Benutzung und wenn Windows gesperrt wird.',
-            divider: false,
-            trailing: PillButton(label: 'Jetzt sperren', icon: TrairIcons.lock, height: 42, onPressed: state.lock),
+        ],
+      ),
+    );
+  }
+
+  Widget _passwordChange(AppState state) {
+    final ready = !_pwBusy && _oldPw.text.isNotEmpty && _newPw1.text.runes.length >= 12 && _newPw1.text == _newPw2.text;
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: TrairColors.borderSoft)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text('Passwort ändern', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 3),
+          const Text('Braucht das alte Passwort, auch wenn Trair gerade offen ist.', style: TrairText.muted),
+          const SizedBox(height: 12),
+          PillField(
+            controller: _oldPw,
+            hint: 'Altes Passwort',
+            obscure: true,
+            height: 44,
+            semanticLabel: 'Altes Passwort',
+            onChanged: (_) => setState(() {}),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: PillField(
+                  controller: _newPw1,
+                  hint: 'Neues Passwort (mind. 12 Zeichen)',
+                  obscure: true,
+                  height: 44,
+                  semanticLabel: 'Neues Passwort',
+                  onChanged: (_) => setState(() {}),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: PillField(
+                  controller: _newPw2,
+                  hint: 'Neues Passwort wiederholen',
+                  obscure: true,
+                  height: 44,
+                  semanticLabel: 'Neues Passwort wiederholen',
+                  onChanged: (_) => setState(() {}),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              PillButton(
+                label: _pwBusy ? 'Ändere …' : 'Passwort ändern',
+                height: 40,
+                onPressed: ready ? () => _changePassword(state) : null,
+              ),
+              const SizedBox(width: 12),
+              Flexible(
+                child: Text(_pwMessage, style: TextStyle(fontSize: 13, color: _pwMessageColor)),
+              ),
+            ],
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _changePassword(AppState state) async {
+    setState(() {
+      _pwBusy = true;
+      _pwMessage = '';
+    });
+    final answer = await state.changePassword(_oldPw.text, _newPw1.text);
+    if (!mounted) return;
+    setState(() {
+      _pwBusy = false;
+      if (answer.ok) {
+        _oldPw.clear();
+        _newPw1.clear();
+        _newPw2.clear();
+        _pwMessage = 'Neues Passwort gilt ab jetzt.';
+        _pwMessageColor = TrairColors.mintText;
+      } else {
+        _oldPw.clear();
+        _pwMessage = vaultErrorText(answer);
+        _pwMessageColor = TrairColors.amber;
+      }
+    });
   }
 
   Widget _privacyCard(AppState state) {
@@ -474,8 +606,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _title('Konto'),
+          const Text('Fingerabdruck deines Kontos', style: TrairText.label),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+            decoration: BoxDecoration(color: TrairColors.field, borderRadius: BorderRadius.circular(16)),
+            child: Row(
+              children: [
+                Expanded(
+                  child: SelectableText(
+                    state.fingerprint,
+                    style: TrairText.mono.copyWith(fontSize: 13, letterSpacing: 0.6, color: const Color(0xFFE2DCFF)),
+                  ),
+                ),
+                RoundIconButton(
+                  icon: TrairIcons.copy,
+                  tooltip: 'Kopieren (verschwindet nach 60 Sekunden)',
+                  filled: false,
+                  onPressed: () => copySensitive(state.fingerprint),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
           const Text(
-            'Meldest du dich 6 Monate lang nicht an, löscht der Server dein Konto automatisch und entfernt es aus allen Gruppen und Communities.',
+            'Andere prüfen dich über diese Zahlen. Meldest du dich 6 Monate lang nicht an, löscht der Server dein Konto '
+            'automatisch und entfernt es aus allen Gruppen und Communities.',
             style: TrairText.muted,
           ),
           const SizedBox(height: 14),
@@ -506,12 +662,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       border: Border.all(color: const Color(0x42FF8A98)),
                     ),
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         const Text(
-                          'Wirklich löschen? Dein Konto verschwindet sofort vom Server und von diesem Gerät. Das kann niemand rückgängig machen.',
+                          'Wirklich löschen? Der Tresor mit deinem Kontoschlüssel wird überschrieben und gelöscht. '
+                          'Das kann niemand rückgängig machen. Zur Sicherheit noch einmal das Passwort:',
                           style: TextStyle(fontSize: 14, height: 1.5, color: TrairColors.roseText),
                         ),
+                        const SizedBox(height: 12),
+                        PillField(
+                          controller: _deletePw,
+                          hint: 'Passwort',
+                          obscure: true,
+                          height: 44,
+                          semanticLabel: 'Passwort zum Löschen',
+                          onChanged: (_) => setState(() {}),
+                        ),
+                        if (_deleteError.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(_deleteError, style: const TextStyle(fontSize: 13, color: TrairColors.amber)),
+                          ),
                         const SizedBox(height: 12),
                         Wrap(
                           spacing: 10,
@@ -520,13 +691,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               label: 'Abbrechen',
                               kind: PillKind.ghost,
                               height: 42,
-                              onPressed: () => setState(() => _askDelete = false),
+                              onPressed: () => setState(() {
+                                _askDelete = false;
+                                _deletePw.clear();
+                                _deleteError = '';
+                              }),
                             ),
                             PillButton(
-                              label: 'Endgültig löschen',
+                              label: _deleteBusy ? 'Lösche …' : 'Endgültig löschen',
                               kind: PillKind.danger,
                               height: 42,
-                              onPressed: () => state.go(TrairScreen.onboarding),
+                              onPressed: _deletePw.text.isEmpty || _deleteBusy ? null : () => _delete(state),
                             ),
                           ],
                         ),
@@ -547,5 +722,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _delete(AppState state) async {
+    setState(() {
+      _deleteBusy = true;
+      _deleteError = '';
+    });
+    final answer = await state.deleteAccount(_deletePw.text);
+    if (!mounted) return;
+    setState(() {
+      _deleteBusy = false;
+      _deletePw.clear();
+      if (!answer.ok) _deleteError = vaultErrorText(answer);
+    });
   }
 }

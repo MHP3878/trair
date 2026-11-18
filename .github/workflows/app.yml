@@ -47,8 +47,16 @@ jobs:
       - name: Analyse
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: flutter analyze
-      - name: Widget-Tests
-        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+      # The real security core, so test/door_native_test.dart can run the
+      # app's door against it (Argon2id with the real settings).
+      - name: Sicherheitskern bauen
+        id: core
+        working-directory: .
+        run: cargo build -p trair-ffi --release --locked
+      - name: Widget-Tests und Test der Tür zum Kern
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' && steps.core.outcome == 'success' }}
+        env:
+          TRAIR_FFI_LIB: ${{ github.workspace }}/target/release/libtrair_ffi.so
         run: flutter test
       - name: Bildschirmfotos hochladen
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
@@ -102,16 +110,27 @@ jobs:
           Copy-Item assets/branding/app_icon.ico windows/runner/resources/app_icon.ico -Force
           if (-not (Select-String -Path windows/runner/main.cpp -Pattern 'L"Trair"' -Quiet)) { throw "Fenstertitel nicht gesetzt" }
           if (-not (Select-String -Path windows/CMakeLists.txt -Pattern 'BINARY_NAME "Trair"' -Quiet)) { throw "Dateiname nicht gesetzt" }
+      # The core's Windows parts (DPAPI, screenshot block) are tested here,
+      # on Windows, then the DLL is built and placed next to Trair.exe.
+      - name: Sicherheitskern testen (Windows)
+        working-directory: .
+        run: cargo test -p trair-ffi --locked
+      - name: Sicherheitskern bauen
+        working-directory: .
+        run: cargo build -p trair-ffi --release --locked
       - name: Bauen
         run: |
           flutter pub get --enforce-lockfile
           flutter build windows --release
-      - name: Datei prüfen
+      - name: Kern dazulegen und Dateien prüfen
         shell: pwsh
         run: |
-          $exe = "build/windows/x64/runner/Release/Trair.exe"
-          if (-not (Test-Path $exe)) { throw "Trair.exe fehlt" }
-          Get-ChildItem build/windows/x64/runner/Release | Format-Table Name, Length
+          $out = "build/windows/x64/runner/Release"
+          Copy-Item ../target/release/trair_ffi.dll $out/trair_ffi.dll -Force
+          foreach ($f in "Trair.exe", "trair_ffi.dll") {
+            if (-not (Test-Path "$out/$f")) { throw "$f fehlt" }
+          }
+          Get-ChildItem $out | Format-Table Name, Length
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Trair-Windows-Demo

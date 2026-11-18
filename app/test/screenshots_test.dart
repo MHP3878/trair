@@ -12,7 +12,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:trair_app/backend/demo_backend.dart';
+import 'package:trair_app/core/vault.dart';
 import 'package:trair_app/main.dart';
+
+import 'support/fake_door.dart';
 
 Future<void> _font(String family, List<String> files) async {
   final loader = FontLoader(family);
@@ -50,21 +53,24 @@ Future<void> _shot(WidgetTester tester, String name) async {
   });
 }
 
-Future<void> _start(WidgetTester tester, Size size) async {
+const _pw = 'mein langes passwort';
+
+Future<void> _start(WidgetTester tester, Size size, {FakeDoor? door}) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
+  final d = door ?? FakeDoor(password: _pw, profile: {'name': 'Julian', 'glow': 0xFFA18DFF});
   await tester.pumpWidget(
     RepaintBoundary(
       key: _shotKey,
-      child: TrairApp(backend: DemoBackend()),
+      child: TrairApp(backend: DemoBackend(), vault: TrairVault(d)),
     ),
   );
   await tester.pumpAndSettle();
 }
 
 Future<void> _unlock(WidgetTester tester) async {
-  await tester.enterText(find.byType(TextField), 'irgendwas');
+  await tester.enterText(find.byType(TextField), _pw);
   await tester.tap(find.text('Entsperren'));
   await tester.pumpAndSettle();
 }
@@ -72,50 +78,51 @@ Future<void> _unlock(WidgetTester tester) async {
 void main() {
   setUpAll(_loadFonts);
 
-  testWidgets('screenshots of every screen', (tester) async {
-    await _start(tester, const Size(1440, 900));
-    await _shot(tester, '01-sperrbildschirm');
-
-    await tester.tap(find.text('Neu hier? Mit Einladungscode starten'));
-    await tester.pumpAndSettle();
+  testWidgets('screenshots of the first start', (tester) async {
+    await _start(tester, const Size(1440, 900), door: FakeDoor());
+    await _shot(tester, '01-erststart-code');
     await tester.tap(find.text('Weiter'));
     await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Julian');
     await _shot(tester, '02-erststart-profil');
     await tester.tap(find.text('Weiter'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).at(0), 'ein langer satz');
     await _shot(tester, '03-erststart-passwort');
+  });
 
-    await tester.tap(find.text('Zurück'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Zurück'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Zurück'));
-    await tester.pumpAndSettle();
+  testWidgets('screenshots of every screen', (tester) async {
+    await _start(tester, const Size(1440, 900));
+    await tester.enterText(find.byType(TextField), 'falsches passwort');
+    await tester.tap(find.text('Entsperren'));
+    await _shot(tester, '04-sperre-falsches-passwort');
     await _unlock(tester);
-    await _shot(tester, '04-chats');
+    await _shot(tester, '05-chats');
 
     await tester.tap(find.text('Verschlüsselt · bestätigt'));
-    await _shot(tester, '05-chats-sicherheitsnummer');
+    await _shot(tester, '06-chats-sicherheitsnummer');
 
     await tester.tap(find.text('Malik').first);
-    await _shot(tester, '06-chats-blockiert');
-
-    await tester.tap(find.text('Projekt Trair'));
-    await _shot(tester, '07-gruppe');
+    await _shot(tester, '07-chats-blockiert');
 
     await tester.tap(find.text('Trair Beta'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Leute einladen'));
     await _shot(tester, '08-community');
 
     await tester.tap(find.text('Chats'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Strenger Modus an'));
     await _shot(tester, '09-einstellungen');
+    await tester.ensureVisible(find.text('Bildschirmfotos blockieren'));
+    await _shot(tester, '10-einstellungen-sicherheit');
+    await tester.ensureVisible(find.text('Konto endgültig löschen'));
+    await _shot(tester, '11-einstellungen-konto');
   });
 
   testWidgets('screenshot of a small window', (tester) async {
     await _start(tester, const Size(1024, 640));
     await _unlock(tester);
-    await _shot(tester, '10-kleines-fenster');
+    await _shot(tester, '12-kleines-fenster');
   });
 }

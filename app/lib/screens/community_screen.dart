@@ -4,6 +4,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../app_state.dart';
+import '../core/clipboard.dart';
 import '../backend/backend.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -107,7 +108,22 @@ class _CommunityScreenState extends State<CommunityScreen> {
                         children: [
                           const Text('Einladungscode · nur einmal nutzbar, 24 Std. gültig', style: TrairText.small),
                           const SizedBox(height: 6),
-                          Text('TRAIR-7KQ2-M9XD', style: TrairText.mono.copyWith(fontSize: 16, letterSpacing: 1.4)),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  'TRAIR-7KQ2-M9XD',
+                                  style: TrairText.mono.copyWith(fontSize: 16, letterSpacing: 1.4),
+                                ),
+                              ),
+                              RoundIconButton(
+                                icon: TrairIcons.copy,
+                                tooltip: 'Kopieren (verschwindet nach 60 Sekunden)',
+                                size: 32,
+                                onPressed: () => copySensitive('TRAIR-7KQ2-M9XD'),
+                              ),
+                            ],
+                          ),
                         ],
                       ),
                     ),

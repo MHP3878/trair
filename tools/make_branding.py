@@ -37,6 +37,7 @@ ICONS = {
     "check": 0xE06C,
     "chevron-down": 0xE06D,
     "chevron-left": 0xE06E,
+    "copy": 0xE09E,
     "ellipsis": 0xE0B6,
     "eye": 0xE0BA,
     "eye-off": 0xE0BB,
