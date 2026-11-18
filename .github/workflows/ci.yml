@@ -1,0 +1,80 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Automatische Pruefungen bei jedem Push und Pull Request.
+# Fremde Actions sind auf feste Commit-IDs festgenagelt (Lieferkette);
+# Dependabot meldet neue Versionen.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Format, Clippy, Tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust-Version aus rust-toolchain.toml installieren
+        run: rustup toolchain install
+      - name: Formatierung
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Tests
+        run: cargo test --workspace --locked
+
+  deny:
+    name: Lizenzen und bekannte Schwachstellen
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: cargo-deny installieren
+        run: cargo install cargo-deny --version 0.21.0 --locked
+      - name: cargo-deny pruefen
+        run: cargo deny check
+
+  repo:
+    name: Geheimnisse, Kopfzeilen, Lizenzliste, DCO
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Lizenz-Kopfzeilen
+        run: python3 tools/check_headers.py
+      - name: Drittanbieter-Lizenzliste aktuell
+        run: python3 tools/third_party_licenses.py --check
+      - name: Geheimnis-Scanner
+        run: bash tools/scan_secrets.sh
+      - name: DCO-Unterschriften
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            RANGE="$BASE..$HEAD"
+          elif [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            RANGE="$AFTER"
+          else
+            RANGE="$BEFORE..$AFTER"
+          fi
+          python3 tools/check_dco.py "$RANGE"

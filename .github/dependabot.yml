@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Dependabot (kostenlos) meldet neue Versionen der Build-Bausteine und
+# Rust-Abhaengigkeiten als Pull Request. Nichts wird automatisch uebernommen.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly

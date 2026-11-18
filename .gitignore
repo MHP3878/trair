@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Build-Ausgaben
+/target/
+**/build/
+.dart_tool/
+
+# Geheimnisse und lokale Einstellungen: niemals ins Repository
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+secrets/
+*.local.toml
+config.toml
+!config.example.toml
+
+# Lokale Daten und Datenbanken
+data/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+
+# Editor und Betriebssystem
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
