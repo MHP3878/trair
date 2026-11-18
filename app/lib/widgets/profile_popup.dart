@@ -103,7 +103,9 @@ class ProfilePopup extends StatelessWidget {
           color: const Color(0xF5141420),
           borderRadius: BorderRadius.circular(26),
           border: Border.all(color: TrairColors.border),
-          boxShadow: const [BoxShadow(color: Color(0x99000000), blurRadius: 40, offset: Offset(0, 18))],
+          boxShadow: const [
+            BoxShadow(color: Color(0x66000000), blurRadius: 48, spreadRadius: -8, offset: Offset(0, 12)),
+          ],
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(26),
@@ -170,7 +172,7 @@ class ProfilePopup extends StatelessWidget {
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(color: TrairColors.borderSoft),
                           ),
-                          child: BadgeRow(badges: v.badges, size: 24, spacing: 6),
+                          child: BadgeRow(badges: v.badges, size: 26, spacing: 7),
                         ),
                       ),
                   ],

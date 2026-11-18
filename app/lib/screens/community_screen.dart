@@ -400,7 +400,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
                         ),
                       ),
                     ),
-                    BadgeRow(badges: p.badges, size: 16, spacing: 4),
+                    BadgeRow(badges: p.badges, size: 17, spacing: 4),
                     if (p.nameWarning) const _NameWarningDot(),
                     Text(m.time, style: const TextStyle(fontSize: 12, color: TrairColors.placeholder)),
                   ],
@@ -451,7 +451,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
                                   ),
                                   if (p.badges.isNotEmpty) ...[
                                     const SizedBox(width: 6),
-                                    BadgeRow(badges: p.badges, size: 15, spacing: 3),
+                                    BadgeRow(badges: p.badges, size: 16, spacing: 4),
                                   ],
                                   if (p.nameWarning) ...[const SizedBox(width: 6), const _NameWarningDot()],
                                 ],

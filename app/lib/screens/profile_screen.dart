@@ -7,6 +7,7 @@ import '../app_state.dart';
 import '../core/clipboard.dart';
 import '../core/vault.dart';
 import '../theme.dart';
+import '../widgets/badges.dart';
 import '../widgets/common.dart';
 import '../widgets/profile_popup.dart';
 import '../widgets/trair_icons.dart';
@@ -198,11 +199,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
             alignment: Alignment.center,
             padding: const EdgeInsets.symmetric(horizontal: 20),
             decoration: BoxDecoration(color: TrairColors.field, borderRadius: BorderRadius.circular(20)),
-            child: GlowName(
-              name: state.userName.trim().isEmpty ? 'Dein Name' : state.userName.trim(),
-              color: state.glow,
-              strength: state.glowStrength,
-              size: 44,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                GlowName(
+                  name: state.userName.trim().isEmpty ? 'Dein Name' : state.userName.trim(),
+                  color: state.glow,
+                  strength: state.glowStrength,
+                  size: 44,
+                ),
+                if (state.backend.ownBadges().isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  BadgeRow(badges: state.backend.ownBadges(), size: 24, spacing: 7),
+                ],
+              ],
             ),
           ),
           const SizedBox(height: 18),

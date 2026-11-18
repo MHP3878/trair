@@ -474,6 +474,9 @@ void main() {
       final about = _field('Ein, zwei Sätze über dich');
       await tester.ensureVisible(about);
       await tester.enterText(about, 'Ich baue Trair.');
+      // Leave the field, or it scrolls itself back into view.
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('Nur Kontakte'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Nur Kontakte'));
