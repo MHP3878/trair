@@ -4,7 +4,7 @@
 
 Trair wird ein Messenger, der sich so einfach bedienen lässt wie WhatsApp oder Discord, bei dem Sicherheit und Privatsphäre aber an erster Stelle stehen. Private Nachrichten sind Ende-zu-Ende-verschlüsselt mit MLS (RFC 9420). Der Server stellt nur zu und kann private Inhalte nicht lesen.
 
-> **Status: Krypto-Kern (Meilenstein M1).** Trair ist noch nicht benutzbar. Bitte nichts davon für echte Kommunikation verwenden.
+> **Status: Krypto-Kern (M1) und App-Oberfläche mit Demo-Daten.** Die App verschlüsselt noch nichts und verbindet sich mit keinem Server; jedes Fenster zeigt das Schild „Demo – nicht verschlüsselt“. Bitte nichts davon für echte Kommunikation verwenden.
 
 ## Grundsätze
 
@@ -19,14 +19,17 @@ Trair wird ein Messenger, der sich so einfach bedienen lässt wie WhatsApp oder 
 | --- | --- |
 | `crates/trair-core` | Rust-Kern der App: Konten, Geräte-Zertifikate, MLS-Gruppen, strenger Modus. Die Angriffstests liegen in `tests/angriffe.rs` |
 | `crates/trair-server` | Rust-Server: Konten, Zustellung, Communities (ab M3) |
-| `tools/` | Prüfskripte für CI: Lizenzliste, Datei-Kopfzeilen, DCO |
+| `app/` | Flutter-App für Windows im Pro-Look. Zeigt bis zur Anbindung an den Rust-Kern nur Demo-Daten (`lib/backend/demo_backend.dart`) |
+| `tools/` | Prüfskripte für CI: Lizenzliste, Datei-Kopfzeilen, DCO. `make_branding.py` erzeugt Logo, Windows-Symbol und Symbol-Schrift neu |
 | `.github/workflows/` | automatische Prüfungen bei jedem Push |
 
-Die Flutter-App kommt mit Meilenstein M5 dazu.
+## Windows-Demo herunterladen
+
+GitHub baut die App bei jedem Push. Unter **Actions → App → letzter grüner Lauf → Artifacts → Trair-Windows-Demo** liegt eine ZIP-Datei. Entpacken und `Trair.exe` starten. Die Datei ist noch nicht signiert, deshalb warnt Windows beim ersten Start („Weitere Informationen → Trotzdem ausführen“).
 
 ## Prüfungen
 
-Bei jedem Push laufen automatisch: Formatierung, Clippy, Tests (darunter die Angriffstests aus dem Prototyp), Lizenz- und Schwachstellencheck (`cargo-deny`), Geheimnis-Scanner (`detect-secrets`), aktuelle Drittanbieter-Lizenzliste, Lizenz-Kopfzeilen, DCO-Unterschriften und die statische Sicherheitsanalyse CodeQL.
+Bei jedem Push laufen automatisch: Formatierung, Clippy, Tests (darunter die Angriffstests aus dem Prototyp), Lizenz- und Schwachstellencheck (`cargo-deny`), Geheimnis-Scanner (`detect-secrets`), aktuelle Drittanbieter-Lizenzliste, Lizenz-Kopfzeilen, DCO-Unterschriften und die statische Sicherheitsanalyse CodeQL. Für die App außerdem `flutter analyze`, die Widget-Tests, `dart format` und der Windows-Build.
 
 Lokal ausführen:
 
@@ -38,6 +41,11 @@ cargo deny check
 python3 tools/third_party_licenses.py --check
 python3 tools/check_headers.py
 bash tools/scan_secrets.sh
+
+cd app
+flutter analyze
+flutter test
+dart format --output=none --set-exit-if-changed .
 ```
 
 ## Lizenz

@@ -1,0 +1,120 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Flutter app: analysis, widget tests, formatting and a Windows build.
+# Fremde Actions sind auf feste Commit-IDs festgenagelt (Lieferkette).
+name: App
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: "3.50.0"
+
+jobs:
+  check:
+    name: App prüfen (Analyse, Tests, Format)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      # --enforce-lockfile: exactly the versions in pubspec.lock, checked
+      # against their sha256, or the run fails.
+      - name: Pakete holen
+        id: deps
+        run: flutter pub get --enforce-lockfile
+      - name: Lizenzen der Dart-Pakete prüfen
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: python3 ../tools/dart_licenses.py --verify
+      # Each check runs even if an earlier one failed, so one run shows
+      # every problem at once.
+      - name: Analyse
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: flutter analyze
+      - name: Widget-Tests
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: flutter test
+      - name: Bildschirmfotos hochladen
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Trair-Screenshots
+          path: app/build/screenshots/
+          retention-days: 14
+          if-no-files-found: warn
+      # Also into the log as base64: lets reviewers (and Claude, whose
+      # sandbox cannot download artifacts) look at the pictures.
+      - name: Bildschirmfotos ins Protokoll
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: |
+          for f in build/screenshots/*.png; do
+            [ -e "$f" ] || continue
+            echo "=====BEGIN $(basename "$f")====="
+            base64 -w 2000 "$f"
+            echo "=====END====="
+          done
+      - name: Formatierung
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: |
+          dart format .
+          git diff --exit-code -- .
+
+  windows:
+    name: Windows-Build
+    runs-on: windows-2025
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      # The Windows runner files are generated here and not kept in Git
+      # yet. Only the name shown in Windows and the program icon change.
+      - name: Windows-Projektdateien erzeugen
+        shell: pwsh
+        run: |
+          flutter create --platforms=windows --project-name trair_app .
+          (Get-Content windows/runner/main.cpp) -replace 'L"trair_app"', 'L"Trair"' | Set-Content windows/runner/main.cpp
+          (Get-Content windows/CMakeLists.txt) -replace 'set\(BINARY_NAME "trair_app"\)', 'set(BINARY_NAME "Trair")' | Set-Content windows/CMakeLists.txt
+          (Get-Content windows/runner/Runner.rc) -replace 'trair_app', 'Trair' -replace 'com\.example', 'Trair contributors' | Set-Content windows/runner/Runner.rc
+          Copy-Item assets/branding/app_icon.ico windows/runner/resources/app_icon.ico -Force
+          if (-not (Select-String -Path windows/runner/main.cpp -Pattern 'L"Trair"' -Quiet)) { throw "Fenstertitel nicht gesetzt" }
+          if (-not (Select-String -Path windows/CMakeLists.txt -Pattern 'BINARY_NAME "Trair"' -Quiet)) { throw "Dateiname nicht gesetzt" }
+      - name: Bauen
+        run: |
+          flutter pub get --enforce-lockfile
+          flutter build windows --release
+      - name: Datei prüfen
+        shell: pwsh
+        run: |
+          $exe = "build/windows/x64/runner/Release/Trair.exe"
+          if (-not (Test-Path $exe)) { throw "Trair.exe fehlt" }
+          Get-ChildItem build/windows/x64/runner/Release | Format-Table Name, Length
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Trair-Windows-Demo
+          path: app/build/windows/x64/runner/Release/
+          retention-days: 30
+          if-no-files-found: error

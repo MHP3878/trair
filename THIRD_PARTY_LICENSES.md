@@ -205,6 +205,46 @@ This file lists every third-party component and its license.
 | zeroize_derive | 1.5.0 | Apache-2.0 OR MIT | https://github.com/RustCrypto/utils |
 | zmij | 1.0.23 | MIT | https://github.com/dtolnay/zmij |
 
-## Flutter / Dart
+## Flutter / Dart (app/)
 
-Not part of the project yet (planned for milestone M5).
+| Component | License | Source |
+| --- | --- | --- |
+| Flutter SDK | BSD-3-Clause | https://github.com/flutter/flutter |
+| Material Icons font (bundled by Flutter) | Apache-2.0 | https://github.com/google/material-design-icons |
+| Geist and Geist Mono fonts (app/assets/fonts) | OFL-1.1 | https://github.com/vercel/geist-font |
+| Lucide icons 1.75.0, 23 icons (app/assets/fonts/Lucide.ttf) | ISC (some icons MIT, from Feather) | https://github.com/lucide-icons/lucide |
+
+Packages from pub.dev (from app/pubspec.lock, including packages only the tests use;
+CI compares each license with the LICENSE file of the package):
+
+| Package | Version | License | Source |
+| --- | --- | --- | --- |
+| async | 2.13.1 | BSD-3-Clause | https://pub.dev/packages/async |
+| boolean_selector | 2.1.2 | BSD-3-Clause | https://pub.dev/packages/boolean_selector |
+| characters | 1.4.1 | BSD-3-Clause | https://pub.dev/packages/characters |
+| clock | 1.1.3 | Apache-2.0 | https://pub.dev/packages/clock |
+| collection | 1.19.1 | BSD-3-Clause | https://pub.dev/packages/collection |
+| cupertino_ui | 1.1.7 | BSD-3-Clause | https://pub.dev/packages/cupertino_ui |
+| fake_async | 1.3.3 | Apache-2.0 | https://pub.dev/packages/fake_async |
+| intl | 0.20.3 | BSD-3-Clause | https://pub.dev/packages/intl |
+| leak_tracker | 11.0.2 | BSD-3-Clause | https://pub.dev/packages/leak_tracker |
+| leak_tracker_flutter_testing | 3.0.10 | BSD-3-Clause | https://pub.dev/packages/leak_tracker_flutter_testing |
+| leak_tracker_testing | 3.0.2 | BSD-3-Clause | https://pub.dev/packages/leak_tracker_testing |
+| listen | 1.0.1 | BSD-3-Clause | https://pub.dev/packages/listen |
+| matcher | 0.12.20 | BSD-3-Clause | https://pub.dev/packages/matcher |
+| material_color_utilities | 0.13.0 | Apache-2.0 | https://pub.dev/packages/material_color_utilities |
+| material_ui | 1.11.1 | BSD-3-Clause | https://pub.dev/packages/material_ui |
+| meta | 1.19.0 | BSD-3-Clause | https://pub.dev/packages/meta |
+| path | 1.9.1 | BSD-3-Clause | https://pub.dev/packages/path |
+| source_span | 1.10.2 | BSD-3-Clause | https://pub.dev/packages/source_span |
+| stack_trace | 1.12.2 | BSD-3-Clause | https://pub.dev/packages/stack_trace |
+| stream_channel | 2.1.4 | BSD-3-Clause | https://pub.dev/packages/stream_channel |
+| string_scanner | 1.4.1 | BSD-3-Clause | https://pub.dev/packages/string_scanner |
+| term_glyph | 1.2.2 | BSD-3-Clause | https://pub.dev/packages/term_glyph |
+| test_api | 0.7.14 | BSD-3-Clause | https://pub.dev/packages/test_api |
+| vector_math | 2.4.4 | BSD-3-Clause | https://pub.dev/packages/vector_math |
+| vm_service | 15.4.0 | BSD-3-Clause | https://pub.dev/packages/vm_service |
+
+Flutter writes the license texts of the SDK and all packages into the built app.
+The app shows them, together with the font license, under
+Einstellungen > Konto > Open-Source-Lizenzen.
