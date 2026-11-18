@@ -23,7 +23,9 @@ class Backdrop extends StatelessWidget {
         Positioned(left: -160, top: -220, child: _blob(760, 560, const Color(0x4D5B47D6))),
         Positioned(right: -160, bottom: -220, child: _blob(680, 520, const Color(0x402C4FB8))),
         Align(alignment: const Alignment(0.15, -0.1), child: _blob(460, 360, const Color(0x403B2F8F))),
-        Positioned.fill(child: child),
+        // Transparent Material above the background colour, so ink and
+        // hover effects of InkWells on the background stay visible.
+        Positioned.fill(child: Material(type: MaterialType.transparency, child: child)),
       ],
     );
   }
@@ -73,7 +75,8 @@ class GlassPanel extends StatelessWidget {
             borderRadius: r,
             border: Border.all(color: borderColor ?? TrairColors.border),
           ),
-          child: child,
+          // Same reason as in Backdrop: ink must paint above the glass.
+          child: Material(type: MaterialType.transparency, child: child),
         ),
       ),
     );

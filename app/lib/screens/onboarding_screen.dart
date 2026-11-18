@@ -283,12 +283,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ),
           ),
         const SizedBox(height: 16),
-        Container(
-          decoration: BoxDecoration(
-            color: TrairColors.field,
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: TrairColors.borderSoft),
-          ),
+        // Own Material, so the tile's hover and ink effects stay visible.
+        Material(
+          color: TrairColors.field,
+          shape: const StadiumBorder(side: BorderSide(color: TrairColors.borderSoft)),
+          clipBehavior: Clip.antiAlias,
           child: CheckboxListTile(
             value: _understood,
             onChanged: (v) => setState(() => _understood = v ?? false),

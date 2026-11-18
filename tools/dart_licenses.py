@@ -20,7 +20,34 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 LOCK = ROOT / "app" / "pubspec.lock"
 
 # Paket -> SPDX-Lizenz. Nur Lizenzen, die mit AGPL-3.0 vereinbar sind.
-KNOWN = {}
+# Enthaelt auch Pakete, die nur die Tests brauchen (flutter_test).
+KNOWN = {
+    "async": "BSD-3-Clause",
+    "boolean_selector": "BSD-3-Clause",
+    "characters": "BSD-3-Clause",
+    "clock": "Apache-2.0",
+    "collection": "BSD-3-Clause",
+    "cupertino_ui": "BSD-3-Clause",
+    "fake_async": "Apache-2.0",
+    "intl": "BSD-3-Clause",
+    "leak_tracker": "BSD-3-Clause",
+    "leak_tracker_flutter_testing": "BSD-3-Clause",
+    "leak_tracker_testing": "BSD-3-Clause",
+    "listen": "BSD-3-Clause",
+    "matcher": "BSD-3-Clause",
+    "material_color_utilities": "Apache-2.0",
+    "material_ui": "BSD-3-Clause",
+    "meta": "BSD-3-Clause",
+    "path": "BSD-3-Clause",
+    "source_span": "BSD-3-Clause",
+    "stack_trace": "BSD-3-Clause",
+    "stream_channel": "BSD-3-Clause",
+    "string_scanner": "BSD-3-Clause",
+    "term_glyph": "BSD-3-Clause",
+    "test_api": "BSD-3-Clause",
+    "vector_math": "BSD-3-Clause",
+    "vm_service": "BSD-3-Clause",
+}
 
 
 def hosted_packages(lock_text):

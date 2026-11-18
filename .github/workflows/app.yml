@@ -34,14 +34,14 @@ jobs:
           channel: stable
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
+      # --enforce-lockfile: exactly the versions in pubspec.lock, checked
+      # against their sha256, or the run fails.
       - name: Pakete holen
         id: deps
-        run: flutter pub get
-      - name: Paketliste und Lizenzen anzeigen
+        run: flutter pub get --enforce-lockfile
+      - name: Lizenzen der Dart-Pakete prüfen
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
-        run: |
-          cat pubspec.lock
-          python3 ../tools/dart_licenses.py --report
+        run: python3 ../tools/dart_licenses.py --verify
       # Each check runs even if an earlier one failed, so one run shows
       # every problem at once.
       - name: Analyse
@@ -83,7 +83,9 @@ jobs:
           if (-not (Select-String -Path windows/runner/main.cpp -Pattern 'L"Trair"' -Quiet)) { throw "Fenstertitel nicht gesetzt" }
           if (-not (Select-String -Path windows/CMakeLists.txt -Pattern 'BINARY_NAME "Trair"' -Quiet)) { throw "Dateiname nicht gesetzt" }
       - name: Bauen
-        run: flutter build windows --release
+        run: |
+          flutter pub get --enforce-lockfile
+          flutter build windows --release
       - name: Datei prüfen
         shell: pwsh
         run: |
