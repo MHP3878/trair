@@ -9,6 +9,7 @@
 //! certificates signed with the account key.
 
 pub mod account;
+pub mod badges;
 pub mod devices;
 pub mod error;
 pub mod keypackages;
@@ -18,6 +19,7 @@ pub mod policy;
 pub mod vault;
 
 pub use account::{Account, DeviceCertificate, Fingerprint};
+pub use badges::{Badge, BadgeKind, Community, VerifiedBadge};
 pub use devices::{DeviceIdentity, SignedDeviceList};
 pub use error::{CoreError, Result};
 pub use mls::{Device, Event, KeyPackageOffer, Member, Outgoing};

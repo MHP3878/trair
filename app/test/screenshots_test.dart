@@ -120,6 +120,29 @@ void main() {
     await _shot(tester, '11-einstellungen-konto');
   });
 
+  testWidgets('screenshots of profiles and badges', (tester) async {
+    await _start(tester, const Size(1440, 900));
+    await _unlock(tester);
+    await tester.tap(find.text('Trair Beta'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Lena').last);
+    await _shot(tester, '13-profilkarte');
+    await tester.tap(find.byTooltip('Schließen'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Tr4ir Support'));
+    await _shot(tester, '14-profil-warnung');
+    await tester.tap(find.byTooltip('Schließen'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Chats'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Strenger Modus an'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('So sehen dich andere'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('So sehen dich andere'));
+    await _shot(tester, '15-eigenes-profil');
+  });
+
   testWidgets('screenshot of a small window', (tester) async {
     await _start(tester, const Size(1024, 640));
     await _unlock(tester);

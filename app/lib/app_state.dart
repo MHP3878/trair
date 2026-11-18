@@ -14,6 +14,9 @@ enum TrairScreen { starting, coreMissing, lock, onboarding, chats, community, pr
 /// Minutes without use before Trair locks itself.
 const autoLockChoices = [5, 15, 30];
 
+/// Longest "Über mich", in characters (like Discord).
+const maxAboutChars = 190;
+
 /// App-wide state. Holds no secrets: the keys stay in the Rust core
 /// behind [TrairVault]; this layer only gets the profile and results.
 class AppState extends ChangeNotifier {
@@ -37,6 +40,13 @@ class AppState extends ChangeNotifier {
   int autoLockMinutes = 15;
   bool screenProtection = true;
   String fingerprint = '';
+
+  /// "Über mich" of the own profile.
+  String about = '';
+
+  /// Who can see the own profile: alle, gemeinsam or kontakte. Takes effect
+  /// with the server (M3); stored now.
+  String profileVisibility = 'gemeinsam';
 
   /// The account's devices, from the vault. Empty while locked.
   List<TrairDevice> devices = const [];
@@ -154,6 +164,10 @@ class AppState extends ChangeNotifier {
 
   void setName(String name) => _change(() => userName = name);
 
+  void setAbout(String text) => _change(() => about = text.characters.take(maxAboutChars).toString());
+
+  void setProfileVisibility(String choice) => _change(() => profileVisibility = choice);
+
   void setStrict(bool on) => _change(() => strict = on);
 
   void setPrivacy(String key, bool on) => _change(() => privacy[key] = on);
@@ -202,6 +216,8 @@ class AppState extends ChangeNotifier {
     'autoLockMinutes': autoLockMinutes,
     'screenProtection': screenProtection,
     'privacy': Map<String, bool>.of(privacy),
+    'about': about,
+    'profileVisibility': profileVisibility,
   };
 
   void _applyProfile(Map<String, Object?> p) {
@@ -214,6 +230,12 @@ class AppState extends ChangeNotifier {
     final minutes = p['autoLockMinutes'];
     autoLockMinutes = minutes is int && autoLockChoices.contains(minutes) ? minutes : 15;
     screenProtection = p['screenProtection'] as bool? ?? true;
+    final storedAbout = p['about'];
+    about = storedAbout is String ? storedAbout.characters.take(maxAboutChars).toString() : '';
+    final visibility = p['profileVisibility'];
+    profileVisibility = visibility is String && const {'alle', 'gemeinsam', 'kontakte'}.contains(visibility)
+        ? visibility
+        : 'gemeinsam';
     final storedPrivacy = p['privacy'];
     for (final key in privacy.keys) {
       privacy[key] = storedPrivacy is Map && storedPrivacy[key] == true;

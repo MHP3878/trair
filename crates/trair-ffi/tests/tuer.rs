@@ -391,3 +391,61 @@ fn d09_second_device_is_withdrawn_with_password() {
     assert_eq!(error(&r), "refused", "already withdrawn");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn d10_only_real_badges_come_out_of_the_door() {
+    use trair_core::Account;
+    use trair_core::badges::{Badge, BadgeKind, Community};
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let founder = Account::generate("gruenderin").unwrap();
+    let stranger = Account::generate("fremder").unwrap();
+    let community = Community::create("Trair Beta", &founder).unwrap();
+    let issue = |issuer: &Account, kind, holder: &Account| {
+        let b = Badge::issue(
+            issuer,
+            kind,
+            holder.public_key(),
+            Some(community.clone()),
+            now,
+            3600,
+            None,
+        )
+        .unwrap();
+        serde_json::to_value(b).unwrap()
+    };
+    let badges = vec![
+        issue(&founder, BadgeKind::Founder, &founder),
+        issue(&founder, BadgeKind::Admin, &founder),
+        issue(&stranger, BadgeKind::Admin, &founder),
+        issue(&founder, BadgeKind::Mod, &stranger),
+        json!({"claim": "kaputt"}),
+    ];
+    let holder = hex::encode(founder.public_key());
+    let r =
+        call(json!({"op": "verify_badges", "holder": holder, "name": "Lena", "badges": badges}));
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(r["badges"].as_array().unwrap().len(), 1, "{r}");
+    assert_eq!(r["badges"][0]["kind"], "founder");
+    assert_eq!(r["badges"][0]["community"], "Trair Beta");
+    assert_eq!(
+        r["badges"][0]["community_warning"], true,
+        "name looks official"
+    );
+    assert_eq!(
+        r["refused"], 3,
+        "self-made admin, badge of someone else, unreadable"
+    );
+    assert_eq!(r["name_warning"], false);
+    let r = call(
+        json!({"op": "verify_badges", "holder": holder, "name": "Trair Support", "badges": []}),
+    );
+    assert_eq!(r["name_warning"], true);
+    for holder in ["", "zz", "00"] {
+        let r = call(json!({"op": "verify_badges", "holder": holder, "name": "x", "badges": []}));
+        assert_eq!(error(&r), "bad_request", "{holder:?}");
+    }
+}

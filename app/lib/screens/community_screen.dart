@@ -7,7 +7,9 @@ import '../app_state.dart';
 import '../core/clipboard.dart';
 import '../backend/backend.dart';
 import '../theme.dart';
+import '../widgets/badges.dart';
 import '../widgets/common.dart';
+import '../widgets/profile_popup.dart';
 import '../widgets/trair_icons.dart';
 
 class CommunityScreen extends StatefulWidget {
@@ -47,7 +49,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
                 children: [
                   Expanded(child: _channel(state, channel)),
                   const SizedBox(width: 10),
-                  SizedBox(width: 260, child: _members(community)),
+                  SizedBox(width: 260, child: _members(state, community)),
                 ],
               ),
             ),
@@ -293,7 +295,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
               Expanded(
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(26, 8, 26, 110),
-                  children: [for (final m in messages) _message(m)],
+                  children: [for (final m in messages) _message(m, state)],
                 ),
               ),
             ],
@@ -349,14 +351,33 @@ class _CommunityScreenState extends State<CommunityScreen> {
     );
   }
 
-  Widget _message(CommunityMessage m) {
-    final p = m.author;
+  /// The user appears with their own name and colour, not the demo's.
+  Person _shown(Person p, AppState state) {
+    if (!p.isSelf) return p;
+    return Person(
+      name: state.userName.trim().isEmpty ? 'Du' : state.userName.trim(),
+      color: state.glow,
+      trust: p.trust,
+      badges: state.backend.ownBadges(),
+      about: state.about,
+      isSelf: true,
+    );
+  }
+
+  void _openProfile(Person p, AppState state) => showProfileCard(context, ProfileView.of(p, state));
+
+  Widget _message(CommunityMessage m, AppState state) {
+    final p = _shown(m.author, state);
     return Padding(
       padding: const EdgeInsets.only(bottom: 20),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Avatar(initials: p.name.substring(0, 1), color: p.color, size: 38),
+          InkWell(
+            customBorder: const CircleBorder(),
+            onTap: () => _openProfile(p, state),
+            child: Avatar(initials: p.name.characters.first.toUpperCase(), color: p.color, size: 38),
+          ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -366,24 +387,21 @@ class _CommunityScreenState extends State<CommunityScreen> {
                   spacing: 8,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    Text(
-                      p.name,
-                      style: TextStyle(
-                        fontSize: 14.5,
-                        fontWeight: FontWeight.w600,
-                        color: p.color,
-                        shadows: glowShadows(p.color, strength: 20),
+                    InkWell(
+                      borderRadius: BorderRadius.circular(6),
+                      onTap: () => _openProfile(p, state),
+                      child: Text(
+                        p.name,
+                        style: TextStyle(
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w600,
+                          color: p.color,
+                          shadows: glowShadows(p.color, strength: 20),
+                        ),
                       ),
                     ),
-                    if (p.role.isNotEmpty)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: const Color(0x0FFFFFFF),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(p.role, style: const TextStyle(fontSize: 11, color: TrairColors.textSoft)),
-                      ),
+                    BadgeRow(badges: p.badges, size: 17, spacing: 4),
+                    if (p.nameWarning) const _NameWarningDot(),
                     Text(m.time, style: const TextStyle(fontSize: 12, color: TrairColors.placeholder)),
                   ],
                 ),
@@ -397,7 +415,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
     );
   }
 
-  Widget _members(Community community) {
+  Widget _members(AppState state, Community community) {
     return GlassPanel(
       padding: const EdgeInsets.fromLTRB(12, 18, 12, 14),
       child: Column(
@@ -411,46 +429,62 @@ class _CommunityScreenState extends State<CommunityScreen> {
                     padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
                     child: Text('${r.name} · ${r.members.length}', style: TrairText.small),
                   ),
-                  for (final p in r.members)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      child: Row(
-                        children: [
-                          Avatar(initials: p.name.substring(0, 1), color: p.color, size: 32),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              p.name,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: p.color),
-                            ),
-                          ),
-                          Tooltip(
-                            message: 'Trust-Stufe ${p.trust} von 3',
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
-                              decoration: BoxDecoration(
-                                color: const Color(0x0AFFFFFF),
-                                borderRadius: BorderRadius.circular(999),
-                              ),
+                  for (final p in r.members.map((m) => _shown(m, state)))
+                    InkWell(
+                      borderRadius: BorderRadius.circular(14),
+                      onTap: () => _openProfile(p, state),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        child: Row(
+                          children: [
+                            Avatar(initials: p.name.characters.first.toUpperCase(), color: p.color, size: 32),
+                            const SizedBox(width: 10),
+                            Expanded(
                               child: Row(
-                                mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  for (var i = 1; i <= 3; i++)
-                                    Container(
-                                      width: 6,
-                                      height: 6,
-                                      margin: const EdgeInsets.symmetric(horizontal: 1.5),
-                                      decoration: BoxDecoration(
-                                        color: i <= p.trust ? TrairColors.mint : const Color(0x24FFFFFF),
-                                        shape: BoxShape.circle,
-                                      ),
+                                  Flexible(
+                                    child: Text(
+                                      p.name,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: p.color),
                                     ),
+                                  ),
+                                  if (p.badges.isNotEmpty) ...[
+                                    const SizedBox(width: 6),
+                                    BadgeRow(badges: p.badges, size: 16, spacing: 4),
+                                  ],
+                                  if (p.nameWarning) ...[const SizedBox(width: 6), const _NameWarningDot()],
                                 ],
                               ),
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: 6),
+                            Tooltip(
+                              message: 'Trust-Stufe ${p.trust} von 3',
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: const Color(0x0AFFFFFF),
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    for (var i = 1; i <= 3; i++)
+                                      Container(
+                                        width: 6,
+                                        height: 6,
+                                        margin: const EdgeInsets.symmetric(horizontal: 1.5),
+                                        decoration: BoxDecoration(
+                                          color: i <= p.trust ? TrairColors.mint : const Color(0x24FFFFFF),
+                                          shape: BoxShape.circle,
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                 ],
@@ -468,6 +502,19 @@ class _CommunityScreenState extends State<CommunityScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Small amber mark next to a name that pretends to be official.
+class _NameWarningDot extends StatelessWidget {
+  const _NameWarningDot();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Tooltip(
+      message: 'Name wirkt offiziell, ist aber nicht vom Trair-Team',
+      child: Icon(TrairIcons.triangleAlert, size: 14, color: TrairColors.amber),
     );
   }
 }

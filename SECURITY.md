@@ -109,6 +109,35 @@ Known limits of devices and pairing:
   1 in 16.7 million per pairing attempt; failed attempts are visible to
   the person pairing.
 
+## Profiles and badges
+
+Code: `crates/trair-core/src/badges.rs`; tests: `tests/abzeichen.rs`.
+
+- A badge (Trair team, founder, admin, moderator) is never a word in a
+  profile but a signed statement for one account key. The app only shows
+  badges the core has checked; everything else is dropped.
+- Team badges must be signed by a public team key built into the app.
+  There is none yet: the project owner creates the team key on their own
+  computer, and only its public half is ever added to the code.
+- A community's id is derived from its founder's key, so nobody else can
+  claim to have founded it. Admins are signed by the founder; moderators
+  by the founder or by an admin who attaches their own admin badge (one
+  step only). Badges are shown everywhere; the tooltip always names the
+  community they come from.
+- Badges expire after at most 14 days (the server will renew them, M3).
+- Names that look official ("Trair Support", also with look-alike letters
+  such as `Tr4ir` or Cyrillic `а`) get a warning unless a team badge backs
+  them. Community names that look official are marked as well.
+- "Über mich" and who may see the profile are stored in the vault; the
+  visibility setting takes effect with the server.
+
+Known limits of badges:
+
+- A removed admin or moderator keeps the badge until it expires.
+- Look-alike detection covers common tricks, not every Unicode character.
+- Profile pictures are not supported yet: images from strangers need a
+  separate review of the image decoder first.
+
 ## Rules for this repository
 
 No private keys, passwords, recovery keys, tokens or user data are ever

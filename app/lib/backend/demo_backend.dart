@@ -75,12 +75,39 @@ class DemoBackend implements TrairBackend {
   static const _bernstein = Color(0xFFFFB547);
   static const _hell = Color(0xFFE8E4F7);
 
-  static const julian = Person(name: 'Julian', color: _violett, trust: 3, role: 'Gründer');
-  static const lena = Person(name: 'Lena', color: _blau, trust: 3, role: 'Admin');
-  static const malik = Person(name: 'Malik', color: _minze, trust: 2, role: 'Moderation');
-  static const aylin = Person(name: 'Aylin', color: _rosa, trust: 2);
+  static const _beta = 'Trair Beta';
+  static const _ownBadges = [ProfileBadge(BadgeKind.team), ProfileBadge(BadgeKind.founder, community: _beta)];
+
+  static const julian = Person(name: 'Julian', color: _violett, trust: 3, badges: _ownBadges, isSelf: true);
+  static const lena = Person(
+    name: 'Lena',
+    color: _blau,
+    trust: 3,
+    badges: [ProfileBadge(BadgeKind.admin, community: _beta)],
+    about: 'Kümmert sich um die Beta. Fragen gern in #allgemein.',
+  );
+  static const malik = Person(
+    name: 'Malik',
+    color: _minze,
+    trust: 2,
+    badges: [
+      ProfileBadge(BadgeKind.mod, community: _beta),
+      ProfileBadge(BadgeKind.founder, community: 'Lauftreff Nord'),
+    ],
+    about: 'Moderiert hier, läuft sonntags.',
+  );
+  static const aylin = Person(name: 'Aylin', color: _rosa, trust: 2, about: 'Design und Farben.');
   static const jonas = Person(name: 'Jonas', color: _bernstein, trust: 1);
   static const noah = Person(name: 'Noah', color: _hell, trust: 0);
+
+  /// Pretends to be official: the core marks the name, no badge backs it.
+  static const fake = Person(
+    name: 'Tr4ir Support',
+    color: _hell,
+    trust: 0,
+    nameWarning: true,
+    about: 'Schick mir dein Passwort, dann schalte ich dich frei.',
+  );
 
   final Map<String, List<ChatMessage>> _messages = {};
   final Map<String, List<CommunityMessage>> _channel = {};
@@ -136,7 +163,7 @@ class DemoBackend implements TrairBackend {
       RoleGroup('Gründer', [julian]),
       RoleGroup('Admin', [lena]),
       RoleGroup('Moderation', [malik]),
-      RoleGroup('Mitglieder', [aylin, jonas, noah]),
+      RoleGroup('Mitglieder', [aylin, jonas, noah, fake]),
     ],
   );
 
@@ -234,4 +261,7 @@ class DemoBackend implements TrairBackend {
   void sendToChannel(String channelId, String text) {
     _channel.putIfAbsent(channelId, () => []).add(CommunityMessage(author: julian, time: 'jetzt', text: text));
   }
+
+  @override
+  List<ProfileBadge> ownBadges() => _ownBadges;
 }

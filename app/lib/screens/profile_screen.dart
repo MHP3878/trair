@@ -7,7 +7,9 @@ import '../app_state.dart';
 import '../core/clipboard.dart';
 import '../core/vault.dart';
 import '../theme.dart';
+import '../widgets/badges.dart';
 import '../widgets/common.dart';
+import '../widgets/profile_popup.dart';
 import '../widgets/trair_icons.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -19,6 +21,7 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   late final TextEditingController _name;
+  late final TextEditingController _about;
   bool _askDelete = false;
   final _oldPw = TextEditingController();
   final _newPw1 = TextEditingController();
@@ -54,13 +57,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   void _nameInit() {
     if (_nameReady) return;
-    _name = TextEditingController(text: AppScope.of(context).userName);
+    final state = AppScope.of(context);
+    _name = TextEditingController(text: state.userName);
+    _about = TextEditingController(text: state.about);
     _nameReady = true;
   }
 
   @override
   void dispose() {
-    if (_nameReady) _name.dispose();
+    if (_nameReady) {
+      _name.dispose();
+      _about.dispose();
+    }
     for (final c in [_oldPw, _newPw1, _newPw2, _deletePw, _deviceName, _withdrawPw]) {
       c.dispose();
     }
@@ -191,11 +199,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
             alignment: Alignment.center,
             padding: const EdgeInsets.symmetric(horizontal: 20),
             decoration: BoxDecoration(color: TrairColors.field, borderRadius: BorderRadius.circular(20)),
-            child: GlowName(
-              name: state.userName.trim().isEmpty ? 'Dein Name' : state.userName.trim(),
-              color: state.glow,
-              strength: state.glowStrength,
-              size: 44,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                GlowName(
+                  name: state.userName.trim().isEmpty ? 'Dein Name' : state.userName.trim(),
+                  color: state.glow,
+                  strength: state.glowStrength,
+                  size: 44,
+                ),
+                if (state.backend.ownBadges().isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  BadgeRow(badges: state.backend.ownBadges(), size: 24, spacing: 7),
+                ],
+              ],
             ),
           ),
           const SizedBox(height: 18),
@@ -250,6 +267,46 @@ class _ProfileScreenState extends State<ProfileScreen> {
           Align(
             alignment: Alignment.centerLeft,
             child: GlowSwatches(selected: state.glow, onPick: state.setGlow),
+          ),
+          const SizedBox(height: 18),
+          FieldLabel('Über mich · ${_about.text.characters.length}/$maxAboutChars'),
+          Container(
+            padding: const EdgeInsets.fromLTRB(18, 12, 18, 12),
+            decoration: BoxDecoration(
+              color: TrairColors.field,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: TrairColors.border),
+            ),
+            child: Semantics(
+              label: 'Über mich',
+              textField: true,
+              child: TextField(
+                controller: _about,
+                minLines: 2,
+                maxLines: 4,
+                maxLength: maxAboutChars,
+                onChanged: (text) {
+                  state.setAbout(text);
+                  setState(() {});
+                },
+                style: const TextStyle(fontSize: 14.5, height: 1.45, color: TrairColors.text),
+                decoration: const InputDecoration.collapsed(
+                  hintText: 'Ein, zwei Sätze über dich',
+                  hintStyle: TextStyle(color: TrairColors.placeholder, fontSize: 14.5),
+                ).copyWith(counterText: ''),
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: PillButton(
+              label: 'So sehen dich andere',
+              icon: TrairIcons.eye,
+              kind: PillKind.ghost,
+              height: 40,
+              onPressed: () => showProfileCard(context, ProfileView.self(state)),
+            ),
           ),
         ],
       ),
@@ -753,6 +810,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _title('Privatsphäre'),
+          _row(
+            title: 'Profil sichtbar für',
+            hint: 'Wer Name, „Über mich“ und Abzeichen sieht. Gilt, sobald der Server läuft.',
+            trailing: Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final c in profileVisibilityChoices.entries)
+                  PillButton(
+                    label: c.value,
+                    kind: c.key == state.profileVisibility ? PillKind.primary : PillKind.ghost,
+                    height: 36,
+                    onPressed: () => state.setProfileVisibility(c.key),
+                  ),
+              ],
+            ),
+          ),
           for (var i = 0; i < items.length; i++)
             _row(
               title: items[i].$2,

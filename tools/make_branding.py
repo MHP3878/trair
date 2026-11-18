@@ -38,11 +38,14 @@ ICONS = {
     "chevron-down": 0xE06D,
     "chevron-left": 0xE06E,
     "copy": 0xE09E,
+    "crown": 0xE1D6,
     "ellipsis": 0xE0B6,
     "eye": 0xE0BA,
     "eye-off": 0xE0BB,
     "file-text": 0xE0CC,
     "flask-conical": 0xE0D5,
+    "gavel": 0xE0E0,
+    "info": 0xE0F9,
     "lock": 0xE10B,
     "monitor": 0xE11D,
     "monitor-smartphone": 0xE3A2,
@@ -55,6 +58,7 @@ ICONS = {
     "user": 0xE19F,
     "user-cog": 0xE342,
     "user-plus": 0xE1A2,
+    "x": 0xE1B2,
 }
 
 # Logo D "Zylinder" auf einem 256er Raster: weisse Scheibe mit T-Schlitz.

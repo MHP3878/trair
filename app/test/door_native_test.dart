@@ -46,6 +46,16 @@ void main() {
       expect((await vault.withdrawDevice(me.id, 'ein sehr langes passwort')).error, 'refused');
       expect(String.fromCharCodes(file.readAsBytesSync()).contains('Julians Laptop'), isFalse);
 
+      // Badges: the core lets nothing through that it cannot check.
+      final checked = await vault.verifyBadges('00' * 32, 'Tr4ir Support', [
+        {'claim': 'kaputt'},
+      ]);
+      expect(checked.ok, isTrue, reason: '${checked.raw}');
+      expect(checked.raw['badges'], isEmpty);
+      expect(checked.raw['refused'], 1);
+      expect(checked.raw['name_warning'], isTrue);
+      expect((await vault.verifyBadges('zz', 'Lena', [])).error, 'bad_request');
+
       expect((await vault.saveProfile({'name': 'Jule'})).ok, isTrue);
       expect((await vault.lock()).ok, isTrue);
       expect((await vault.saveProfile({})).error, 'locked');
