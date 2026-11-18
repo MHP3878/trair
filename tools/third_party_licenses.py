@@ -17,21 +17,21 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 TARGET = ROOT / "THIRD_PARTY_LICENSES.md"
 
 
-# The app uses no packages from pub.dev yet, so this part is written by
-# hand. Once the first pub.dev package arrives, it must be generated from
-# pubspec.lock like the Rust part.
+# Written by hand for now. The Dart packages from pub.dev get generated
+# from app/pubspec.lock as soon as the lock file is in the repository.
 FLUTTER = [
     "## Flutter / Dart (app/)",
     "",
     "| Component | License | Source |",
     "| --- | --- | --- |",
     "| Flutter SDK | BSD-3-Clause | https://github.com/flutter/flutter |",
+    "| material_ui (Flutter's Material library, publisher flutter.dev) | BSD-3-Clause | https://github.com/flutter/packages |",
     "| Material Icons font (bundled by Flutter) | Apache-2.0 | https://github.com/google/material-design-icons |",
     "| Geist and Geist Mono fonts (app/assets/fonts) | OFL-1.1 | https://github.com/vercel/geist-font |",
     "",
-    "No packages from pub.dev are used yet. The Dart packages that the Flutter SDK",
-    "pulls in carry their own licenses; Flutter writes all of their license texts",
-    "into the built app. The app shows them, together with the font license, under",
+    "The Dart packages that the Flutter SDK and material_ui pull in carry their own",
+    "licenses; Flutter writes all of their license texts into the built app. The app",
+    "shows them, together with the font license, under",
     "Einstellungen > Konto > Open-Source-Lizenzen.",
 ]
 

@@ -37,6 +37,11 @@ jobs:
       - name: Pakete holen
         id: deps
         run: flutter pub get
+      - name: Paketliste und Lizenzen anzeigen
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: |
+          cat pubspec.lock
+          python3 ../tools/dart_licenses.py --report
       # Each check runs even if an earlier one failed, so one run shows
       # every problem at once.
       - name: Analyse

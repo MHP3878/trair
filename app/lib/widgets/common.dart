@@ -3,7 +3,7 @@
 
 import 'dart:ui' show ImageFilter;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../app_state.dart';
 import '../theme.dart';
@@ -33,9 +33,7 @@ class Backdrop extends StatelessWidget {
       child: Container(
         width: w,
         height: h,
-        decoration: BoxDecoration(
-          gradient: RadialGradient(colors: [c, c.withAlpha(0)]),
-        ),
+        decoration: BoxDecoration(gradient: RadialGradient(colors: [c, c.withAlpha(0)])),
       ),
     );
   }
@@ -363,7 +361,11 @@ class SecurityCapsule extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(width: 7, height: 7, decoration: BoxDecoration(color: dot, shape: BoxShape.circle)),
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(color: dot, shape: BoxShape.circle),
+              ),
               const SizedBox(width: 8),
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 260),
@@ -513,10 +515,7 @@ class ProfileCard extends StatelessWidget {
                       width: 38,
                       height: 38,
                       alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: state.glow,
-                        shape: BoxShape.circle,
-                      ),
+                      decoration: BoxDecoration(color: state.glow, shape: BoxShape.circle),
                       child: Text(
                         initial,
                         style: const TextStyle(color: Color(0xFF0B0B12), fontWeight: FontWeight.w700),
@@ -580,13 +579,15 @@ class DemoBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Semantics(
+    return Semantics(
       label: 'Demo-Version, nicht verschlüsselt',
       container: true,
-      child: Material(
+      child: const Material(
         color: Color(0xFF15120C),
         child: DecoratedBox(
-          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: Color(0x40FFB547)))),
+          decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(color: Color(0x40FFB547))),
+          ),
           child: SizedBox(
             height: 30,
             child: Row(

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 The Trair contributors
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Colors of the Pro look (dark, frosted glass, one accent).
 class TrairColors {
@@ -66,9 +66,7 @@ ThemeData trairTheme() {
       thumbColor: TrairColors.accentPale,
       inactiveTrackColor: const Color(0x22FFFFFF),
     ),
-    checkboxTheme: CheckboxThemeData(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
-    ),
+    checkboxTheme: CheckboxThemeData(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5))),
     tooltipTheme: const TooltipThemeData(waitDuration: Duration(milliseconds: 600)),
   );
 }
@@ -90,11 +88,7 @@ class TrairText {
   static const body = TextStyle(fontSize: 14.5, height: 1.5, color: TrairColors.text);
   static const muted = TextStyle(fontSize: 13, height: 1.45, color: TrairColors.textMuted);
   static const small = TextStyle(fontSize: 12, color: TrairColors.textMuted);
-  static const label = TextStyle(
-    fontSize: 13,
-    fontWeight: FontWeight.w500,
-    color: TrairColors.textSoft,
-  );
+  static const label = TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: TrairColors.textSoft);
   static const mono = TextStyle(fontFamily: 'GeistMono', fontSize: 14, color: TrairColors.text);
 }
 

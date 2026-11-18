@@ -2,8 +2,8 @@
 // Copyright (C) 2026 The Trair contributors
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:material_ui/material_ui.dart';
 
 import 'app_state.dart';
 import 'backend/backend.dart';

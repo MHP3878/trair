@@ -7,11 +7,13 @@ version: 0.0.1+1
 environment:
   sdk: ^3.8.0
 
-# No packages from pub.dev yet: only the Flutter SDK itself. Fonts are
-# bundled (SIL OFL 1.1), so the app never loads anything from the internet.
+# Only the Flutter SDK and Flutter's own Material library (material_ui,
+# published by flutter.dev, BSD-3-Clause; it left the SDK in Flutter 3.50).
+# Fonts are bundled (SIL OFL 1.1), so the app loads nothing from the internet.
 dependencies:
   flutter:
     sdk: flutter
+  material_ui: ^1.11.0
 
 dev_dependencies:
   flutter_test:

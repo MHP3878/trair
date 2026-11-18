@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 The Trair contributors
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../app_state.dart';
 import '../theme.dart';
@@ -125,7 +125,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const SizedBox(height: 22),
           const Padding(
             padding: EdgeInsets.only(left: 12, bottom: 10),
-            child: Text('Einstellungen', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600, letterSpacing: -0.6)),
+            child: Text(
+              'Einstellungen',
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600, letterSpacing: -0.6),
+            ),
           ),
           for (final entry in _navIcons.entries)
             InkWell(
@@ -133,7 +136,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
               onTap: () {
                 final ctx = _keys[entry.key]?.currentContext;
                 if (ctx != null) {
-                  Scrollable.ensureVisible(ctx, duration: const Duration(milliseconds: 350), curve: Curves.easeOutCubic);
+                  Scrollable.ensureVisible(
+                    ctx,
+                    duration: const Duration(milliseconds: 350),
+                    curve: Curves.easeOutCubic,
+                  );
                 }
               },
               child: Padding(
@@ -235,7 +242,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           const SizedBox(height: 18),
           const FieldLabel('Leuchtfarbe'),
-          Align(alignment: Alignment.centerLeft, child: GlowSwatches(selected: state.glow, onPick: state.setGlow)),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: GlowSwatches(selected: state.glow, onPick: state.setGlow),
+          ),
         ],
       ),
     );
@@ -276,7 +286,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         const SizedBox(height: 8),
                         Text(
                           labels[i],
-                          style: TextStyle(fontSize: 11.5, color: i == level ? TrairColors.text : TrairColors.textMuted),
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: i == level ? TrairColors.text : TrairColors.textMuted,
+                          ),
                         ),
                       ],
                     ),
@@ -415,7 +428,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
             title: 'Automatisch sperren',
             hint: 'Nach 15 Minuten ohne Benutzung und wenn Windows gesperrt wird.',
             divider: false,
-            trailing: PillButton(label: 'Jetzt sperren', icon: Icons.lock_outline_rounded, height: 42, onPressed: state.lock),
+            trailing: PillButton(
+              label: 'Jetzt sperren',
+              icon: Icons.lock_outline_rounded,
+              height: 42,
+              onPressed: state.lock,
+            ),
           ),
         ],
       ),

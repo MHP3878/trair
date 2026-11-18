@@ -22,12 +22,7 @@ class AppState extends ChangeNotifier {
   bool strict = true;
 
   /// Privacy switches; all off by default (decision 10).
-  final Map<String, bool> privacy = {
-    'lese': false,
-    'tippt': false,
-    'online': false,
-    'vorschau': false,
-  };
+  final Map<String, bool> privacy = {'lese': false, 'tippt': false, 'online': false, 'vorschau': false};
 
   void go(TrairScreen next) {
     screen = next;

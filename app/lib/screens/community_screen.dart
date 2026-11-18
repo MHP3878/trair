@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 The Trair contributors
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../app_state.dart';
 import '../backend/backend.dart';
@@ -211,7 +211,10 @@ class _CommunityScreenState extends State<CommunityScreen> {
                           Text.rich(
                             TextSpan(
                               children: [
-                                const TextSpan(text: '# ', style: TextStyle(color: TrairColors.textMuted)),
+                                const TextSpan(
+                                  text: '# ',
+                                  style: TextStyle(color: TrairColors.textMuted),
+                                ),
                                 TextSpan(text: channel.name),
                               ],
                             ),
@@ -231,7 +234,12 @@ class _CommunityScreenState extends State<CommunityScreen> {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
-                          RoundIconButton(icon: Icons.search_rounded, tooltip: 'Im Kanal suchen', filled: false, onPressed: () {}),
+                          RoundIconButton(
+                            icon: Icons.search_rounded,
+                            tooltip: 'Im Kanal suchen',
+                            filled: false,
+                            onPressed: () {},
+                          ),
                         ],
                       ),
                     ),
@@ -254,9 +262,9 @@ class _CommunityScreenState extends State<CommunityScreen> {
                               child: Text(
                                 channel.open
                                     ? 'Dieser Kanal ist offen: Nachrichten liegen lesbar auf dem Server, damit Moderation '
-                                        'möglich ist. Schreib hier nichts Privates.'
+                                          'möglich ist. Schreib hier nichts Privates.'
                                     : 'Dieser Kanal ist geschlossen: Nur Mitglieder mit Schlüssel können mitlesen. '
-                                        'Auch Admins und der Server sehen den Inhalt nicht.',
+                                          'Auch Admins und der Server sehen den Inhalt nicht.',
                                 style: const TextStyle(fontSize: 13.5, height: 1.5, color: TrairColors.textSoft),
                               ),
                             ),
@@ -353,7 +361,10 @@ class _CommunityScreenState extends State<CommunityScreen> {
                     if (p.role.isNotEmpty)
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(color: const Color(0x0FFFFFFF), borderRadius: BorderRadius.circular(999)),
+                        decoration: BoxDecoration(
+                          color: const Color(0x0FFFFFFF),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
                         child: Text(p.role, style: const TextStyle(fontSize: 11, color: TrairColors.textSoft)),
                       ),
                     Text(m.time, style: const TextStyle(fontSize: 12, color: TrairColors.placeholder)),
@@ -401,7 +412,10 @@ class _CommunityScreenState extends State<CommunityScreen> {
                             message: 'Trust-Stufe ${p.trust} von 3',
                             child: Container(
                               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
-                              decoration: BoxDecoration(color: const Color(0x0AFFFFFF), borderRadius: BorderRadius.circular(999)),
+                              decoration: BoxDecoration(
+                                color: const Color(0x0AFFFFFF),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [

@@ -210,10 +210,11 @@ This file lists every third-party component and its license.
 | Component | License | Source |
 | --- | --- | --- |
 | Flutter SDK | BSD-3-Clause | https://github.com/flutter/flutter |
+| material_ui (Flutter's Material library, publisher flutter.dev) | BSD-3-Clause | https://github.com/flutter/packages |
 | Material Icons font (bundled by Flutter) | Apache-2.0 | https://github.com/google/material-design-icons |
 | Geist and Geist Mono fonts (app/assets/fonts) | OFL-1.1 | https://github.com/vercel/geist-font |
 
-No packages from pub.dev are used yet. The Dart packages that the Flutter SDK
-pulls in carry their own licenses; Flutter writes all of their license texts
-into the built app. The app shows them, together with the font license, under
+The Dart packages that the Flutter SDK and material_ui pull in carry their own
+licenses; Flutter writes all of their license texts into the built app. The app
+shows them, together with the font license, under
 Einstellungen > Konto > Open-Source-Lizenzen.

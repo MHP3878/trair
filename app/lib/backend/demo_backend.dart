@@ -152,13 +152,18 @@ class DemoBackend implements TrairBackend {
       CommunityMessage(
         author: lena,
         time: 'Mo 18:10',
-        text: '1. Respektvoll bleiben. 2. Kein Spam. 3. Sicherheitslücken bitte privat melden, nicht öffentlich posten.',
+        text:
+            '1. Respektvoll bleiben. 2. Kein Spam. 3. Sicherheitslücken bitte privat melden, nicht öffentlich posten.',
       ),
     ],
     'allgemein': [
       CommunityMessage(author: aylin, time: '15:02', text: 'Kann man die Leuchtfarbe pro Community ändern?'),
       CommunityMessage(author: lena, time: '15:04', text: 'Noch nicht, aber gute Idee. Kommt auf die Liste.'),
-      CommunityMessage(author: jonas, time: '15:06', text: 'Bei mir hat der Launcher beim ersten Start etwas gebraucht.'),
+      CommunityMessage(
+        author: jonas,
+        time: '15:06',
+        text: 'Bei mir hat der Launcher beim ersten Start etwas gebraucht.',
+      ),
       CommunityMessage(
         author: julian,
         time: '15:07',
@@ -172,9 +177,7 @@ class DemoBackend implements TrairBackend {
       CommunityMessage(author: noah, time: '11:15', text: 'Hallo zusammen, bin neu hier.'),
       CommunityMessage(author: aylin, time: '11:16', text: 'Willkommen, Noah!'),
     ],
-    'moderation': [
-      CommunityMessage(author: malik, time: '10:41', text: 'Eine Meldung aus #memes, schon erledigt.'),
-    ],
+    'moderation': [CommunityMessage(author: malik, time: '10:41', text: 'Eine Meldung aus #memes, schon erledigt.')],
   };
 
   @override

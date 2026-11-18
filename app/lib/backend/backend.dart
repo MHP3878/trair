@@ -57,13 +57,7 @@ class ChatSummary {
 enum MessageKind { system, incoming, outgoing }
 
 class ChatMessage {
-  const ChatMessage({
-    required this.kind,
-    required this.text,
-    this.time = '',
-    this.sender,
-    this.senderColor,
-  });
+  const ChatMessage({required this.kind, required this.text, this.time = '', this.sender, this.senderColor});
 
   final MessageKind kind;
   final String text;
@@ -92,13 +86,7 @@ class ChannelCategory {
 }
 
 class Channel {
-  const Channel({
-    required this.id,
-    required this.name,
-    required this.topic,
-    required this.open,
-    this.teamOnly = false,
-  });
+  const Channel({required this.id, required this.name, required this.topic, required this.open, this.teamOnly = false});
 
   final String id;
   final String name;

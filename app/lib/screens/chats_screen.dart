@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 The Trair contributors
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 
 import '../app_state.dart';
@@ -54,9 +54,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
     final chats = backend.chats();
     final chat = chats.firstWhere((c) => c.id == _active, orElse: () => chats.first);
     return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.keyK, control: true): _searchFocus.requestFocus,
-      },
+      bindings: {const SingleActivator(LogicalKeyboardKey.keyK, control: true): _searchFocus.requestFocus},
       child: Focus(
         focusNode: _screenFocus,
         child: Backdrop(
@@ -65,10 +63,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
             children: [
               SizedBox(width: 304, child: _sidebar(state, chats)),
               Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(0, 10, 10, 10),
-                  child: _conversation(state, chat),
-                ),
+                child: Padding(padding: const EdgeInsets.fromLTRB(0, 10, 10, 10), child: _conversation(state, chat)),
               ),
             ],
           ),
@@ -108,7 +103,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
             trailing: Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(color: const Color(0x0FFFFFFF), borderRadius: BorderRadius.circular(999)),
-              child: const Text('Strg K', style: TextStyle(fontFamily: 'GeistMono', fontSize: 11, color: TrairColors.textMuted)),
+              child: const Text(
+                'Strg K',
+                style: TextStyle(fontFamily: 'GeistMono', fontSize: 11, color: TrairColors.textMuted),
+              ),
             ),
           ),
           const SizedBox(height: 12),
@@ -173,7 +171,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
                         Avatar(initials: community.initials, color: TrairColors.accentPale, size: 36, square: true),
                         const SizedBox(width: 12),
                         Expanded(
-                          child: Text(community.name, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                          child: Text(
+                            community.name,
+                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                          ),
                         ),
                         Text('${community.memberCount} Mitglieder', style: TrairText.small),
                       ],
@@ -199,8 +200,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
     final prefix = last == null
         ? ''
         : last.kind == MessageKind.outgoing
-            ? 'Du: '
-            : (last.sender != null ? '${last.sender}: ' : '');
+        ? 'Du: '
+        : (last.sender != null ? '${last.sender}: ' : '');
     final preview = warn ? 'Sicherheitsnummer geändert' : (last == null ? '' : '$prefix${last.text}');
     final unread = active || _read.contains(c.id) ? 0 : c.unread;
     return Padding(
@@ -256,7 +257,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
                           if (unread > 0)
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                              decoration: BoxDecoration(color: TrairColors.accent, borderRadius: BorderRadius.circular(999)),
+                              decoration: BoxDecoration(
+                                color: TrairColors.accent,
+                                borderRadius: BorderRadius.circular(999),
+                              ),
                               child: Text(
                                 '$unread',
                                 style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white),
@@ -342,8 +346,18 @@ class _ChatsScreenState extends State<ChatsScreen> {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
-                          RoundIconButton(icon: Icons.search_rounded, tooltip: 'Im Chat suchen', filled: false, onPressed: () {}),
-                          RoundIconButton(icon: Icons.more_horiz_rounded, tooltip: 'Mehr', filled: false, onPressed: () {}),
+                          RoundIconButton(
+                            icon: Icons.search_rounded,
+                            tooltip: 'Im Chat suchen',
+                            filled: false,
+                            onPressed: () {},
+                          ),
+                          RoundIconButton(
+                            icon: Icons.more_horiz_rounded,
+                            tooltip: 'Mehr',
+                            filled: false,
+                            onPressed: () {},
+                          ),
                         ],
                       ),
                     ),
@@ -359,9 +373,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
               Expanded(
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(28, 8, 28, 110),
-                  children: [
-                    for (final m in messages) _bubble(m, chat),
-                  ],
+                  children: [for (final m in messages) _bubble(m, chat)],
                 ),
               ),
             ],
@@ -399,7 +411,9 @@ class _ChatsScreenState extends State<ChatsScreen> {
                               onSubmitted: (_) => send(),
                               style: const TextStyle(fontSize: 14.5, color: TrairColors.text),
                               decoration: InputDecoration.collapsed(
-                                hintText: blocked ? 'Blockiert: erst Sicherheitsnummer prüfen' : 'Nachricht an ${chat.name}',
+                                hintText: blocked
+                                    ? 'Blockiert: erst Sicherheitsnummer prüfen'
+                                    : 'Nachricht an ${chat.name}',
                                 hintStyle: const TextStyle(color: TrairColors.placeholder, fontSize: 14.5),
                               ),
                             ),
@@ -494,7 +508,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
               child: Text(
                 blocked
                     ? '${chat.name}s Sicherheitsnummer hat sich plötzlich geändert. Das passiert bei Trair nie von selbst. '
-                        'Senden ist blockiert, bis ihr die Nummer persönlich verglichen habt.'
+                          'Senden ist blockiert, bis ihr die Nummer persönlich verglichen habt.'
                     : '${chat.name}s Sicherheitsnummer hat sich geändert. Der strenge Modus ist aus, deshalb nur diese Warnung.',
                 style: const TextStyle(color: TrairColors.amberText, fontSize: 14, height: 1.5),
               ),
@@ -528,7 +542,9 @@ class _ChatsScreenState extends State<ChatsScreen> {
               children: [
                 const Icon(Icons.lock_outline_rounded, size: 12, color: TrairColors.accentLight),
                 const SizedBox(width: 8),
-                Flexible(child: Text(m.text, style: TrairText.small, textAlign: TextAlign.center)),
+                Flexible(
+                  child: Text(m.text, style: TrairText.small, textAlign: TextAlign.center),
+                ),
               ],
             ),
           ),
@@ -607,7 +623,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text('${m.time} · zugestellt', style: const TextStyle(fontSize: 11, color: TrairColors.placeholder)),
+                        Text(
+                          '${m.time} · zugestellt',
+                          style: const TextStyle(fontSize: 11, color: TrairColors.placeholder),
+                        ),
                         const SizedBox(width: 4),
                         const Icon(Icons.check_rounded, size: 12, color: TrairColors.placeholder),
                       ],
