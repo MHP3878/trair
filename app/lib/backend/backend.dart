@@ -28,6 +28,36 @@ abstract class TrairBackend {
   Community community();
   List<CommunityMessage> channelMessages(String channelId);
   void sendToChannel(String channelId, String text);
+
+  /// The badges of the user's own profile, already checked by the core.
+  List<ProfileBadge> ownBadges();
+}
+
+/// Kinds of badge, in display order (crates/trair-core/src/badges.rs).
+enum BadgeKind { team, founder, admin, mod }
+
+/// A badge the core has checked. Unchecked badges never reach the app.
+class ProfileBadge {
+  const ProfileBadge(this.kind, {this.community, this.communityWarning = false});
+
+  /// From an answer of the core's `verify_badges`. Unknown kinds give null.
+  static ProfileBadge? fromJson(Map<String, Object?> j) {
+    final kind = BadgeKind.values.where((k) => k.name == j['kind']).firstOrNull;
+    if (kind == null) return null;
+    return ProfileBadge(
+      kind,
+      community: j['community'] as String?,
+      communityWarning: j['community_warning'] == true,
+    );
+  }
+
+  final BadgeKind kind;
+
+  /// The community for founder, admin and moderator badges.
+  final String? community;
+
+  /// The community name looks official but is not.
+  final bool communityWarning;
 }
 
 enum ChatKind { direct, group }
@@ -105,14 +135,34 @@ class RoleGroup {
 }
 
 class Person {
-  const Person({required this.name, required this.color, required this.trust, this.role = ''});
+  const Person({
+    required this.name,
+    required this.color,
+    required this.trust,
+    this.badges = const [],
+    this.about = '',
+    this.nameWarning = false,
+    this.isSelf = false,
+  });
 
   final String name;
   final Color color;
 
   /// Trust level 0..3.
   final int trust;
-  final String role;
+
+  /// Checked badges, shown everywhere.
+  final List<ProfileBadge> badges;
+
+  /// "Über mich", at most 190 characters.
+  final String about;
+
+  /// The name looks official without a badge that backs it.
+  final bool nameWarning;
+
+  /// This is the user. Name, colour and "Über mich" then come from the
+  /// user's own profile, not from here.
+  final bool isSelf;
 }
 
 class CommunityMessage {

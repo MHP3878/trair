@@ -9,7 +9,10 @@ import 'package:material_ui/material_ui.dart';
 import 'package:trair_app/backend/demo_backend.dart';
 import 'package:trair_app/core/vault.dart';
 import 'package:trair_app/main.dart';
+import 'package:trair_app/backend/backend.dart';
+import 'package:trair_app/widgets/badges.dart';
 import 'package:trair_app/widgets/common.dart';
+import 'package:trair_app/widgets/profile_popup.dart';
 
 import 'support/fake_door.dart';
 
@@ -420,6 +423,78 @@ void main() {
       expect(find.text('1 Gerät'), findsOneWidget);
       expect(door.devices, hasLength(1));
       expect(door.devices.single['this'], isTrue);
+    });
+  });
+
+  group('Profile und Abzeichen', () {
+    Finder inPopup(Finder f) => find.descendant(of: find.byType(ProfilePopup), matching: f);
+
+    Future<void> openCommunity(WidgetTester tester) async {
+      await _start(tester);
+      await _unlock(tester);
+      await tester.tap(find.text('Trair Beta'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('members show their badges and open a profile card', (tester) async {
+      await openCommunity(tester);
+      // The member list is the last place a name appears.
+      await tester.tap(find.text('Lena').last);
+      await tester.pumpAndSettle();
+      expect(inPopup(find.text('Kümmert sich um die Beta. Fragen gern in #allgemein.')), findsOneWidget);
+      final badges = tester.widgetList<TrairBadge>(inPopup(find.byType(TrairBadge))).toList();
+      expect(badges.map((b) => b.badge.kind), [BadgeKind.admin]);
+
+      // The tooltip says where the role comes from.
+      await tester.longPress(inPopup(find.byType(TrairBadge)));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Admin in „Trair Beta“', findRichText: true), findsOneWidget);
+      await tester.pump(const Duration(seconds: 2));
+      await tester.tap(find.byTooltip('Schließen'));
+      await tester.pumpAndSettle();
+      expect(find.byType(ProfilePopup), findsNothing);
+    });
+
+    testWidgets('a name that pretends to be official gets a warning', (tester) async {
+      await openCommunity(tester);
+      expect(find.byTooltip('Name wirkt offiziell, ist aber nicht vom Trair-Team'), findsWidgets);
+      await tester.tap(find.text('Tr4ir Support'));
+      await tester.pumpAndSettle();
+      expect(inPopup(find.textContaining('Vorsicht: Der Name wirkt offiziell')), findsOneWidget);
+      expect(inPopup(find.byType(TrairBadge)), findsNothing);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.byType(ProfilePopup), findsNothing);
+    });
+
+    testWidgets('own about text and visibility are stored and shown to others', (tester) async {
+      final door = await _start(tester);
+      await _unlock(tester);
+      await _openSettings(tester);
+      final about = _field('Ein, zwei Sätze über dich');
+      await tester.ensureVisible(about);
+      await tester.enterText(about, 'Ich baue Trair.');
+      await tester.ensureVisible(find.text('Nur Kontakte'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Nur Kontakte'));
+      await tester.pump(const Duration(seconds: 1));
+      expect(door.profile['about'], 'Ich baue Trair.');
+      expect(door.profile['profileVisibility'], 'kontakte');
+
+      await tester.ensureVisible(find.text('So sehen dich andere'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('So sehen dich andere'));
+      await tester.pumpAndSettle();
+      expect(inPopup(find.text('Ich baue Trair.')), findsOneWidget);
+      expect(inPopup(find.text('Sichtbar für: Nur Kontakte')), findsOneWidget);
+      expect(inPopup(find.byType(TrairBadge)), findsNWidgets(2));
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+
+      await _ctrl(tester, LogicalKeyboardKey.keyL);
+      await _unlock(tester);
+      await _openSettings(tester);
+      expect(find.text('Ich baue Trair.'), findsOneWidget, reason: 'restored from the vault');
     });
   });
 }

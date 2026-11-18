@@ -18,10 +18,16 @@
 //! | `protect_window`  | `on`                   | `windows` (how many were set)    |
 //! | `rename_device`   | `id`, `label`          | `devices`                        |
 //! | `withdraw_device` | `id`, `password`       | `devices`                        |
+//! | `verify_badges`   | `holder`, `name`, `badges` | `badges`, `refused`, `name_warning` |
 //!
 //! `device` is this device's id; `devices` lists the account's devices as
 //! `{id, label, fingerprint, this}` (label may be null). `upgraded` is true
 //! once, when a vault from Paket 1 got its device key and was stored again.
+//!
+//! `verify_badges` checks the badges of a profile (`holder`: the account
+//! key in hex, `name`: the display name, `badges`: signed badges as JSON)
+//! and returns only the valid ones as `{kind, community, community_id,
+//! community_warning, expires}`. It needs no unlocked vault.
 //!
 //! Error codes: `bad_request`, `not_initialized`, `exists`, `no_vault`,
 //! `locked`, `wrong_password` (with `wait` in seconds), `wait` (with
@@ -30,10 +36,11 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 use serde_json::{Value, json};
+use trair_core::badges::{self, Badge};
 use trair_core::vault::{Vault, VaultError};
 use zeroize::Zeroizing;
 
@@ -85,6 +92,11 @@ enum Request {
     WithdrawDevice {
         id: String,
         password: Zeroizing<String>,
+    },
+    VerifyBadges {
+        holder: String,
+        name: String,
+        badges: Vec<Value>,
     },
 }
 
@@ -147,6 +159,11 @@ fn run(state: &mut State, req: Request) -> Value {
         },
         Request::RenameDevice { id, label } => rename_device(state, &id, &label),
         Request::WithdrawDevice { id, password } => withdraw_device(state, &id, &password),
+        Request::VerifyBadges {
+            holder,
+            name,
+            badges,
+        } => verify_badges(&holder, &name, badges),
     }
 }
 
@@ -305,6 +322,32 @@ fn withdraw_device(state: &mut State, id: &str, password: &str) -> Value {
         return vault_error(e);
     }
     with_devices(seal_and_write(vault, &path), vault)
+}
+
+fn verify_badges(holder: &str, name: &str, badges: Vec<Value>) -> Value {
+    let Ok(holder) = hex::decode(holder) else {
+        return fail("bad_request");
+    };
+    if holder.len() != 32 {
+        return fail("bad_request");
+    }
+    // Each badge on its own: one broken badge does not hide the others.
+    let total = badges.len();
+    let parsed: Vec<Badge> = badges
+        .into_iter()
+        .filter_map(|b| serde_json::from_value(b).ok())
+        .collect();
+    let unreadable = total - parsed.len();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let (shown, refused) = badges::verify_all(&parsed, &holder, now, badges::TEAM_KEYS);
+    json!({
+        "ok": true,
+        "name_warning": badges::name_needs_warning(name, &shown),
+        "badges": shown,
+        "refused": refused + unreadable,
+    })
 }
 
 fn delete_account(state: &mut State, password: &str) -> Value {

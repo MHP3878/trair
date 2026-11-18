@@ -87,6 +87,11 @@ class TrairVault {
   Future<CoreAnswer> withdrawDevice(String id, String password) =>
       _call({'op': 'withdraw_device', 'id': id, 'password': password});
 
+  /// Check the badges of a profile in the core. Only valid ones come back
+  /// (`badges`), plus `refused` and `name_warning`. Works while locked.
+  Future<CoreAnswer> verifyBadges(String holderKeyHex, String name, List<Object?> badges) =>
+      _call({'op': 'verify_badges', 'holder': holderKeyHex, 'name': name, 'badges': badges});
+
   /// Hide the window from screenshots. Returns false where unsupported.
   Future<bool> protectWindow(bool on) async => (await _call({'op': 'protect_window', 'on': on})).ok;
 

@@ -16,11 +16,14 @@ abstract final class TrairIcons {
   static const chevronDown = IconData(0xE06D, fontFamily: _font);
   static const chevronLeft = IconData(0xE06E, fontFamily: _font);
   static const copy = IconData(0xE09E, fontFamily: _font);
+  static const crown = IconData(0xE1D6, fontFamily: _font);
   static const ellipsis = IconData(0xE0B6, fontFamily: _font);
   static const eye = IconData(0xE0BA, fontFamily: _font);
   static const eyeOff = IconData(0xE0BB, fontFamily: _font);
   static const fileText = IconData(0xE0CC, fontFamily: _font);
   static const flaskConical = IconData(0xE0D5, fontFamily: _font);
+  static const gavel = IconData(0xE0E0, fontFamily: _font);
+  static const info = IconData(0xE0F9, fontFamily: _font);
   static const lock = IconData(0xE10B, fontFamily: _font);
   static const monitor = IconData(0xE11D, fontFamily: _font);
   static const monitorSmartphone = IconData(0xE3A2, fontFamily: _font);
@@ -33,4 +36,5 @@ abstract final class TrairIcons {
   static const user = IconData(0xE19F, fontFamily: _font);
   static const userCog = IconData(0xE342, fontFamily: _font);
   static const userPlus = IconData(0xE1A2, fontFamily: _font);
+  static const x = IconData(0xE1B2, fontFamily: _font);
 }
