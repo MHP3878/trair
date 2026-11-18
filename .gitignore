@@ -3,6 +3,7 @@
 /target/
 **/build/
 .dart_tool/
+__pycache__/
 
 # Geheimnisse und lokale Einstellungen: niemals ins Repository
 .env
