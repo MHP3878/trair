@@ -202,7 +202,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
         : last.kind == MessageKind.outgoing
         ? 'Du: '
         : (last.sender != null ? '${last.sender}: ' : '');
-    final preview = warn ? 'Sicherheitsnummer geändert' : (last == null ? '' : '$prefix${last.text}');
+    final preview = warn ? 'Neue Sicherheitsnummer' : (last == null ? '' : '$prefix${last.text}');
     final unread = active || _read.contains(c.id) ? 0 : c.unread;
     return Padding(
       padding: const EdgeInsets.only(bottom: 2),
