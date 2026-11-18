@@ -8,7 +8,18 @@ all-features = true
 version = 2
 # Jede bekannte Schwachstelle laesst CI fehlschlagen. Ausnahmen nur mit
 # schriftlicher Begruendung hier und im Planungsdokument.
-ignore = []
+ignore = [
+    # crypto-bigint 0.5.5 (ueber elliptic-curve) wird nur fuer die NIST-Kurven
+    # P-256/P-384/K-256 benutzt. Trair verwendet ausschliesslich X25519 und
+    # Ed25519, und der Kern lehnt Schluesselpakete mit anderer Cipher-Suite ab
+    # (Test other_cipher_suites_are_refused). Erneut pruefen, sobald OpenMLS
+    # eine Version ohne crypto-bigint 0.5 anbietet.
+    { id = "RUSTSEC-2026-0387", reason = "nur NIST-Kurven betroffen, Trair nutzt sie nicht" },
+    # proc-macro-error2 ist ein Hilfsmakro, das nur beim Bauen laeuft
+    # (hax-lib-macros ueber libcrux). Kein Code davon landet im Programm.
+    # "Nicht mehr gepflegt" ist keine Schwachstelle.
+    { id = "RUSTSEC-2026-0173", reason = "nur Bauzeit-Makro, keine Schwachstelle" },
+]
 
 [licenses]
 version = 2

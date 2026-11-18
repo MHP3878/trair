@@ -4,7 +4,7 @@
 
 Trair wird ein Messenger, der sich so einfach bedienen lässt wie WhatsApp oder Discord, bei dem Sicherheit und Privatsphäre aber an erster Stelle stehen. Private Nachrichten sind Ende-zu-Ende-verschlüsselt mit MLS (RFC 9420). Der Server stellt nur zu und kann private Inhalte nicht lesen.
 
-> **Status: Vorbereitung (Meilenstein M0).** Trair ist noch nicht benutzbar. Bitte nichts davon für echte Kommunikation verwenden.
+> **Status: Krypto-Kern (Meilenstein M1).** Trair ist noch nicht benutzbar. Bitte nichts davon für echte Kommunikation verwenden.
 
 ## Grundsätze
 
@@ -17,7 +17,7 @@ Trair wird ein Messenger, der sich so einfach bedienen lässt wie WhatsApp oder 
 
 | Ordner | Inhalt |
 | --- | --- |
-| `crates/trair-core` | Rust-Kern der App: Schlüssel, MLS, lokale Speicherung (ab M1) |
+| `crates/trair-core` | Rust-Kern der App: Konten, Geräte-Zertifikate, MLS-Gruppen, strenger Modus. Die Angriffstests liegen in `tests/angriffe.rs` |
 | `crates/trair-server` | Rust-Server: Konten, Zustellung, Communities (ab M3) |
 | `tools/` | Prüfskripte für CI: Lizenzliste, Datei-Kopfzeilen, DCO |
 | `.github/workflows/` | automatische Prüfungen bei jedem Push |
@@ -26,7 +26,7 @@ Die Flutter-App kommt mit Meilenstein M5 dazu.
 
 ## Prüfungen
 
-Bei jedem Push laufen automatisch: Formatierung, Clippy, Tests, Lizenz- und Schwachstellencheck (`cargo-deny`), Geheimnis-Scanner (`detect-secrets`), aktuelle Drittanbieter-Lizenzliste, Lizenz-Kopfzeilen und DCO-Unterschriften.
+Bei jedem Push laufen automatisch: Formatierung, Clippy, Tests (darunter die Angriffstests aus dem Prototyp), Lizenz- und Schwachstellencheck (`cargo-deny`), Geheimnis-Scanner (`detect-secrets`), aktuelle Drittanbieter-Lizenzliste, Lizenz-Kopfzeilen, DCO-Unterschriften und die statische Sicherheitsanalyse CodeQL.
 
 Lokal ausführen:
 
