@@ -73,11 +73,12 @@ fn t02_wrong_password_opens_nothing() {
         format!("{} ", *PW), // one character more
         secret(200),         // long
     ];
-    for pw in &wrong {
+    // On failure name the case, never the password itself.
+    for (case, pw) in wrong.iter().enumerate() {
         assert_eq!(
             open(&file, pw).unwrap_err(),
             VaultError::WrongPassword,
-            "{pw:?}"
+            "wrong password case {case}"
         );
     }
 }
