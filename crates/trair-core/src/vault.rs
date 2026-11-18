@@ -344,10 +344,9 @@ impl Header {
             t: u32_at(13),
             p: u32_at(17),
         };
-        let mut salt = [0u8; SALT_LEN];
-        salt.copy_from_slice(&file[21..21 + SALT_LEN]);
-        let mut nonce = [0u8; NONCE_LEN];
-        nonce.copy_from_slice(&file[21 + SALT_LEN..HEADER_LEN]);
+        let broken = |_| VaultError::Damaged("header".into());
+        let salt: [u8; SALT_LEN] = file[21..21 + SALT_LEN].try_into().map_err(broken)?;
+        let nonce: [u8; NONCE_LEN] = file[21 + SALT_LEN..HEADER_LEN].try_into().map_err(broken)?;
         Ok(Header {
             params,
             salt,
