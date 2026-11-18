@@ -277,7 +277,7 @@ pub fn poll(net: &mut Net, dev: &mut Device) -> Vec<Result<Event, CoreError>> {
 pub fn poll_ok(net: &mut Net, dev: &mut Device) -> Vec<Event> {
     poll(net, dev)
         .into_iter()
-        .map(|r| r.unwrap_or_else(|e| panic!("{} could not process a message: {e}", dev.id())))
+        .map(|r| r.unwrap_or_else(|e| panic!("a device could not process a message: {e}")))
         .collect()
 }
 
