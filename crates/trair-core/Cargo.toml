@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 [package]
 name = "trair-core"
-description = "Trair core: keys, MLS and local storage (from milestone M1)"
+description = "Trair core: accounts, devices, MLS groups and the strict security policy"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,3 +13,14 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+# MLS (RFC 9420). MIT licensed. Exact versions: crypto updates are
+# reviewed by hand, never pulled in silently.
+openmls = "=0.9.2"
+openmls_basic_credential = "=0.6.0"
+openmls_rust_crypto = "=0.6.0"
+openmls_traits = "=0.6.0"
+hex = "0.4.3"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+thiserror = "2.0.21"

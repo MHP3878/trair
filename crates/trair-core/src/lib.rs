@@ -1,11 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 The Trair contributors
 
-//! Trair core.
+//! Trair core: accounts, devices, MLS groups and the strict policy.
 //!
-//! Milestone M0 only provides the project skeleton. The MLS wrapper, the
-//! strict security policy and the regression tests from the prototype
-//! follow in milestone M1.
+//! Everything secret lives here and never in the app layer. The server is
+//! treated as untrusted: it delivers bytes, but who is in a group and who
+//! sent a message is decided only by MLS signatures and by device
+//! certificates signed with the account key.
+
+pub mod account;
+pub mod error;
+pub mod keypackages;
+pub mod mls;
+pub mod policy;
+
+pub use account::{Account, DeviceCertificate, Fingerprint};
+pub use error::{CoreError, Result};
+pub use mls::{Device, Event, KeyPackageOffer, Member, Outgoing};
+pub use policy::{Policy, Trust};
 
 /// Version of this crate, as set in the workspace manifest.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
