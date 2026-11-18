@@ -33,10 +33,12 @@ use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use openmls_basic_credential::SignatureKeyPair;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use thiserror::Error;
 use zeroize::Zeroizing;
 
 use crate::account::Account;
+use crate::devices::{DeviceIdentity, SignedDeviceList, validate_label};
 
 /// First bytes of every vault file.
 pub const MAGIC: &[u8; 8] = b"TRAIRV1\0";
@@ -50,7 +52,11 @@ const SALT_LEN: usize = 16;
 const NONCE_LEN: usize = 24;
 const HEADER_LEN: usize = 8 + 1 + 12 + SALT_LEN + NONCE_LEN;
 const TAG_LEN: usize = 16;
-const PAYLOAD_VERSION: u32 = 1;
+/// Content version. 1 = Paket 1 (account only), 2 = with this device's
+/// key and the signed device list (M2). Version 1 is upgraded on opening.
+const PAYLOAD_VERSION: u32 = 2;
+/// Name this device gets until the person renames it.
+pub const DEFAULT_LABEL: &str = "Dieser PC";
 
 /// Errors of the vault. The app shows one text per kind; none of them
 /// contains secret data.
@@ -141,12 +147,16 @@ impl Limits {
 }
 
 /// The decrypted content. Only lives in memory while Trair is unlocked;
-/// the key pair wipes its private half when dropped.
+/// the key pairs wipe their private halves when dropped.
 #[derive(Serialize)]
 struct ContentRef<'a> {
     v: u32,
     user: &'a str,
     account: &'a SignatureKeyPair,
+    device_id: &'a str,
+    device: &'a SignatureKeyPair,
+    list: &'a SignedDeviceList,
+    labels: &'a BTreeMap<String, String>,
     profile: &'a Value,
 }
 
@@ -155,7 +165,26 @@ struct Content {
     v: u32,
     user: String,
     account: SignatureKeyPair,
+    // Missing in version 1.
+    device_id: Option<String>,
+    device: Option<SignatureKeyPair>,
+    list: Option<SignedDeviceList>,
+    #[serde(default)]
+    labels: BTreeMap<String, String>,
     profile: Value,
+}
+
+/// What a new device receives when it is paired: everything to build its
+/// own vault (see [`crate::pairing`]).
+pub struct JoinedAccount {
+    /// The account, with its private key.
+    pub account: Account,
+    /// The new device's own identity.
+    pub device: DeviceIdentity,
+    /// The device list that includes the new device.
+    pub list: SignedDeviceList,
+    /// The profile of the account (name, colours, settings).
+    pub profile: Value,
 }
 
 /// An unlocked vault. Dropping it wipes the key from memory.
@@ -164,7 +193,11 @@ pub struct Vault {
     salt: [u8; SALT_LEN],
     key: Zeroizing<[u8; 32]>,
     account: Account,
+    device: DeviceIdentity,
+    list: SignedDeviceList,
+    labels: BTreeMap<String, String>,
     profile: Value,
+    migrated: bool,
 }
 
 impl std::fmt::Debug for Vault {
@@ -193,14 +226,46 @@ impl Vault {
         check_profile(&profile)?;
         let user = format!("local-{}", hex::encode(random::<6>()?));
         let account = Account::generate(&user).map_err(internal)?;
+        let device = DeviceIdentity::generate().map_err(internal)?;
+        let list = SignedDeviceList::first(&account, device.entry()).map_err(internal)?;
+        let joined = JoinedAccount {
+            account,
+            device,
+            list,
+            profile,
+        };
+        Self::create_joined_with(password, joined, params)
+    }
+
+    /// Build the vault of a newly paired device, using
+    /// [`KdfParams::DEFAULT`].
+    pub fn create_joined(password: &str, joined: JoinedAccount) -> VaultResult<(Vault, Vec<u8>)> {
+        Self::create_joined_with(password, joined, KdfParams::DEFAULT)
+    }
+
+    /// Like [`Vault::create_joined`] with other Argon2id settings. For tests.
+    pub fn create_joined_with(
+        password: &str,
+        joined: JoinedAccount,
+        params: KdfParams,
+    ) -> VaultResult<(Vault, Vec<u8>)> {
+        check_password(password)?;
+        check_profile(&joined.profile)?;
+        check_own_device(&joined.account, &joined.device, &joined.list)?;
         let salt = random::<SALT_LEN>()?;
         let key = derive(password, &salt, params)?;
+        let mut labels = BTreeMap::new();
+        labels.insert(joined.device.id.clone(), DEFAULT_LABEL.to_string());
         let vault = Vault {
             params,
             salt,
             key,
-            account,
-            profile,
+            account: joined.account,
+            device: joined.device,
+            list: joined.list,
+            labels,
+            profile: joined.profile,
+            migrated: false,
         };
         let file = vault.seal()?;
         Ok((vault, file))
@@ -230,20 +295,38 @@ impl Vault {
         );
         let content: Content = serde_json::from_slice(&plain)
             .map_err(|_| VaultError::Damaged("content is not readable".into()))?;
-        if content.v != PAYLOAD_VERSION {
-            return Err(VaultError::Damaged(format!(
-                "unknown content version {}",
-                content.v
-            )));
-        }
         let account = Account::from_keys(&content.user, content.account)
             .map_err(|_| VaultError::Damaged("account keys do not belong together".into()))?;
+        let mut labels = content.labels;
+        let (device, list, migrated) =
+            match (content.v, content.device_id, content.device, content.list) {
+                // Paket 1: the account had no device key yet. Give it one now;
+                // the caller stores the upgraded vault (see `migrated`).
+                (1, None, None, None) => {
+                    let device = DeviceIdentity::generate().map_err(internal)?;
+                    let list =
+                        SignedDeviceList::first(&account, device.entry()).map_err(internal)?;
+                    labels.insert(device.id.clone(), DEFAULT_LABEL.to_string());
+                    (device, list, true)
+                }
+                (PAYLOAD_VERSION, Some(id), Some(keys), Some(list)) => {
+                    (DeviceIdentity { id, keys }, list, false)
+                }
+                (v, ..) => {
+                    return Err(VaultError::Damaged(format!("unknown content version {v}")));
+                }
+            };
+        check_own_device(&account, &device, &list)?;
         Ok(Vault {
             params: header.params,
             salt: header.salt,
             key,
             account,
+            device,
+            list,
+            labels,
             profile: content.profile,
+            migrated,
         })
     }
 
@@ -253,6 +336,10 @@ impl Vault {
             v: PAYLOAD_VERSION,
             user: self.account.user(),
             account: self.account.keys(),
+            device_id: &self.device.id,
+            device: &self.device.keys,
+            list: &self.list,
+            labels: &self.labels,
             profile: &self.profile,
         };
         let plain = Zeroizing::new(serde_json::to_vec(&content).map_err(internal)?);
@@ -287,6 +374,65 @@ impl Vault {
     /// The stored profile (display name, colours, settings).
     pub fn profile(&self) -> &Value {
         &self.profile
+    }
+
+    /// This device: its id and signing key.
+    pub fn device(&self) -> &DeviceIdentity {
+        &self.device
+    }
+
+    /// The account's current, signed device list.
+    pub fn device_list(&self) -> &SignedDeviceList {
+        &self.list
+    }
+
+    /// Names people gave to devices, by device id. Only stored here.
+    pub fn labels(&self) -> &BTreeMap<String, String> {
+        &self.labels
+    }
+
+    /// True if this vault came from Paket 1 and was upgraded while
+    /// opening. Store it with [`Vault::seal`] right away.
+    pub fn migrated(&self) -> bool {
+        self.migrated
+    }
+
+    /// Give a device a name. Call [`Vault::seal`] afterwards.
+    pub fn set_label(&mut self, device_id: &str, label: &str) -> VaultResult<()> {
+        validate_label(label).map_err(|_| VaultError::Refused("device name".into()))?;
+        if !self.list.list.contains(device_id) {
+            return Err(VaultError::Refused("unknown device".into()));
+        }
+        self.labels.insert(device_id.to_string(), label.to_string());
+        Ok(())
+    }
+
+    /// Replace the device list with a newer one signed by this account
+    /// (for example after pairing). This device must still be on it.
+    pub fn set_device_list(&mut self, list: SignedDeviceList) -> VaultResult<()> {
+        list.verify(self.account.public_key(), Some(self.list.list.seq))
+            .map_err(|e| VaultError::Refused(format!("{e}")))?;
+        check_own_device(&self.account, &self.device, &list)?;
+        self.list = list;
+        Ok(())
+    }
+
+    /// Withdraw another device of this account. It is refused everywhere
+    /// from now on. This device cannot withdraw itself. Call
+    /// [`Vault::seal`] afterwards.
+    pub fn withdraw_device(&mut self, device_id: &str) -> VaultResult<()> {
+        if device_id == self.device.id {
+            return Err(VaultError::Refused(
+                "this device cannot withdraw itself".into(),
+            ));
+        }
+        let list = self
+            .list
+            .without_device(&self.account, device_id)
+            .map_err(|e| VaultError::Refused(format!("{e}")))?;
+        self.labels.remove(device_id);
+        self.list = list;
+        Ok(())
     }
 
     /// Replace the profile. Call [`Vault::seal`] afterwards to store it.
@@ -365,6 +511,24 @@ impl Header {
         h.extend_from_slice(&self.nonce);
         h
     }
+}
+
+/// The list must be signed by the account and contain this device with
+/// exactly its key.
+fn check_own_device(
+    account: &Account,
+    device: &DeviceIdentity,
+    list: &SignedDeviceList,
+) -> VaultResult<()> {
+    let verified = list
+        .verify(account.public_key(), None)
+        .map_err(|_| VaultError::Damaged("device list".into()))?;
+    if verified.user != account.user() || !verified.devices.contains(&device.entry()) {
+        return Err(VaultError::Damaged(
+            "this device is not on the device list".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn check_password(password: &str) -> VaultResult<()> {

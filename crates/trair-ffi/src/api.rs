@@ -9,13 +9,19 @@
 //! |-------------------|------------------------|----------------------------------|
 //! | `init`            | `dir`                  | `exists`, `unlocked`             |
 //! | `status`          |                        | `exists`, `unlocked`             |
-//! | `create`          | `password`, `profile`  | `fingerprint`, `profile`         |
-//! | `unlock`          | `password`             | `fingerprint`, `profile`         |
+//! | `create`          | `password`, `profile`  | `fingerprint`, `profile`, `device`, `devices` |
+//! | `unlock`          | `password`             | same as `create`, plus `upgraded` |
 //! | `lock`            |                        |                                  |
 //! | `save_profile`    | `profile`              |                                  |
 //! | `change_password` | `old`, `new`           |                                  |
 //! | `delete_account`  | `password`             |                                  |
 //! | `protect_window`  | `on`                   | `windows` (how many were set)    |
+//! | `rename_device`   | `id`, `label`          | `devices`                        |
+//! | `withdraw_device` | `id`, `password`       | `devices`                        |
+//!
+//! `device` is this device's id; `devices` lists the account's devices as
+//! `{id, label, fingerprint, this}` (label may be null). `upgraded` is true
+//! once, when a vault from Paket 1 got its device key and was stored again.
 //!
 //! Error codes: `bad_request`, `not_initialized`, `exists`, `no_vault`,
 //! `locked`, `wrong_password` (with `wait` in seconds), `wait` (with
@@ -71,6 +77,14 @@ enum Request {
     },
     ProtectWindow {
         on: bool,
+    },
+    RenameDevice {
+        id: String,
+        label: String,
+    },
+    WithdrawDevice {
+        id: String,
+        password: Zeroizing<String>,
     },
 }
 
@@ -131,6 +145,8 @@ fn run(state: &mut State, req: Request) -> Value {
             Some(n) => json!({"ok": true, "windows": n}),
             None => fail("unsupported"),
         },
+        Request::RenameDevice { id, label } => rename_device(state, &id, &label),
+        Request::WithdrawDevice { id, password } => withdraw_device(state, &id, &password),
     }
 }
 
@@ -197,7 +213,19 @@ fn unlock(state: &mut State, password: &str) -> Value {
     };
     match Vault::open(&file, password) {
         Ok(vault) => {
-            let answer = unlocked_answer(&vault);
+            // A vault from Paket 1 got its device key while opening. Store it
+            // right away, or the next unlock would make a different device.
+            if vault.migrated() {
+                let stored = vault
+                    .seal()
+                    .map_err(|_| ())
+                    .and_then(|f| write_vault(&path, &f));
+                if stored.is_err() {
+                    return fail("io");
+                }
+            }
+            let mut answer = unlocked_answer(&vault);
+            answer["upgraded"] = json!(vault.migrated());
             state.vault = Some(vault);
             state.failures = 0;
             state.blocked_until = None;
@@ -244,6 +272,39 @@ fn change_password(state: &mut State, old: &str, new: &str) -> Value {
         return vault_error(e);
     }
     seal_and_write(vault, &path)
+}
+
+fn rename_device(state: &mut State, id: &str, label: &str) -> Value {
+    let Some(path) = vault_path(state) else {
+        return fail("not_initialized");
+    };
+    let Some(vault) = state.vault.as_mut() else {
+        return fail("locked");
+    };
+    if let Err(e) = vault.set_label(id, label) {
+        return vault_error(e);
+    }
+    with_devices(seal_and_write(vault, &path), vault)
+}
+
+fn withdraw_device(state: &mut State, id: &str, password: &str) -> Value {
+    let Some(path) = vault_path(state) else {
+        return fail("not_initialized");
+    };
+    if state.vault.is_none() {
+        return fail("locked");
+    }
+    // Withdrawing cannot be undone, so it needs the password again.
+    if let Some(answer) = check_password(state, &path, password) {
+        return answer;
+    }
+    let Some(vault) = state.vault.as_mut() else {
+        return fail("locked");
+    };
+    if let Err(e) = vault.withdraw_device(id) {
+        return vault_error(e);
+    }
+    with_devices(seal_and_write(vault, &path), vault)
 }
 
 fn delete_account(state: &mut State, password: &str) -> Value {
@@ -308,7 +369,35 @@ fn unlocked_answer(vault: &Vault) -> Value {
         "ok": true,
         "fingerprint": vault.account().fingerprint().grouped(),
         "profile": vault.profile(),
+        "device": vault.device().id,
+        "devices": devices(vault),
     })
+}
+
+/// The account's devices for the app. Withdrawn devices are left out.
+fn devices(vault: &Vault) -> Value {
+    let own = &vault.device().id;
+    vault
+        .device_list()
+        .list
+        .devices
+        .iter()
+        .map(|d| {
+            json!({
+                "id": d.id,
+                "label": vault.labels().get(&d.id),
+                "fingerprint": d.fingerprint().grouped(),
+                "this": &d.id == own,
+            })
+        })
+        .collect()
+}
+
+fn with_devices(mut answer: Value, vault: &Vault) -> Value {
+    if answer["ok"] == true {
+        answer["devices"] = devices(vault);
+    }
+    answer
 }
 
 fn seal_and_write(vault: &Vault, path: &Path) -> Value {

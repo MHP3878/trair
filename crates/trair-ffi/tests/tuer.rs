@@ -253,3 +253,131 @@ fn d06_vault_is_bound_to_windows_user() {
     assert_eq!(r["ok"], true, "{r}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+fn device_ids(answer: &Value) -> Vec<String> {
+    answer["devices"]
+        .as_array()
+        .unwrap_or(&Vec::new())
+        .iter()
+        .map(|d| d["id"].as_str().unwrap_or("").to_string())
+        .collect()
+}
+
+#[test]
+fn d07_devices_can_be_named_but_not_withdraw_themselves() {
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let dir = fresh_dir();
+    call(json!({"op": "init", "dir": dir}));
+    let created = call(json!({"op": "create", "password": PW, "profile": {}}));
+    let me = created["device"].as_str().unwrap().to_string();
+    assert_eq!(device_ids(&created), vec![me.clone()]);
+    let first = &created["devices"][0];
+    assert_eq!(first["this"], true);
+    assert_eq!(first["label"], "Dieser PC");
+    assert_eq!(first["fingerprint"].as_str().unwrap().len(), 39);
+
+    let renamed = call(json!({"op": "rename_device", "id": me, "label": "Julians Laptop"}));
+    assert_eq!(
+        renamed["devices"][0]["label"], "Julians Laptop",
+        "{renamed}"
+    );
+    for bad in ["", " vorne", "a\u{7}b"] {
+        let r = call(json!({"op": "rename_device", "id": me, "label": bad}));
+        assert_eq!(error(&r), "refused", "{bad:?}");
+    }
+    let r = call(json!({"op": "rename_device", "id": "d-00000000", "label": "Fremd"}));
+    assert_eq!(error(&r), "refused");
+    // The name is stored in the vault, not only in memory.
+    call(json!({"op": "lock"}));
+    let again = call(json!({"op": "unlock", "password": PW}));
+    assert_eq!(again["devices"][0]["label"], "Julians Laptop");
+    assert_eq!(again["device"], me.as_str());
+    assert_eq!(again["upgraded"], false);
+
+    // Withdrawing needs the password and never hits this device.
+    let r = call(json!({"op": "withdraw_device", "id": me, "password": "nicht das passwort"}));
+    assert_eq!(error(&r), "wrong_password");
+    let r = call(json!({"op": "withdraw_device", "id": me, "password": PW}));
+    assert_eq!(error(&r), "refused");
+    let r = call(json!({"op": "withdraw_device", "id": "d-00000000", "password": PW}));
+    assert_eq!(error(&r), "refused");
+    call(json!({"op": "lock"}));
+    let r = call(json!({"op": "rename_device", "id": me, "label": "Neu"}));
+    assert_eq!(error(&r), "locked");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The bare core format is only accepted where there is no DPAPI layer.
+#[cfg(not(windows))]
+#[test]
+fn d08_vault_from_paket_1_is_upgraded_once() {
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let fixtures =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../trair-core/tests/fixtures");
+    let old = std::fs::read(fixtures.join("vault-v1-real.bin")).unwrap();
+    let password = std::fs::read_to_string(fixtures.join("vault-v1.password")).unwrap();
+    let expected = std::fs::read_to_string(fixtures.join("vault-v1-real.fingerprint")).unwrap();
+    let dir = fresh_dir();
+    call(json!({"op": "init", "dir": dir}));
+    std::fs::write(dir.join(VAULT_FILE), &old).unwrap();
+
+    let first = call(json!({"op": "unlock", "password": password.trim_end()}));
+    assert_eq!(first["ok"], true, "{first}");
+    assert_eq!(first["upgraded"], true);
+    assert_eq!(
+        first["fingerprint"].as_str().unwrap().replace(' ', ""),
+        expected.trim(),
+        "same account as in Paket 1"
+    );
+    assert_eq!(first["profile"]["name"], "Julian");
+    let stored = std::fs::read(dir.join(VAULT_FILE)).unwrap();
+    assert!(stored != old, "upgraded vault was stored");
+
+    call(json!({"op": "lock"}));
+    let second = call(json!({"op": "unlock", "password": password.trim_end()}));
+    assert_eq!(second["upgraded"], false, "only once");
+    assert_eq!(
+        second["device"], first["device"],
+        "same device after the upgrade"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A second device (as pairing will add it, M3) is withdrawn through the
+/// door and stays withdrawn.
+#[cfg(not(windows))]
+#[test]
+fn d09_second_device_is_withdrawn_with_password() {
+    use trair_core::DeviceIdentity;
+    use trair_core::vault::Vault;
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let (mut vault, _) = Vault::create(PW, json!({})).unwrap();
+    let other = DeviceIdentity::generate().unwrap();
+    let list = vault
+        .device_list()
+        .with_device(vault.account(), other.entry())
+        .unwrap();
+    vault.set_device_list(list).unwrap();
+    let dir = fresh_dir();
+    call(json!({"op": "init", "dir": dir}));
+    std::fs::write(dir.join(VAULT_FILE), vault.seal().unwrap()).unwrap();
+
+    let opened = call(json!({"op": "unlock", "password": PW}));
+    assert_eq!(device_ids(&opened).len(), 2, "{opened}");
+    let unnamed = opened["devices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["this"] == false)
+        .unwrap();
+    assert_eq!(unnamed["label"], Value::Null);
+    let r = call(json!({"op": "withdraw_device", "id": other.id, "password": PW}));
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(device_ids(&r), vec![vault.device().id.clone()]);
+    call(json!({"op": "lock"}));
+    let again = call(json!({"op": "unlock", "password": PW}));
+    assert_eq!(device_ids(&again), vec![vault.device().id.clone()]);
+    let r = call(json!({"op": "withdraw_device", "id": other.id, "password": PW}));
+    assert_eq!(error(&r), "refused", "already withdrawn");
+    let _ = std::fs::remove_dir_all(&dir);
+}

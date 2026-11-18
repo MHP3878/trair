@@ -4,7 +4,7 @@
 
 Trair wird ein Messenger, der sich so einfach bedienen lässt wie WhatsApp oder Discord, bei dem Sicherheit und Privatsphäre aber an erster Stelle stehen. Private Nachrichten sind Ende-zu-Ende-verschlüsselt mit MLS (RFC 9420). Der Server stellt nur zu und kann private Inhalte nicht lesen.
 
-> **Status: Krypto-Kern (M1), App mit echtem Tresor.** Konto, Launcher-Passwort, Sperre und Einstellungen sind echt und verschlüsselt (siehe `SECURITY.md`). Chats und Kontakte sind noch ausgedacht, weil es noch keinen Server gibt; jedes Fenster zeigt deshalb „Demo-Chats – nicht verschlüsselt“. Bitte noch nicht für echte Kommunikation verwenden.
+> **Status: Krypto-Kern (M1), App mit echtem Tresor, Geräte im Kern (M2).** Konto, Launcher-Passwort, Sperre, Einstellungen und die Geräteliste sind echt und verschlüsselt (siehe `SECURITY.md`). Das Koppeln eines zweiten Geräts ist im Kern fertig und getestet; der Knopf in der App kommt mit dem Server (M3). Chats und Kontakte sind noch ausgedacht, weil es noch keinen Server gibt; jedes Fenster zeigt deshalb „Demo-Chats – nicht verschlüsselt“. Bitte noch nicht für echte Kommunikation verwenden.
 
 ## Grundsätze
 
@@ -17,7 +17,7 @@ Trair wird ein Messenger, der sich so einfach bedienen lässt wie WhatsApp oder 
 
 | Ordner | Inhalt |
 | --- | --- |
-| `crates/trair-core` | Rust-Kern der App: Konten, Geräte-Zertifikate, MLS-Gruppen, strenger Modus. Die Angriffstests liegen in `tests/angriffe.rs` |
+| `crates/trair-core` | Rust-Kern der App: Konten, Geräte und unterschriebene Geräteliste, Koppeln mit Code (SPAKE2), MLS-Gruppen, strenger Modus, Tresor. Angriffstests: `tests/angriffe.rs`, `tests/koppeln.rs` |
 | `crates/trair-ffi` | Die schmale Tür zwischen App und Kern: vier C-Funktionen, JSON-Nachrichten, unter Windows DPAPI und Bildschirmfoto-Schutz |
 | `crates/trair-server` | Rust-Server: Konten, Zustellung, Communities (ab M3) |
 | `app/` | Flutter-App für Windows im Pro-Look. Zeigt bis zur Anbindung an den Rust-Kern nur Demo-Daten (`lib/backend/demo_backend.dart`) |

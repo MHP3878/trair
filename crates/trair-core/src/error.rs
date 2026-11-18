@@ -16,6 +16,10 @@ pub enum CoreError {
     /// This is always refused, strict mode or not.
     #[error("forged device certificate: {0}")]
     Forged(String),
+    /// A member or new device was withdrawn by its account. Always
+    /// refused, strict mode or not.
+    #[error("withdrawn device: {0}")]
+    Withdrawn(String),
     /// The group is not known on this device.
     #[error("unknown group {0}")]
     UnknownGroup(String),

@@ -3,9 +3,10 @@
 
 //! Trust levels and the strict mode (decision 6: on by default).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::account::Fingerprint;
+use crate::devices::DeviceList;
 
 /// How far a group member can be trusted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,12 +24,20 @@ pub enum Trust {
     Mismatch,
     /// The device certificate is invalid. Always refused.
     Forged,
+    /// The account withdrew this device (lost or given away). Always
+    /// refused, strict mode or not.
+    Withdrawn,
 }
 
 impl Trust {
     /// True for members that strict mode accepts.
     pub fn is_trusted(self) -> bool {
         matches!(self, Trust::Own | Trust::OwnAccount | Trust::Verified)
+    }
+
+    /// True for members that are refused even without strict mode.
+    pub fn always_refused(self) -> bool {
+        matches!(self, Trust::Forged | Trust::Withdrawn)
     }
 }
 
@@ -37,6 +46,8 @@ impl Trust {
 pub struct Policy {
     strict: bool,
     pins: HashMap<String, Fingerprint>,
+    /// Withdrawn devices, as `user:device`.
+    withdrawn: HashSet<String>,
 }
 
 impl Default for Policy {
@@ -44,6 +55,7 @@ impl Default for Policy {
         Policy {
             strict: true,
             pins: HashMap::new(),
+            withdrawn: HashSet::new(),
         }
     }
 }
@@ -70,6 +82,19 @@ impl Policy {
         self.pins.get(user)
     }
 
+    /// Take note of the withdrawn devices in a verified device list.
+    /// Withdrawals are never undone.
+    pub fn apply_device_list(&mut self, list: &DeviceList) {
+        for d in &list.withdrawn {
+            self.withdrawn.insert(format!("{}:{}", list.user, d.id));
+        }
+    }
+
+    /// Was this device (`user:device`) withdrawn by its account?
+    pub fn is_withdrawn(&self, device_id: &str) -> bool {
+        self.withdrawn.contains(device_id)
+    }
+
     /// Trust level of a member that is not this device.
     pub fn classify(
         &self,
@@ -92,12 +117,12 @@ impl Policy {
         }
     }
 
-    /// Members that stop an action. Forged devices always do; in strict
-    /// mode every member that is not trusted does.
+    /// Members that stop an action. Forged and withdrawn devices always
+    /// do; in strict mode every member that is not trusted does.
     pub fn blocking<'a>(&self, members: impl IntoIterator<Item = (&'a str, Trust)>) -> Vec<String> {
         members
             .into_iter()
-            .filter(|(_, t)| *t == Trust::Forged || (self.strict && !t.is_trusted()))
+            .filter(|(_, t)| t.always_refused() || (self.strict && !t.is_trusted()))
             .map(|(id, _)| id.to_string())
             .collect()
     }

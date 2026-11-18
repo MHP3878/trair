@@ -179,6 +179,7 @@ This file lists every third-party component and its license.
 | signature | 2.2.0 | Apache-2.0 OR MIT | https://github.com/RustCrypto/traits/tree/master/signature |
 | signature | 3.0.0 | Apache-2.0 OR MIT | https://github.com/RustCrypto/traits |
 | slab | 0.4.12 | MIT | https://github.com/tokio-rs/slab |
+| spake2 | 0.4.0 | MIT OR Apache-2.0 | https://github.com/RustCrypto/PAKEs/tree/master/spake2 |
 | spki | 0.7.3 | Apache-2.0 OR MIT | https://github.com/RustCrypto/formats/tree/master/spki |
 | spki | 0.8.1 | Apache-2.0 OR MIT | https://github.com/RustCrypto/formats |
 | sponge-cursor | 0.1.0 | MIT OR Apache-2.0 | https://github.com/RustCrypto/utils |
