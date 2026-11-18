@@ -6,6 +6,7 @@ import 'package:material_ui/material_ui.dart';
 import '../app_state.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/trair_icons.dart';
 
 /// First start: invite code, profile, launcher password. No recovery key:
 /// losing the password means losing the account (decision 2).
@@ -206,7 +207,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           child: const Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.warning_amber_rounded, color: TrairColors.rose, size: 22),
+              Icon(TrairIcons.triangleAlert, color: TrairColors.rose, size: 22),
               SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -306,7 +307,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           onBack: () => setState(() => _step = 2),
           next: PillButton(
             label: 'Trair starten',
-            icon: Icons.arrow_forward_rounded,
+            icon: TrairIcons.arrowRight,
             onPressed: _canStart ? () => state.finishOnboarding(name: _name.text, glowColor: _glow) : null,
           ),
         ),

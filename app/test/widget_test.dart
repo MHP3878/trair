@@ -27,6 +27,7 @@ Future<void> _loadFonts() async {
     mono.addFont(bytes(f));
   }
   await mono.load();
+  await (FontLoader('Lucide')..addFont(bytes('Lucide.ttf'))).load();
 }
 
 Future<void> _start(WidgetTester tester, {Size size = const Size(1440, 900)}) async {

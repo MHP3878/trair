@@ -6,6 +6,7 @@ import 'package:material_ui/material_ui.dart';
 import '../app_state.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/trair_icons.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -47,12 +48,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   static const _navIcons = <String, IconData>{
-    'Profil': Icons.person_outline_rounded,
-    'Trust': Icons.verified_outlined,
-    'Geräte': Icons.devices_outlined,
-    'Sicherheit': Icons.shield_outlined,
-    'Privatsphäre': Icons.visibility_off_outlined,
-    'Konto': Icons.manage_accounts_outlined,
+    'Profil': TrairIcons.user,
+    'Trust': TrairIcons.badgeCheck,
+    'Geräte': TrairIcons.monitorSmartphone,
+    'Sicherheit': TrairIcons.shieldCheck,
+    'Privatsphäre': TrairIcons.eyeOff,
+    'Konto': TrairIcons.userCog,
   };
 
   @override
@@ -323,7 +324,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   width: 38,
                   height: 38,
                   decoration: const BoxDecoration(color: Color(0x246E4FF6), shape: BoxShape.circle),
-                  child: const Icon(Icons.desktop_windows_outlined, size: 19, color: TrairColors.accentPale),
+                  child: const Icon(TrairIcons.monitor, size: 19, color: TrairColors.accentPale),
                 ),
                 const SizedBox(width: 12),
                 const Expanded(
@@ -346,7 +347,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const SizedBox(height: 12),
           PillButton(
             label: 'Gerät per QR-Code koppeln',
-            icon: Icons.qr_code_2_rounded,
+            icon: TrairIcons.qrCode,
             kind: PillKind.dashed,
             expand: true,
             onPressed: () {},
@@ -421,7 +422,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               width: 34,
               height: 34,
               decoration: const BoxDecoration(color: Color(0x1FFF8A98), shape: BoxShape.circle),
-              child: const Icon(Icons.lock_outline_rounded, size: 16, color: TrairColors.rose),
+              child: const Icon(TrairIcons.lock, size: 16, color: TrairColors.rose),
             ),
           ),
           _row(
@@ -430,7 +431,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             divider: false,
             trailing: PillButton(
               label: 'Jetzt sperren',
-              icon: Icons.lock_outline_rounded,
+              icon: TrairIcons.lock,
               height: 42,
               onPressed: state.lock,
             ),
@@ -487,7 +488,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             alignment: Alignment.centerLeft,
             child: PillButton(
               label: 'Open-Source-Lizenzen',
-              icon: Icons.description_outlined,
+              icon: TrairIcons.fileText,
               kind: PillKind.ghost,
               height: 42,
               onPressed: () => showLicensePage(

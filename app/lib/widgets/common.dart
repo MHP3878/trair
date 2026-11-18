@@ -7,6 +7,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../app_state.dart';
 import '../theme.dart';
+import 'trair_icons.dart';
 
 /// Dark background with three soft, still color fields. The glass panels
 /// need something behind them, otherwise the frosted effect is invisible.
@@ -85,7 +86,8 @@ class GlassPanel extends StatelessWidget {
   }
 }
 
-/// The Trair mark: a "T" whose stem is a keyhole.
+/// The Trair logo "Zylinder": a white lock cylinder with a T-shaped keyway
+/// on a violet tile. Same drawing as assets/branding/trair-app-icon.svg.
 class TrairLogo extends StatelessWidget {
   const TrairLogo({super.key, this.size = 32});
 
@@ -93,34 +95,58 @@ class TrairLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(size * 0.31),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF9C84FF), TrairColors.accent],
+    return Semantics(
+      label: 'Trair',
+      image: true,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(size * 58 / 256),
+          boxShadow: const [BoxShadow(color: Color(0x59000000), blurRadius: 8, offset: Offset(0, 2))],
         ),
-        boxShadow: const [BoxShadow(color: Color(0x59000000), blurRadius: 8, offset: Offset(0, 2))],
+        child: CustomPaint(size: Size.square(size), painter: const _LogoPainter()),
       ),
-      child: CustomPaint(painter: _LogoPainter()),
     );
   }
 }
 
 class _LogoPainter extends CustomPainter {
+  const _LogoPainter();
+
   @override
   void paint(Canvas canvas, Size size) {
-    final s = size.width / 40;
-    final p = Paint()
-      ..color = Colors.white
-      ..strokeWidth = 3.8 * s
-      ..strokeCap = StrokeCap.round;
-    canvas.drawLine(Offset(12 * s, 13 * s), Offset(28 * s, 13 * s), p);
-    canvas.drawCircle(Offset(20 * s, 21.5 * s), 3.8 * s, Paint()..color = Colors.white);
-    canvas.drawLine(Offset(20 * s, 23.5 * s), Offset(20 * s, 29.5 * s), p);
+    canvas.scale(size.width / 256);
+    final tile = RRect.fromLTRBR(0, 0, 256, 256, const Radius.circular(58));
+    canvas.drawRRect(
+      tile,
+      Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF8A6CFF), Color(0xFF5A3BE6)],
+        ).createShader(const Rect.fromLTWH(0, 0, 256, 256)),
+    );
+    canvas.drawRRect(
+      tile.deflate(1),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..color = const Color(0x29FFFFFF),
+    );
+    final keyway = Path.combine(
+      PathOperation.union,
+      Path()..addRRect(RRect.fromLTRBR(82, 92, 174, 118, const Radius.circular(13))),
+      Path()..addRRect(RRect.fromLTRBR(115, 92, 141, 180, const Radius.circular(13))),
+    );
+    final disc = Path()..addOval(Rect.fromCircle(center: const Offset(128, 128), radius: 88));
+    canvas.drawPath(Path.combine(PathOperation.difference, disc, keyway), Paint()..color = Colors.white);
+    canvas.drawCircle(
+      const Offset(128, 128),
+      74,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3
+        ..color = const Color(0x2E5A3BE6),
+    );
   }
 
   @override
@@ -386,7 +412,7 @@ class SecurityCapsule extends StatelessWidget {
                 AnimatedRotation(
                   turns: open ? 0.5 : 0,
                   duration: const Duration(milliseconds: 220),
-                  child: Icon(Icons.expand_more_rounded, size: 16, color: fg),
+                  child: Icon(TrairIcons.chevronDown, size: 16, color: fg),
                 ),
               ],
             ],
@@ -482,7 +508,7 @@ class BackToChats extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.chevron_left_rounded, size: 18, color: TrairColors.textSoft),
+              Icon(TrairIcons.chevronLeft, size: 18, color: TrairColors.textSoft),
               Text('Chats', style: TextStyle(fontSize: 13, color: TrairColors.textSoft)),
             ],
           ),
@@ -570,7 +596,7 @@ class ProfileCard extends StatelessWidget {
               ),
             ),
           ),
-          RoundIconButton(icon: Icons.lock_outline_rounded, tooltip: 'Trair sperren', onPressed: state.lock),
+          RoundIconButton(icon: TrairIcons.lock, tooltip: 'Trair sperren', onPressed: state.lock),
         ],
       ),
     );
@@ -598,7 +624,7 @@ class DemoBar extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.science_outlined, size: 14, color: TrairColors.amber),
+                Icon(TrairIcons.flaskConical, size: 14, color: TrairColors.amber),
                 SizedBox(width: 8),
                 Text(
                   'Demo – nicht verschlüsselt',

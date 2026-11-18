@@ -8,6 +8,7 @@ import '../app_state.dart';
 import '../backend/backend.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/trair_icons.dart';
 
 enum _Filter { all, direct, group }
 
@@ -89,7 +90,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           SidebarHeader(
-            trailing: RoundIconButton(icon: Icons.edit_outlined, tooltip: 'Neuer Chat', onPressed: () {}),
+            trailing: RoundIconButton(icon: TrairIcons.squarePen, tooltip: 'Neuer Chat', onPressed: () {}),
           ),
           const SizedBox(height: 18),
           PillField(
@@ -98,7 +99,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
             hint: 'Suchen',
             height: 42,
             semanticLabel: 'Chats durchsuchen (nur auf diesem Gerät)',
-            leading: const Icon(Icons.search_rounded, size: 18, color: TrairColors.textMuted),
+            leading: const Icon(TrairIcons.search, size: 18, color: TrairColors.textMuted),
             onChanged: (_) => setState(() {}),
             trailing: Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -347,13 +348,13 @@ class _ChatsScreenState extends State<ChatsScreen> {
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
                           RoundIconButton(
-                            icon: Icons.search_rounded,
+                            icon: TrairIcons.search,
                             tooltip: 'Im Chat suchen',
                             filled: false,
                             onPressed: () {},
                           ),
                           RoundIconButton(
-                            icon: Icons.more_horiz_rounded,
+                            icon: TrairIcons.ellipsis,
                             tooltip: 'Mehr',
                             filled: false,
                             onPressed: () {},
@@ -394,7 +395,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                     child: Row(
                       children: [
                         RoundIconButton(
-                          icon: Icons.add_rounded,
+                          icon: TrairIcons.plus,
                           tooltip: 'Datei anhängen',
                           size: 40,
                           onPressed: blocked ? null : () {},
@@ -420,7 +421,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                           ),
                         ),
                         RoundIconButton(
-                          icon: Icons.arrow_upward_rounded,
+                          icon: TrairIcons.arrowUp,
                           tooltip: 'Senden',
                           size: 40,
                           color: TrairColors.accent,
@@ -501,7 +502,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
               width: 34,
               height: 34,
               decoration: const BoxDecoration(color: Color(0x24FFB547), shape: BoxShape.circle),
-              child: const Icon(Icons.warning_amber_rounded, size: 18, color: TrairColors.amber),
+              child: const Icon(TrairIcons.triangleAlert, size: 18, color: TrairColors.amber),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -540,7 +541,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.lock_outline_rounded, size: 12, color: TrairColors.accentLight),
+                const Icon(TrairIcons.lock, size: 12, color: TrairColors.accentLight),
                 const SizedBox(width: 8),
                 Flexible(
                   child: Text(m.text, style: TrairText.small, textAlign: TextAlign.center),
@@ -628,7 +629,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                           style: const TextStyle(fontSize: 11, color: TrairColors.placeholder),
                         ),
                         const SizedBox(width: 4),
-                        const Icon(Icons.check_rounded, size: 12, color: TrairColors.placeholder),
+                        const Icon(TrairIcons.check, size: 12, color: TrairColors.placeholder),
                       ],
                     ),
                   ),

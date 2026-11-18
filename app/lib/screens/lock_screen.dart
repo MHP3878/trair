@@ -6,6 +6,7 @@ import 'package:material_ui/material_ui.dart';
 import '../app_state.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/trair_icons.dart';
 
 /// Launcher: nothing is decrypted while this screen is shown.
 class LockScreen extends StatefulWidget {
@@ -61,7 +62,7 @@ class _LockScreenState extends State<LockScreen> {
                         semanticLabel: 'Launcher-Passwort',
                         onSubmitted: (_) => unlock(),
                         trailing: RoundIconButton(
-                          icon: _show ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                          icon: _show ? TrairIcons.eyeOff : TrairIcons.eye,
                           tooltip: _show ? 'Passwort verbergen' : 'Passwort anzeigen',
                           filled: false,
                           onPressed: () => setState(() => _show = !_show),
@@ -70,7 +71,7 @@ class _LockScreenState extends State<LockScreen> {
                       const SizedBox(height: 14),
                       PillButton(
                         label: 'Entsperren',
-                        icon: Icons.arrow_forward_rounded,
+                        icon: TrairIcons.arrowRight,
                         height: 50,
                         expand: true,
                         onPressed: unlock,

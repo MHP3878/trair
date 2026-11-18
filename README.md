@@ -20,7 +20,7 @@ Trair wird ein Messenger, der sich so einfach bedienen lässt wie WhatsApp oder 
 | `crates/trair-core` | Rust-Kern der App: Konten, Geräte-Zertifikate, MLS-Gruppen, strenger Modus. Die Angriffstests liegen in `tests/angriffe.rs` |
 | `crates/trair-server` | Rust-Server: Konten, Zustellung, Communities (ab M3) |
 | `app/` | Flutter-App für Windows im Pro-Look. Zeigt bis zur Anbindung an den Rust-Kern nur Demo-Daten (`lib/backend/demo_backend.dart`) |
-| `tools/` | Prüfskripte für CI: Lizenzliste, Datei-Kopfzeilen, DCO |
+| `tools/` | Prüfskripte für CI: Lizenzliste, Datei-Kopfzeilen, DCO. `make_branding.py` erzeugt Logo, Windows-Symbol und Symbol-Schrift neu |
 | `.github/workflows/` | automatische Prüfungen bei jedem Push |
 
 ## Windows-Demo herunterladen

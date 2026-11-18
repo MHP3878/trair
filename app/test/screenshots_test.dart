@@ -28,6 +28,7 @@ Future<void> _loadFonts() async {
     for (final w in ['Regular', 'Medium', 'SemiBold', 'Bold']) 'assets/fonts/Geist-$w.ttf',
   ]);
   await _font('GeistMono', ['assets/fonts/GeistMono-Regular.ttf', 'assets/fonts/GeistMono-Medium.ttf']);
+  await _font('Lucide', ['assets/fonts/Lucide.ttf']);
   // Icons: the font ships with the Flutter SDK. Without it icons are boxes.
   final root = Platform.environment['FLUTTER_ROOT'];
   if (root != null) {

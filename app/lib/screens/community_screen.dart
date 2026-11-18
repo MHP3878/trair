@@ -7,6 +7,7 @@ import '../app_state.dart';
 import '../backend/backend.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/trair_icons.dart';
 
 class CommunityScreen extends StatefulWidget {
   const CommunityScreen({super.key});
@@ -81,7 +82,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
                   ),
                 ),
                 RoundIconButton(
-                  icon: Icons.person_add_alt_rounded,
+                  icon: TrairIcons.userPlus,
                   tooltip: 'Leute einladen',
                   color: _invite ? const Color(0x336E4FF6) : null,
                   onPressed: () => setState(() => _invite = !_invite),
@@ -153,7 +154,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
             child: Row(
               children: [
                 Icon(
-                  ch.open ? Icons.visibility_outlined : Icons.lock_outline_rounded,
+                  ch.open ? TrairIcons.eye : TrairIcons.lock,
                   size: 16,
                   color: ch.open ? TrairColors.amber : TrairColors.accentLight,
                   semanticLabel: ch.open ? 'offen' : 'geschlossen',
@@ -235,7 +236,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
                           RoundIconButton(
-                            icon: Icons.search_rounded,
+                            icon: TrairIcons.search,
                             tooltip: 'Im Kanal suchen',
                             filled: false,
                             onPressed: () {},
@@ -313,7 +314,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
                           ),
                         ),
                         RoundIconButton(
-                          icon: Icons.arrow_upward_rounded,
+                          icon: TrairIcons.arrowUp,
                           tooltip: 'Senden',
                           size: 40,
                           color: TrairColors.accent,

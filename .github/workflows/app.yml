@@ -91,7 +91,7 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
       # The Windows runner files are generated here and not kept in Git
-      # yet. Only the name shown in Windows is changed.
+      # yet. Only the name shown in Windows and the program icon change.
       - name: Windows-Projektdateien erzeugen
         shell: pwsh
         run: |
@@ -99,6 +99,7 @@ jobs:
           (Get-Content windows/runner/main.cpp) -replace 'L"trair_app"', 'L"Trair"' | Set-Content windows/runner/main.cpp
           (Get-Content windows/CMakeLists.txt) -replace 'set\(BINARY_NAME "trair_app"\)', 'set(BINARY_NAME "Trair")' | Set-Content windows/CMakeLists.txt
           (Get-Content windows/runner/Runner.rc) -replace 'trair_app', 'Trair' -replace 'com\.example', 'Trair contributors' | Set-Content windows/runner/Runner.rc
+          Copy-Item assets/branding/app_icon.ico windows/runner/resources/app_icon.ico -Force
           if (-not (Select-String -Path windows/runner/main.cpp -Pattern 'L"Trair"' -Quiet)) { throw "Fenstertitel nicht gesetzt" }
           if (-not (Select-String -Path windows/CMakeLists.txt -Pattern 'BINARY_NAME "Trair"' -Quiet)) { throw "Dateiname nicht gesetzt" }
       - name: Bauen

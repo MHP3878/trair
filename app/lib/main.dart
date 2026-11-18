@@ -17,11 +17,14 @@ import 'theme.dart';
 import 'widgets/common.dart';
 
 void main() {
-  // The fonts are bundled files, not Dart packages, so Flutter does not
-  // list their license by itself. The OFL requires that it travels along.
+  // The fonts and icons are bundled files, not Dart packages, so Flutter
+  // does not list their licenses by itself. Both licenses require that they
+  // travel along.
   LicenseRegistry.addLicense(() async* {
     final text = await rootBundle.loadString('assets/fonts/OFL.txt');
     yield LicenseEntryWithLineBreaks(const ['Geist', 'Geist Mono'], text);
+    final icons = await rootBundle.loadString('assets/fonts/LUCIDE-LICENSE.txt');
+    yield LicenseEntryWithLineBreaks(const ['Lucide'], icons);
   });
   runApp(TrairApp(backend: DemoBackend()));
 }
