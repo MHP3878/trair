@@ -27,7 +27,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 BRANDING = ROOT / "app" / "assets" / "branding"
 FONTS = ROOT / "app" / "assets" / "fonts"
 
-LUCIDE_TTF_SHA256 = "3d6ce197ac48c4b546500518a5de137d46c3b2269762dd26c3ac32e974ed9658"
+LUCIDE_TTF_SHA256 = "3d6ce197ac48c4b546500518a5de137d46c3b2269762dd26c3ac32e974ed9658"  # pragma: allowlist secret (Pruefsumme einer oeffentlichen Datei)
 
 # Muss zu app/lib/widgets/trair_icons.dart passen.
 ICONS = {
