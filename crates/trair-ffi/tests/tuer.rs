@@ -28,6 +28,8 @@ fn fresh_dir() -> PathBuf {
     std::env::temp_dir().join(format!("trair-test-{hex}"))
 }
 
+/// Only the tests that build a vault in the core need it (not on Windows).
+#[cfg(not(windows))]
 fn random_password() -> String {
     let mut bytes = [0u8; 24];
     getrandom::fill(&mut bytes).unwrap();
