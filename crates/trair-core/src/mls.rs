@@ -141,7 +141,8 @@ impl Device {
             signature_key: keys.to_public_vec().into(),
         };
         Ok(Device {
-            id: cert.id(),
+            // Public device id; the same value the certificate carries.
+            id: format!("{}:{}", account.user(), device),
             user: account.user().to_string(),
             account: account.fingerprint(),
             provider,
