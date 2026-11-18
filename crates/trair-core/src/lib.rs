@@ -13,11 +13,13 @@ pub mod error;
 pub mod keypackages;
 pub mod mls;
 pub mod policy;
+pub mod vault;
 
 pub use account::{Account, DeviceCertificate, Fingerprint};
 pub use error::{CoreError, Result};
 pub use mls::{Device, Event, KeyPackageOffer, Member, Outgoing};
 pub use policy::{Policy, Trust};
+pub use vault::{Vault, VaultError};
 
 /// Version of this crate, as set in the workspace manifest.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

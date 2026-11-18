@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 [workspace]
 resolver = "3"
-members = ["crates/trair-core", "crates/trair-server"]
+members = ["crates/trair-core", "crates/trair-ffi", "crates/trair-server"]
 
 [workspace.package]
 version = "0.0.0"
@@ -16,3 +16,11 @@ unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+
+# Argon2id is far too slow without optimisation; this keeps the vault
+# tests fast in debug builds. It does not change any result.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
