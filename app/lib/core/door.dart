@@ -76,9 +76,10 @@ String _callSync(String path, String request) {
   final free = lib.lookupFunction<Void Function(Pointer<Uint8>, Size), void Function(Pointer<Uint8>, int)>(
     'trair_free',
   );
-  final call = lib.lookupFunction<Pointer<Uint8> Function(Pointer<Uint8>, Size), Pointer<Uint8> Function(Pointer<Uint8>, int)>(
-    'trair_call',
-  );
+  final call = lib
+      .lookupFunction<Pointer<Uint8> Function(Pointer<Uint8>, Size), Pointer<Uint8> Function(Pointer<Uint8>, int)>(
+        'trair_call',
+      );
   final bytes = utf8.encode(request);
   final input = alloc(bytes.length);
   if (input == nullptr) return '{"ok":false,"error":"bad_request"}';

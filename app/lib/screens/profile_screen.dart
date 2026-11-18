@@ -479,14 +479,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _passwordChange(AppState state) {
-    final ready =
-        !_pwBusy &&
-        _oldPw.text.isNotEmpty &&
-        _newPw1.text.runes.length >= 12 &&
-        _newPw1.text == _newPw2.text;
+    final ready = !_pwBusy && _oldPw.text.isNotEmpty && _newPw1.text.runes.length >= 12 && _newPw1.text == _newPw2.text;
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 14),
-      decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: TrairColors.borderSoft))),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: TrairColors.borderSoft)),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -537,7 +535,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 onPressed: ready ? () => _changePassword(state) : null,
               ),
               const SizedBox(width: 12),
-              Flexible(child: Text(_pwMessage, style: TextStyle(fontSize: 13, color: _pwMessageColor))),
+              Flexible(
+                child: Text(_pwMessage, style: TextStyle(fontSize: 13, color: _pwMessageColor)),
+              ),
             ],
           ),
         ],

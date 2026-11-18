@@ -74,9 +74,7 @@ class TrairVault {
 String vaultErrorText(CoreAnswer a) {
   switch (a.error) {
     case 'wrong_password':
-      return a.wait > 0
-          ? 'Passwort falsch. Zu viele Versuche: bitte ${a.wait} Sekunden warten.'
-          : 'Passwort falsch.';
+      return a.wait > 0 ? 'Passwort falsch. Zu viele Versuche: bitte ${a.wait} Sekunden warten.' : 'Passwort falsch.';
     case 'wait':
       return 'Zu viele Versuche. Bitte noch ${a.wait} Sekunden warten.';
     case 'weak_password':

@@ -14,9 +14,7 @@ class StartScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Backdrop(
-      child: Center(child: TrairLogo(size: 64)),
-    );
+    return const Backdrop(child: Center(child: TrairLogo(size: 64)));
   }
 }
 

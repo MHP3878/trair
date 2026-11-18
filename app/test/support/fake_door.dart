@@ -66,7 +66,11 @@ class FakeDoor implements CoreDoor {
     return _fail('bad_request');
   }
 
-  Map<String, Object?> _open() => {'ok': true, 'fingerprint': 'a1b2 c3d4 e5f6 0718 293a 4b5c 6d7e 8f90', 'profile': profile};
+  Map<String, Object?> _open() => {
+    'ok': true,
+    'fingerprint': 'a1b2 c3d4 e5f6 0718 293a 4b5c 6d7e 8f90',
+    'profile': profile,
+  };
 
   Map<String, Object?> _wrong() {
     failures += 1;

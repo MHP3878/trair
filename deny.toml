@@ -49,6 +49,10 @@ crate = "trair-core"
 allow = ["AGPL-3.0-or-later"]
 
 [[licenses.exceptions]]
+crate = "trair-ffi"
+allow = ["AGPL-3.0-or-later"]
+
+[[licenses.exceptions]]
 crate = "trair-server"
 allow = ["AGPL-3.0-or-later"]
 
