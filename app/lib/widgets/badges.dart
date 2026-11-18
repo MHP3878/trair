@@ -57,10 +57,7 @@ class TrairBadge extends StatefulWidget {
 }
 
 class _TrairBadgeState extends State<TrairBadge> with SingleTickerProviderStateMixin {
-  late final AnimationController _shine = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 700),
-  );
+  late final AnimationController _shine = AnimationController(vsync: this, duration: const Duration(milliseconds: 700));
 
   @override
   void dispose() {

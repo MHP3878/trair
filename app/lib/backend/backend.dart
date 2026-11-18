@@ -44,11 +44,7 @@ class ProfileBadge {
   static ProfileBadge? fromJson(Map<String, Object?> j) {
     final kind = BadgeKind.values.where((k) => k.name == j['kind']).firstOrNull;
     if (kind == null) return null;
-    return ProfileBadge(
-      kind,
-      community: j['community'] as String?,
-      communityWarning: j['community_warning'] == true,
-    );
+    return ProfileBadge(kind, community: j['community'] as String?, communityWarning: j['community_warning'] == true);
   }
 
   final BadgeKind kind;

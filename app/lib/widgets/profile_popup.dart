@@ -11,11 +11,7 @@ import 'common.dart';
 import 'trair_icons.dart';
 
 /// Who can see the own profile (setting in Privatsphäre).
-const profileVisibilityChoices = {
-  'alle': 'Alle',
-  'gemeinsam': 'Gemeinsame Chats',
-  'kontakte': 'Nur Kontakte',
-};
+const profileVisibilityChoices = {'alle': 'Alle', 'gemeinsam': 'Gemeinsame Chats', 'kontakte': 'Nur Kontakte'};
 
 const _trustNames = ['Neu', 'Dabei', 'Vertraut', 'Verlässlich'];
 
@@ -199,10 +195,7 @@ class ProfilePopup extends StatelessWidget {
                             ),
                           ),
                         ),
-                        if (v.isSelf) ...[
-                          const SizedBox(width: 8),
-                          const Text('Du', style: TrairText.small),
-                        ],
+                        if (v.isSelf) ...[const SizedBox(width: 8), const Text('Du', style: TrairText.small)],
                       ],
                     ),
                     if (v.nameWarning) ...[const SizedBox(height: 10), const _NameWarning()],

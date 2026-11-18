@@ -458,34 +458,34 @@ class _CommunityScreenState extends State<CommunityScreen> {
                               ),
                             ),
                             const SizedBox(width: 6),
-                          Tooltip(
-                            message: 'Trust-Stufe ${p.trust} von 3',
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
-                              decoration: BoxDecoration(
-                                color: const Color(0x0AFFFFFF),
-                                borderRadius: BorderRadius.circular(999),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  for (var i = 1; i <= 3; i++)
-                                    Container(
-                                      width: 6,
-                                      height: 6,
-                                      margin: const EdgeInsets.symmetric(horizontal: 1.5),
-                                      decoration: BoxDecoration(
-                                        color: i <= p.trust ? TrairColors.mint : const Color(0x24FFFFFF),
-                                        shape: BoxShape.circle,
+                            Tooltip(
+                              message: 'Trust-Stufe ${p.trust} von 3',
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: const Color(0x0AFFFFFF),
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    for (var i = 1; i <= 3; i++)
+                                      Container(
+                                        width: 6,
+                                        height: 6,
+                                        margin: const EdgeInsets.symmetric(horizontal: 1.5),
+                                        decoration: BoxDecoration(
+                                          color: i <= p.trust ? TrairColors.mint : const Color(0x24FFFFFF),
+                                          shape: BoxShape.circle,
+                                        ),
                                       ),
-                                    ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
                     ),
                 ],
               ],
