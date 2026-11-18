@@ -25,7 +25,9 @@ class Backdrop extends StatelessWidget {
         Align(alignment: const Alignment(0.15, -0.1), child: _blob(460, 360, const Color(0x403B2F8F))),
         // Transparent Material above the background colour, so ink and
         // hover effects of InkWells on the background stay visible.
-        Positioned.fill(child: Material(type: MaterialType.transparency, child: child)),
+        Positioned.fill(
+          child: Material(type: MaterialType.transparency, child: child),
+        ),
       ],
     );
   }
