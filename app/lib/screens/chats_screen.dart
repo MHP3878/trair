@@ -353,12 +353,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                             filled: false,
                             onPressed: () {},
                           ),
-                          RoundIconButton(
-                            icon: TrairIcons.ellipsis,
-                            tooltip: 'Mehr',
-                            filled: false,
-                            onPressed: () {},
-                          ),
+                          RoundIconButton(icon: TrairIcons.ellipsis, tooltip: 'Mehr', filled: false, onPressed: () {}),
                         ],
                       ),
                     ),

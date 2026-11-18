@@ -429,12 +429,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             title: 'Automatisch sperren',
             hint: 'Nach 15 Minuten ohne Benutzung und wenn Windows gesperrt wird.',
             divider: false,
-            trailing: PillButton(
-              label: 'Jetzt sperren',
-              icon: TrairIcons.lock,
-              height: 42,
-              onPressed: state.lock,
-            ),
+            trailing: PillButton(label: 'Jetzt sperren', icon: TrairIcons.lock, height: 42, onPressed: state.lock),
           ),
         ],
       ),
