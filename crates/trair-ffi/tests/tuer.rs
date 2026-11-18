@@ -28,6 +28,12 @@ fn fresh_dir() -> PathBuf {
     std::env::temp_dir().join(format!("trair-test-{hex}"))
 }
 
+fn random_password() -> String {
+    let mut bytes = [0u8; 24];
+    getrandom::fill(&mut bytes).unwrap();
+    bytes.iter().map(|b| char::from(b'a' + b % 26)).collect()
+}
+
 fn error(v: &Value) -> &str {
     v["error"].as_str().unwrap_or("")
 }
@@ -351,7 +357,9 @@ fn d09_second_device_is_withdrawn_with_password() {
     use trair_core::DeviceIdentity;
     use trair_core::vault::Vault;
     let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
-    let (mut vault, _) = Vault::create(PW, json!({})).unwrap();
+    // A random password: nothing hard-coded flows into the core.
+    let pw = random_password();
+    let (mut vault, _) = Vault::create(&pw, json!({})).unwrap();
     let other = DeviceIdentity::generate().unwrap();
     let list = vault
         .device_list()
@@ -362,7 +370,7 @@ fn d09_second_device_is_withdrawn_with_password() {
     call(json!({"op": "init", "dir": dir}));
     std::fs::write(dir.join(VAULT_FILE), vault.seal().unwrap()).unwrap();
 
-    let opened = call(json!({"op": "unlock", "password": PW}));
+    let opened = call(json!({"op": "unlock", "password": pw}));
     assert_eq!(device_ids(&opened).len(), 2, "{opened}");
     let unnamed = opened["devices"]
         .as_array()
@@ -371,13 +379,13 @@ fn d09_second_device_is_withdrawn_with_password() {
         .find(|d| d["this"] == false)
         .unwrap();
     assert_eq!(unnamed["label"], Value::Null);
-    let r = call(json!({"op": "withdraw_device", "id": other.id, "password": PW}));
+    let r = call(json!({"op": "withdraw_device", "id": other.id, "password": pw}));
     assert_eq!(r["ok"], true, "{r}");
     assert_eq!(device_ids(&r), vec![vault.device().id.clone()]);
     call(json!({"op": "lock"}));
-    let again = call(json!({"op": "unlock", "password": PW}));
+    let again = call(json!({"op": "unlock", "password": pw}));
     assert_eq!(device_ids(&again), vec![vault.device().id.clone()]);
-    let r = call(json!({"op": "withdraw_device", "id": other.id, "password": PW}));
+    let r = call(json!({"op": "withdraw_device", "id": other.id, "password": pw}));
     assert_eq!(error(&r), "refused", "already withdrawn");
     let _ = std::fs::remove_dir_all(&dir);
 }

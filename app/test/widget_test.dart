@@ -348,6 +348,19 @@ void main() {
       expect(search.focusNode!.hasFocus, isTrue);
     });
 
+    testWidgets('every screen fits a small window without overflow', (tester) async {
+      await _start(tester, size: const Size(1024, 640));
+      await _unlock(tester);
+      await tester.tap(find.text('Trair Beta'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Chats'));
+      await tester.pumpAndSettle();
+      await _openSettings(tester);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('Geräte', () {
     testWidgets('the devices card shows this device from the vault and renames it', (tester) async {
       final door = await _start(tester);
       await _unlock(tester);
@@ -379,7 +392,10 @@ void main() {
     });
 
     testWidgets('withdrawing another device needs the password', (tester) async {
-      final door = await _start(tester, door: FakeDoor(password: pw, profile: {}, otherDevices: ['Altes Handy']));
+      final door = await _start(
+        tester,
+        door: FakeDoor(password: pw, profile: {}, otherDevices: ['Altes Handy']),
+      );
       await _unlock(tester);
       await _openSettings(tester);
       await tester.ensureVisible(find.text('Altes Handy'));
@@ -404,17 +420,6 @@ void main() {
       expect(find.text('1 Gerät'), findsOneWidget);
       expect(door.devices, hasLength(1));
       expect(door.devices.single['this'], isTrue);
-    });
-
-    testWidgets('every screen fits a small window without overflow', (tester) async {
-      await _start(tester, size: const Size(1024, 640));
-      await _unlock(tester);
-      await tester.tap(find.text('Trair Beta'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Chats'));
-      await tester.pumpAndSettle();
-      await _openSettings(tester);
-      expect(tester.takeException(), isNull);
     });
   });
 }
