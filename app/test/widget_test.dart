@@ -1344,8 +1344,8 @@ void main() {
       await tester.ensureVisible(find.byWidgetPredicate((w) => w is PillSwitch && w.label == 'Als Gäste einladen'));
       await tester.tap(find.byWidgetPredicate((w) => w is PillSwitch && w.label == 'Als Gäste einladen'));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.widgetWithText(PillButton, 'Einladungsschlüssel erstellen'));
-      await tester.tap(find.widgetWithText(PillButton, 'Einladungsschlüssel erstellen'));
+      await tester.ensureVisible(find.widgetWithText(PillButton, 'Einladung erstellen'));
+      await tester.tap(find.widgetWithText(PillButton, 'Einladung erstellen'));
       await tester.pumpAndSettle();
       expect(door.groupInvites.single, {'chat': 'g1', 'minutes': 1440, 'guest': true});
       expect(find.textContaining('trair3:local-julian:'), findsOneWidget);
@@ -1429,7 +1429,7 @@ void main() {
       await tester.tap(find.byTooltip('Gruppe verwalten'));
       await tester.pumpAndSettle();
       expect(find.text('MITGLIEDER · 2'), findsOneWidget);
-      expect(find.widgetWithText(PillButton, 'Einladungsschlüssel erstellen'), findsNothing);
+      expect(find.widgetWithText(PillButton, 'Einladung erstellen'), findsNothing);
       expect(find.byTooltip('Gruppe umbenennen'), findsNothing);
       expect(find.byTooltip('Mitglied verwalten'), findsNothing);
 

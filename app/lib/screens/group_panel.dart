@@ -203,6 +203,8 @@ class _GroupPanelState extends State<GroupPanel> {
   Widget _member(AppState state, GroupInfo g, GroupMember m) {
     final me = m.user == state.ownUser;
     final p = state.peerProfiles[m.user];
+    // Yourself in your own colour and picture.
+    final Color? glow = me ? state.glow : p?.glow;
     final canKick = !me && g.isAdmin && m.role != 'owner' && (g.isOwner || !m.isAdmin);
     final canRole = !me && g.isOwner && m.role != 'owner';
     final sub = [
@@ -220,10 +222,10 @@ class _GroupPanelState extends State<GroupPanel> {
       child: Row(
         children: [
           Avatar(
-            initials: initialsOf(_nameOf(state, m.user)),
-            color: p?.glow ?? TrairColors.accentLight,
+            initials: initialsOf(me && state.userName.trim().isNotEmpty ? state.userName : _nameOf(state, m.user)),
+            color: glow ?? TrairColors.accentLight,
             size: 34,
-            picture: p?.picture,
+            picture: me ? state.picture : p?.picture,
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -239,8 +241,8 @@ class _GroupPanelState extends State<GroupPanel> {
                         style: TextStyle(
                           fontSize: 13.5,
                           fontWeight: FontWeight.w600,
-                          color: p?.glow ?? TrairColors.text,
-                          shadows: p?.glow == null ? null : glowShadows(p!.glow!, strength: 16),
+                          color: glow ?? TrairColors.text,
+                          shadows: glow == null ? null : glowShadows(glow, strength: 16),
                         ),
                       ),
                     ),
@@ -376,7 +378,7 @@ class _GroupPanelState extends State<GroupPanel> {
       ),
       const SizedBox(height: 8),
       PillButton(
-        label: 'Einladungsschlüssel erstellen',
+        label: 'Einladung erstellen',
         icon: TrairIcons.link,
         height: 38,
         expand: true,

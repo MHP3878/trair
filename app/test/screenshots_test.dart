@@ -412,9 +412,9 @@ void main() {
     await tester.tap(find.text('Zum Admin machen'));
     await tester.pumpAndSettle();
     await _shot(tester, '26-gruppe');
-    await tester.ensureVisible(find.widgetWithText(PillButton, 'Einladungsschlüssel erstellen'));
+    await tester.ensureVisible(find.widgetWithText(PillButton, 'Einladung erstellen'));
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(PillButton, 'Einladungsschlüssel erstellen'));
+    await tester.tap(find.widgetWithText(PillButton, 'Einladung erstellen'));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.textContaining('trair3:'));
     await tester.pumpAndSettle();
