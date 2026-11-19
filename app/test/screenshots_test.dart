@@ -12,12 +12,16 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:trair_app/app_state.dart';
 import 'package:trair_app/backend/demo_backend.dart';
 import 'package:trair_app/core/vault.dart';
 import 'package:trair_app/main.dart';
+import 'package:trair_app/screens/chats_screen.dart';
+import 'package:trair_app/screens/lock_screen.dart';
 
 import 'support/fake_door.dart';
 import 'support/fake_server.dart';
+import 'support/multi_door.dart';
 
 Future<void> _font(String family, List<String> files) async {
   final loader = FontLoader(family);
@@ -65,7 +69,12 @@ Future<void> _start(WidgetTester tester, Size size, {FakeDoor? door, FakeServer?
   await tester.pumpWidget(
     RepaintBoundary(
       key: _shotKey,
-      child: TrairApp(backend: DemoBackend(), vault: TrairVault(d), transport: server == null ? null : (_) => server),
+      child: TrairApp(
+        backend: DemoBackend(),
+        vault: TrairVault(d),
+        transport: server == null ? null : (_) => server,
+        accountsBase: Directory.systemTemp.createTempSync('trair-shot-').path,
+      ),
     ),
   );
   await tester.pumpAndSettle();
@@ -203,6 +212,70 @@ void main() {
     );
     server.deliver(FakeDoor.wire({'kind': 'chat', 'chat': 'x1', 'peer': 'local-unbekannt'}));
     await _shot(tester, '20-echter-chat');
+  });
+
+  testWidgets('screenshots of the account list and a profile picture', (tester) async {
+    tester.view.physicalSize = const Size(1440, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final base = Directory.systemTemp.createTempSync('trair-shot-').path;
+    final door = MultiDoor(base);
+    door.doors[base] = FakeDoor(password: _pw, profile: {'name': 'Julian', 'glow': 0xFFA18DFF});
+    final sep = Platform.pathSeparator;
+    for (final (n, card) in [(2, '{"v":1,"name":"Lena","glow":4283754938}'), (3, '{"v":1,"hidden":true}')]) {
+      final dir = '$base${sep}konten$sep$n';
+      Directory(dir).createSync(recursive: true);
+      File('$dir${sep}vault.trair').writeAsStringSync('fake');
+      File('$dir${sep}karte.json').writeAsStringSync(card);
+    }
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: _shotKey,
+        child: TrairApp(backend: DemoBackend(), vault: TrairVault(door), accountsBase: base),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await _unlock(tester);
+
+    // A picture, as if chosen in the file dialog: cut and made small.
+    final element = tester.element(find.byType(ChatsScreen));
+    final state = AppScope.of(element);
+    final raw = await tester.runAsync(() async {
+      final rec = ui.PictureRecorder();
+      final c = ui.Canvas(rec);
+      c.drawRect(
+        const ui.Rect.fromLTWH(0, 0, 300, 200),
+        ui.Paint()
+          ..shader = ui.Gradient.linear(ui.Offset.zero, const ui.Offset(300, 200), const [
+            ui.Color(0xFF8B70FF),
+            ui.Color(0xFF4DD4FF),
+          ]),
+      );
+      c.drawCircle(const ui.Offset(150, 86), 44, ui.Paint()..color = const ui.Color(0xE6FFFFFF));
+      c.drawCircle(const ui.Offset(150, 230), 90, ui.Paint()..color = const ui.Color(0xE6FFFFFF));
+      final img = await rec.endRecording().toImage(300, 200);
+      final bytes = await img.toByteData(format: ui.ImageByteFormat.png);
+      return bytes!.buffer.asUint8List();
+    });
+    expect(await tester.runAsync(() => state.setPicture(raw!)), isNull);
+    // The save timer started in real time (inside runAsync).
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 900)));
+    await tester.pump(const Duration(seconds: 1));
+    expect(File('$base${sep}karte.png').existsSync(), isTrue, reason: 'the start screen shows it');
+    await tester.runAsync(() => precacheImage(MemoryImage(state.picture!), element));
+    await tester.tap(find.text('Strenger Modus an'));
+    await tester.pumpAndSettle();
+    await _shot(tester, '22-profilbild');
+
+    await tester.runAsync(state.lock);
+    await tester.pumpAndSettle();
+    for (final c in state.accountCards) {
+      if (c.picture != null) {
+        await tester.runAsync(() => precacheImage(MemoryImage(c.picture!), tester.element(find.byType(LockScreen))));
+      }
+    }
+    await tester.pumpAndSettle();
+    await _shot(tester, '21-kontoauswahl');
   });
 
   testWidgets('screenshot of a small window', (tester) async {

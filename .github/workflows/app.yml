@@ -163,3 +163,36 @@ jobs:
           path: target/release/trair-server.exe
           retention-days: 30
           if-no-files-found: error
+
+  # A private draft release with the Windows packages, so they can be
+  # fetched without signing in to CI (artifacts need that). Only for pull
+  # requests from this repository; this job builds nothing, it only packs
+  # what the Windows job made, and only it may write releases.
+  vorschau:
+    name: Vorschau-Paket (privater Entwurf)
+    needs: windows
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          path: pakete
+      - name: Packen und in den Entwurf "vorschau" legen
+        working-directory: pakete
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          for d in Trair-Windows-Demo Trair-Server Trair-Team-Werkzeug; do
+            (cd "$d" && zip -qr "../$d.zip" .)
+          done
+          ls -la
+          notes="Automatisch aus CI, Stand ${SHA}. Nur zum Ausprobieren, nicht für echte Nutzung."
+          if ! gh release view vorschau >/dev/null 2>&1; then
+            gh release create vorschau --draft --title "Vorschau" --notes "$notes"
+          fi
+          gh release upload vorschau Trair-Windows-Demo.zip Trair-Server.zip Trair-Team-Werkzeug.zip --clobber
+          gh release edit vorschau --draft --notes "$notes"

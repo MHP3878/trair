@@ -173,6 +173,7 @@ This file lists every third-party component and its license.
 | proc-macro-error-attr2 | 2.0.0 | MIT OR Apache-2.0 | https://github.com/GnomedDev/proc-macro-error-2 |
 | proc-macro-error2 | 2.0.1 | MIT OR Apache-2.0 | https://github.com/GnomedDev/proc-macro-error-2 |
 | proc-macro2 | 1.0.107 | MIT OR Apache-2.0 | https://github.com/dtolnay/proc-macro2 |
+| qrcode | 0.15.0 | MIT OR Apache-2.0 | https://github.com/kennytm/qrcode-rust |
 | quote | 1.0.47 | MIT OR Apache-2.0 | https://github.com/dtolnay/quote |
 | r-efi | 6.0.0 | MIT OR Apache-2.0 OR LGPL-2.1-or-later | https://github.com/r-efi/r-efi |
 | rand | 0.10.4 | MIT OR Apache-2.0 | https://github.com/rust-random/rand |

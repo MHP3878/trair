@@ -60,7 +60,7 @@ dart format --output=none --set-exit-if-changed .
 
 1. `trair-server.exe` starten.
 2. Trair starten, Konto anlegen, Einstellungen → Server → Verbinden.
-3. Eine zweite Instanz mit eigenem Datenordner starten: `$env:TRAIR_DATA_DIR = "$env:TEMP\Trair-Bob"; .\Trair.exe`. Dort ein **neues** Konto anlegen (nicht koppeln) und ebenfalls verbinden.
+3. Ein zweites Trair-Fenster öffnen (Trair.exe noch einmal starten). Auf dem Startbildschirm „Neues Konto erstellen“ wählen und ebenfalls verbinden. Ein Konto kann immer nur in einem Fenster offen sein.
 4. In beiden Fenstern oben auf „Neuer Chat“: den eigenen Kontaktcode kopieren und im anderen Fenster einfügen.
 5. „Chat starten“, schreiben. Die Nachrichten laufen verschlüsselt über den Server; er sieht nur Geheimtext.
 

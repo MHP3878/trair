@@ -320,6 +320,21 @@ class FakeDoor implements CoreDoor {
         if (device == null || device['this'] == true) return _fail('refused');
         devices.remove(device);
         return {'ok': true, 'devices': _copy()};
+      case 'qr':
+        // A fixed pattern with the three corner squares, enough to draw.
+        return {
+          'ok': true,
+          'size': 21,
+          'rows': [
+            for (var y = 0; y < 21; y++)
+              [
+                for (var x = 0; x < 21; x++)
+                  ((x < 7 && y < 7) || (x > 13 && y < 7) || (x < 7 && y > 13))
+                      ? ((x % 6 == 0 || y % 6 == 0 || (x % 7 > 1 && x % 7 < 5 && y % 7 > 1 && y % 7 < 5)) ? '1' : '0')
+                      : ((x * 7 + y * 3 + x * y) % 3 == 0 ? '1' : '0'),
+              ].join(),
+          ],
+        };
       case 'contact_code' ||
           'add_contact' ||
           'contacts' ||

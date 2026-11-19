@@ -334,6 +334,23 @@ Known limits:
   not sent again by itself yet; the app says so.
 - A newly paired device sees new chats, not the existing ones.
 
+## Several accounts on one computer
+
+Code: `app/lib/core/accounts.dart`, `init` in `crates/trair-ffi/src/
+api.rs`; tests: `tuer.rs` (d17), `widget_test.dart` (group "Mehrere
+Konten").
+
+- Each account has its own folder (the data folder, then `konten/2`,
+  `konten/3`, ...) with its own vault, chat database and keys. Accounts
+  share nothing.
+- The start screen lists the accounts before any password. What it shows
+  lies **unencrypted** in `karte.json` and `karte.png` of each folder:
+  name, colour, profile picture (128 × 128). An account can switch this
+  off in its settings; then only "Konto N" is stored and shown. Anyone
+  with access to the user's files can see how many accounts there are.
+- The core locks an account's folder for its process (`trair.lock`); a
+  second Trair window cannot open the same account at the same time.
+
 ## Rules for this repository
 
 No private keys, passwords, recovery keys, tokens or user data are ever

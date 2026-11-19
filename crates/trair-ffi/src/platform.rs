@@ -29,7 +29,14 @@ pub fn create_private_dir(dir: &Path) -> std::io::Result<()> {
 }
 
 #[cfg(windows)]
-pub use windows::{protect_windows, unwrap, wrap};
+pub use windows::{pick_image, protect_windows, unwrap, wrap};
+
+/// Let the person choose a picture file. Only on Windows; elsewhere the
+/// app passes a path itself (tests).
+#[cfg(not(windows))]
+pub fn pick_image() -> Option<Option<String>> {
+    None
+}
 
 #[cfg(not(windows))]
 pub fn wrap(inner: &[u8]) -> Result<Vec<u8>, ()> {
@@ -172,6 +179,53 @@ mod windows {
             }
         }
         1
+    }
+
+    /// The Windows "open file" dialog for pictures. `Some(None)`: the
+    /// person cancelled.
+    pub fn pick_image() -> Option<Option<String>> {
+        use windows_sys::Win32::UI::Controls::Dialogs::{
+            GetOpenFileNameW, OFN_EXPLORER, OFN_FILEMUSTEXIST, OFN_NOCHANGEDIR, OFN_PATHMUSTEXIST,
+            OPENFILENAMEW,
+        };
+        let wide = |s: &str| s.encode_utf16().collect::<Vec<u16>>();
+        // "Name\0pattern\0...\0\0"
+        let filter = wide("Bilder (PNG, JPG, GIF, BMP)\0*.png;*.jpg;*.jpeg;*.gif;*.bmp\0\0");
+        let title = wide("Profilbild wählen\0");
+        let mut file = vec![0u16; 1024];
+        let mut ofn = OPENFILENAMEW {
+            lStructSize: std::mem::size_of::<OPENFILENAMEW>() as u32,
+            lpstrFilter: filter.as_ptr(),
+            lpstrFile: file.as_mut_ptr(),
+            nMaxFile: file.len() as u32,
+            lpstrTitle: title.as_ptr(),
+            Flags: OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR,
+            ..Default::default()
+        };
+        // The dialog uses shell (COM) objects; this thread may not have
+        // COM yet.
+        use windows_sys::Win32::System::Com::{
+            COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx, CoUninitialize,
+        };
+        // SAFETY: no pointers; paired with CoUninitialize below on success.
+        let com = unsafe {
+            CoInitializeEx(
+                std::ptr::null(),
+                (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32,
+            )
+        };
+        // SAFETY: every pointer in `ofn` points to a live, NUL-terminated
+        // buffer of the stated size for the whole call.
+        let chosen = unsafe { GetOpenFileNameW(&mut ofn) } != 0;
+        if com >= 0 {
+            // SAFETY: CoInitializeEx succeeded on this thread.
+            unsafe { CoUninitialize() };
+        }
+        if !chosen {
+            return Some(None);
+        }
+        let len = file.iter().position(|&c| c == 0).unwrap_or(file.len());
+        Some(String::from_utf16(&file[..len]).ok())
     }
 
     /// Hide all top-level windows of this process from screenshots and

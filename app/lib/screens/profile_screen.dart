@@ -24,6 +24,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   late final TextEditingController _about;
   late final TextEditingController _serverUrl;
   bool _askDelete = false;
+  String _pictureMessage = '';
   final _oldPw = TextEditingController();
   final _newPw1 = TextEditingController();
   final _newPw2 = TextEditingController();
@@ -210,21 +211,61 @@ class _ProfileScreenState extends State<ProfileScreen> {
             alignment: Alignment.center,
             padding: const EdgeInsets.symmetric(horizontal: 20),
             decoration: BoxDecoration(color: TrairColors.field, borderRadius: BorderRadius.circular(20)),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                GlowName(
-                  name: state.userName.trim().isEmpty ? 'Dein Name' : state.userName.trim(),
+                Avatar(
+                  initials: state.userName.trim().isEmpty ? '?' : state.userName.trim().characters.first.toUpperCase(),
                   color: state.glow,
-                  strength: state.glowStrength,
-                  size: 44,
+                  size: 76,
+                  picture: state.picture,
                 ),
-                if (state.ownBadges.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  BadgeRow(badges: state.ownBadges, size: 24, spacing: 7),
-                ],
+                const SizedBox(width: 22),
+                Flexible(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      GlowName(
+                        name: state.userName.trim().isEmpty ? 'Dein Name' : state.userName.trim(),
+                        color: state.glow,
+                        strength: state.glowStrength,
+                        size: 40,
+                      ),
+                      if (state.ownBadges.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        BadgeRow(badges: state.ownBadges, size: 24, spacing: 7),
+                      ],
+                    ],
+                  ),
+                ),
               ],
             ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              PillButton(
+                label: state.picture == null ? 'Profilbild wählen' : 'Anderes Bild',
+                icon: TrairIcons.user,
+                kind: PillKind.ghost,
+                height: 40,
+                onPressed: () async {
+                  final message = await state.pickPicture();
+                  if (mounted) setState(() => _pictureMessage = message ?? '');
+                },
+              ),
+              if (state.picture != null) ...[
+                const SizedBox(width: 10),
+                PillButton(label: 'Bild entfernen', kind: PillKind.ghost, height: 40, onPressed: state.removePicture),
+              ],
+              if (_pictureMessage.isNotEmpty) ...[
+                const SizedBox(width: 12),
+                Flexible(
+                  child: Text(_pictureMessage, style: const TextStyle(fontSize: 13, color: TrairColors.amber)),
+                ),
+              ],
+            ],
           ),
           const SizedBox(height: 18),
           Row(
@@ -308,7 +349,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
           ),
-          const SizedBox(height: 14),
+          _row(
+            title: 'Auf dem Startbildschirm zeigen',
+            hint: state.showOnStart
+                ? 'Name, Farbe und Bild stehen vor dem Passwort in der Kontoliste, unverschlüsselt auf diesem PC.'
+                : 'Vor dem Passwort steht nur „Konto ${state.account?.number ?? 1}“, ohne Name und Bild.',
+            divider: false,
+            trailing: PillSwitch(
+              value: state.showOnStart,
+              onChanged: state.setShowOnStart,
+              label: 'Auf dem Startbildschirm zeigen',
+            ),
+          ),
+          const SizedBox(height: 6),
           Align(
             alignment: Alignment.centerLeft,
             child: PillButton(

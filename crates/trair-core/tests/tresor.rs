@@ -9,7 +9,9 @@ use std::sync::LazyLock;
 use std::time::Instant;
 
 use serde_json::json;
-use trair_core::vault::{KdfParams, Limits, MAGIC, MIN_PASSWORD_CHARS, Vault, VaultError};
+use trair_core::vault::{
+    KdfParams, Limits, MAGIC, MAX_PROFILE_BYTES, MIN_PASSWORD_CHARS, Vault, VaultError,
+};
 
 /// Test passwords are random: no password is written in the code.
 static PW: LazyLock<String> = LazyLock::new(|| secret(24));
@@ -213,7 +215,10 @@ fn t11_nothing_readable_in_the_file() {
 #[test]
 fn t12_profile_size_is_limited() {
     let (mut v, _) = new_vault();
-    let big = json!({"name": "x".repeat(70 * 1024)});
+    // A profile picture fits (about 60 KiB), a few hundred KiB do not.
+    let picture = json!({"picture": "x".repeat(60 * 1024)});
+    v.set_profile(picture).expect("room for a picture");
+    let big = json!({"name": "x".repeat(MAX_PROFILE_BYTES + 1)});
     assert_eq!(
         v.set_profile(big.clone()).unwrap_err(),
         VaultError::TooLarge

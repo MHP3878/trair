@@ -16,6 +16,8 @@
 //! | `change_password` | `old`, `new`           |                                  |
 //! | `delete_account`  | `password`             |                                  |
 //! | `protect_window`  | `on`                   | `windows` (how many were set)    |
+//! | `qr`              | `text`                 | `size`, `rows` (`1` dark, `0` light) |
+//! | `pick_image`      |                        | `path`; errors `cancelled`, `unsupported` |
 //! | `rename_device`   | `id`, `label`          | `devices`                        |
 //! | `withdraw_device` | `id`, `password`       | `devices`                        |
 //! | `verify_badges`   | `holder`, `name`, `badges` | `badges`, `refused`, `name_warning` |
@@ -69,7 +71,10 @@
 //! and returns only the valid ones as `{kind, community, community_id,
 //! community_warning, expires}`. It needs no unlocked vault.
 //!
-//! Error codes: `bad_request`, `not_initialized`, `exists`, `no_vault`,
+//! `init` locks the folder for this process; another Trair window gets
+//! `in_use` for the same folder.
+//!
+//! Error codes: `bad_request`, `not_initialized`, `exists`, `no_vault`, `in_use`,
 //! `locked`, `wrong_password` (with `wait` in seconds), `wait` (with
 //! `seconds`), `weak_password`, `damaged`, `refused`, `too_large`, `io`,
 //! `unsupported`, `internal`.
@@ -132,6 +137,12 @@ enum Request {
     ProtectWindow {
         on: bool,
     },
+    /// A QR code for `text` (a contact code). Needs no vault.
+    Qr {
+        text: String,
+    },
+    /// The Windows file dialog for a profile picture.
+    PickImage {},
     RenameDevice {
         id: String,
         label: String,
@@ -251,6 +262,9 @@ struct State {
     pair_guest: Option<PairingGuest>,
     /// The chat database, open while the vault is.
     chats: Option<Messenger>,
+    /// Held while this process uses the data folder: a second Trair
+    /// window cannot open the same account at the same time.
+    folder_lock: Option<std::fs::File>,
 }
 
 static STATE: Mutex<State> = Mutex::new(State {
@@ -261,6 +275,7 @@ static STATE: Mutex<State> = Mutex::new(State {
     pair_host: None,
     pair_guest: None,
     chats: None,
+    folder_lock: None,
 });
 
 /// Handle one request. Never panics on bad input; a poisoned lock (a
@@ -306,6 +321,12 @@ fn run(state: &mut State, req: Request) -> Value {
         Request::DeleteAccount { password } => delete_account(state, &password),
         Request::ProtectWindow { on } => match platform::protect_windows(on) {
             Some(n) => json!({"ok": true, "windows": n}),
+            None => fail("unsupported"),
+        },
+        Request::Qr { text } => qr(&text),
+        Request::PickImage {} => match platform::pick_image() {
+            Some(Some(path)) => json!({"ok": true, "path": path}),
+            Some(None) => fail("cancelled"),
             None => fail("unsupported"),
         },
         Request::RenameDevice { id, label } => rename_device(state, &id, &label),
@@ -409,13 +430,66 @@ fn init(state: &mut State, dir: &str) -> Value {
         return fail("io");
     }
     if state.dir.as_ref() != Some(&dir) {
+        // Take the new folder first; if another window has it, nothing
+        // here changes.
+        let lock = match lock_folder(&dir) {
+            Ok(l) => l,
+            Err(code) => return fail(code),
+        };
         state.vault = None;
         state.chats = None;
+        state.pair_host = None;
+        state.pair_guest = None;
         state.failures = 0;
         state.blocked_until = None;
+        state.folder_lock = Some(lock);
     }
     state.dir = Some(dir);
     status(state)
+}
+
+/// Name of the lock file in each data folder.
+pub const LOCK_FILE: &str = "trair.lock";
+
+fn lock_folder(dir: &Path) -> Result<std::fs::File, &'static str> {
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(dir.join(LOCK_FILE))
+        .map_err(|_| "io")?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(std::fs::TryLockError::WouldBlock) => Err("in_use"),
+        Err(_) => Err("io"),
+    }
+}
+
+/// Longest text for a QR code.
+pub const MAX_QR_TEXT: usize = 512;
+
+/// The squares of a QR code: `size` rows of `size` characters, `1` dark,
+/// `0` light. Error correction level M.
+fn qr(text: &str) -> Value {
+    if text.is_empty() || text.len() > MAX_QR_TEXT {
+        return fail("bad_request");
+    }
+    match qrcode::QrCode::with_error_correction_level(text.as_bytes(), qrcode::EcLevel::M) {
+        Ok(code) => {
+            let size = code.width();
+            let rows: Vec<String> = code
+                .to_colors()
+                .chunks(size)
+                .map(|row| {
+                    row.iter()
+                        .map(|c| if *c == qrcode::Color::Dark { '1' } else { '0' })
+                        .collect()
+                })
+                .collect();
+            json!({"ok": true, "size": size, "rows": rows})
+        }
+        Err(_) => fail("bad_request"),
+    }
 }
 
 fn status(state: &State) -> Value {

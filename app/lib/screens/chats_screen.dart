@@ -11,6 +11,7 @@ import '../core/clipboard.dart';
 import '../backend/backend.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/qr.dart';
 import '../widgets/trair_icons.dart';
 
 enum _Filter { all, direct, group }
@@ -417,18 +418,50 @@ class _ChatsScreenState extends State<ChatsScreen> {
           else ...[
             const FieldLabel('Dein Kontaktcode'),
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: SelectableText(
-                    state.contactCode,
-                    style: const TextStyle(fontFamily: 'GeistMono', fontSize: 12.5, color: TrairColors.text),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.fromLTRB(18, 8, 6, 8),
+                        decoration: BoxDecoration(
+                          color: TrairColors.field,
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(color: TrairColors.borderSoft),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: SelectableText(
+                                state.contactCode,
+                                style: const TextStyle(
+                                  fontFamily: 'GeistMono',
+                                  fontSize: 12.5,
+                                  color: TrairColors.text,
+                                ),
+                              ),
+                            ),
+                            RoundIconButton(
+                              icon: TrairIcons.copy,
+                              tooltip: 'Code kopieren',
+                              filled: false,
+                              onPressed: () => Clipboard.setData(ClipboardData(text: state.contactCode)),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      const Text(
+                        'Oder den QR-Code zeigen: Am Handy wird er gescannt, sobald es die Android-App gibt.',
+                        style: TrairText.small,
+                      ),
+                    ],
                   ),
                 ),
-                RoundIconButton(
-                  icon: TrairIcons.copy,
-                  tooltip: 'Code kopieren',
-                  onPressed: () => Clipboard.setData(ClipboardData(text: state.contactCode)),
-                ),
+                const SizedBox(width: 20),
+                QrBox(text: state.contactCode, size: 132),
               ],
             ),
             const SizedBox(height: 20),
@@ -509,6 +542,45 @@ class _ChatsScreenState extends State<ChatsScreen> {
     );
   }
 
+  /// A real message, shaped like the demo ones: tail corner and time.
+  Widget _realBubble(RealMessage m) {
+    final t = DateTime.fromMillisecondsSinceEpoch(m.at * 1000);
+    final time = '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+    const big = Radius.circular(22);
+    const small = Radius.circular(8);
+    return Align(
+      alignment: m.outgoing ? Alignment.centerRight : Alignment.centerLeft,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 540),
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Column(
+            crossAxisAlignment: m.outgoing ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  color: m.outgoing ? TrairColors.accent : TrairColors.bubbleOther,
+                  borderRadius: m.outgoing
+                      ? const BorderRadius.only(topLeft: big, topRight: big, bottomLeft: big, bottomRight: small)
+                      : const BorderRadius.only(topLeft: big, topRight: big, bottomRight: big, bottomLeft: small),
+                ),
+                child: Text(m.text, style: m.outgoing ? TrairText.body.copyWith(color: Colors.white) : TrairText.body),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+                child: Text(
+                  m.missing > 0 ? '$time · ${m.missing} davor fehlen' : time,
+                  style: TextStyle(fontSize: 11, color: m.missing > 0 ? TrairColors.amber : TrairColors.placeholder),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _realConversation(AppState state, RealChat chat) {
     final messages = state.realMessages[chat.id] ?? const <RealMessage>[];
     final canWrite = chat.state == 'active' && state.chatsOnline;
@@ -541,8 +613,6 @@ class _ChatsScreenState extends State<ChatsScreen> {
                 SecurityCapsule(
                   text: chat.isRequest ? 'Anfrage · unbekannter Schlüssel' : 'Echt Ende-zu-Ende verschlüsselt',
                   tone: chat.isRequest ? CapsuleTone.warn : CapsuleTone.safe,
-                  open: false,
-                  onTap: () {},
                 ),
               ],
             ),
@@ -585,27 +655,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
           Expanded(
             child: ListView(
               padding: const EdgeInsets.fromLTRB(28, 8, 28, 16),
-              children: [
-                for (final m in messages)
-                  Align(
-                    alignment: m.outgoing ? Alignment.centerRight : Alignment.centerLeft,
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 540),
-                      child: Container(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: m.outgoing ? TrairColors.accent : TrairColors.bubbleOther,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          m.missing > 0 ? '${m.text}\n(${m.missing} Nachricht(en) davor fehlen)' : m.text,
-                          style: m.outgoing ? TrairText.body.copyWith(color: Colors.white) : TrairText.body,
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
+              children: [for (final m in messages) _realBubble(m)],
             ),
           ),
           Padding(

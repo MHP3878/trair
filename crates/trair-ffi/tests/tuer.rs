@@ -1036,3 +1036,69 @@ fn d16_the_chat_ops_refuse_what_does_not_fit() {
     call(json!({"op": "lock"}));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn d17_an_account_is_open_in_one_window_only() {
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let mine = fresh_dir();
+    let other = fresh_dir();
+    assert_eq!(call(json!({"op": "init", "dir": mine}))["ok"], true);
+    call(json!({"op": "create", "password": PW, "profile": {}}));
+    // Another Trair window holds the other account's folder.
+    std::fs::create_dir_all(&other).unwrap();
+    let held = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(other.join(trair_ffi::api::LOCK_FILE))
+        .unwrap();
+    held.lock().unwrap();
+    let refused = call(json!({"op": "init", "dir": other}));
+    assert_eq!(error(&refused), "in_use");
+    // Nothing changed here: this account is still open.
+    assert_eq!(call(json!({"op": "status"}))["unlocked"], true);
+    drop(held);
+    let s = call(json!({"op": "init", "dir": other}));
+    assert_eq!(s["ok"], true, "{s}");
+    assert_eq!(s["exists"], false);
+    // Switching gave the first folder free again.
+    let again = std::fs::OpenOptions::new()
+        .write(true)
+        .open(mine.join(trair_ffi::api::LOCK_FILE))
+        .unwrap();
+    assert!(again.try_lock().is_ok(), "the old folder is no longer held");
+    drop(again);
+    let _ = std::fs::remove_dir_all(&mine);
+    let _ = std::fs::remove_dir_all(&other);
+}
+
+#[test]
+fn d18_qr_codes_come_from_the_core() {
+    let code = "trair1:local-0a1b2c3d4e5f:0123456789abcdef0123456789abcdef:ab12"; // pragma: allowlist secret (Beispielcode)
+    let q = call(json!({"op": "qr", "text": code}));
+    assert_eq!(q["ok"], true, "{q}");
+    let size = q["size"].as_u64().unwrap() as usize;
+    let rows: Vec<&str> = q["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r.as_str().unwrap())
+        .collect();
+    assert_eq!(rows.len(), size);
+    assert!(
+        rows.iter()
+            .all(|r| r.len() == size && r.bytes().all(|b| b == b'0' || b == b'1'))
+    );
+    // The three finder squares sit in the corners.
+    for (r, c) in [(0, 0), (0, size - 7), (size - 7, 0)] {
+        assert_eq!(&rows[r][c..c + 7], "1111111");
+        assert_eq!(&rows[r + 6][c..c + 7], "1111111");
+    }
+    assert_eq!(error(&call(json!({"op": "qr", "text": ""}))), "bad_request");
+    assert_eq!(
+        error(&call(json!({"op": "qr", "text": "x".repeat(513)}))),
+        "bad_request"
+    );
+    #[cfg(not(windows))]
+    assert_eq!(error(&call(json!({"op": "pick_image"}))), "unsupported");
+}
