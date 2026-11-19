@@ -20,6 +20,11 @@
 //! before the end becomes a contact at once, without a request; it works
 //! for one person only. `v`: the chat it opens vanishes at the end, on
 //! both sides.
+//!
+//! A group key has the same shape with `trair3` and `m` (member) or `g`
+//! (guest: leaves again at the end). It names the admin who made it; its
+//! token goes to that admin, whose device adds whoever brings it before
+//! the end, as often as it is used.
 
 use sha2::{Digest, Sha256};
 
@@ -28,6 +33,7 @@ use crate::error::{CoreError, Result};
 
 const PREFIX: &str = "trair1";
 const INVITE_PREFIX: &str = "trair2";
+const GROUP_PREFIX: &str = "trair3";
 const CHECK_CONTEXT: &[u8] = b"trair/contact-code/v1\0";
 const INVITE_CHECK_CONTEXT: &[u8] = b"trair/invite-code/v1\0";
 
@@ -38,6 +44,10 @@ pub enum InviteKind {
     Friend,
     /// A chat that vanishes at the end, with a contact that goes with it.
     Vanishing,
+    /// A group key: whoever uses it joins the group.
+    Member,
+    /// A group key for guests: they leave the group again at the end.
+    Guest,
 }
 
 impl InviteKind {
@@ -46,6 +56,21 @@ impl InviteKind {
         match self {
             InviteKind::Friend => 'f',
             InviteKind::Vanishing => 'v',
+            InviteKind::Member => 'm',
+            InviteKind::Guest => 'g',
+        }
+    }
+
+    /// A group key (not a friendship key).
+    pub fn is_group(self) -> bool {
+        matches!(self, InviteKind::Member | InviteKind::Guest)
+    }
+
+    fn prefix(self) -> &'static str {
+        if self.is_group() {
+            GROUP_PREFIX
+        } else {
+            INVITE_PREFIX
         }
     }
 
@@ -54,6 +79,8 @@ impl InviteKind {
         match c {
             'f' => Some(InviteKind::Friend),
             'v' => Some(InviteKind::Vanishing),
+            'm' => Some(InviteKind::Member),
+            'g' => Some(InviteKind::Guest),
             _ => None,
         }
     }
@@ -89,7 +116,8 @@ impl InviteCode {
         let token = hex::encode(self.token);
         let tail = format!("{}{}", self.kind.letter(), self.ends);
         format!(
-            "{INVITE_PREFIX}:{}:{}:{token}:{tail}:{}",
+            "{}:{}:{}:{token}:{tail}:{}",
+            self.kind.prefix(),
             self.contact.user,
             self.contact.fingerprint.as_str(),
             invite_check(&self.contact.user, &self.contact.fingerprint, &token, &tail)
@@ -104,7 +132,7 @@ impl InviteCode {
         let [prefix, user, fp, token, tail, sum] = parts.as_slice() else {
             return Err(CoreError::Rejected("not a friendship key".into()));
         };
-        if *prefix != INVITE_PREFIX {
+        if *prefix != INVITE_PREFIX && *prefix != GROUP_PREFIX {
             return Err(CoreError::Rejected("not a friendship key".into()));
         }
         validate_name(user)?;
@@ -117,6 +145,9 @@ impl InviteCode {
             .next()
             .and_then(InviteKind::from_letter)
             .ok_or_else(|| CoreError::Rejected("friendship key has a typo".into()))?;
+        if kind.prefix() != *prefix {
+            return Err(CoreError::Rejected("friendship key has a typo".into()));
+        }
         let ends: u64 = chars
             .as_str()
             .parse()
@@ -243,6 +274,27 @@ mod tests {
             b[i] = if b[i] == b'0' { b'1' } else { b'0' };
             let changed = String::from_utf8(b).unwrap();
             assert!(InviteCode::parse(&changed).is_err(), "{changed}");
+        }
+    }
+
+    #[test]
+    fn group_keys_have_their_own_prefix() {
+        for kind in [InviteKind::Member, InviteKind::Guest] {
+            let code = InviteCode {
+                contact: ContactCode {
+                    user: "olga".into(),
+                    fingerprint: Fingerprint::of(b"key"),
+                },
+                token: [7; 16],
+                kind,
+                ends: 1_800_003_600,
+            };
+            let text = code.text();
+            assert!(text.starts_with("trair3:"), "{text}");
+            assert_eq!(InviteCode::parse(&text).unwrap(), code);
+            // The prefix and the letter must agree.
+            let swapped = text.replacen("trair3", "trair2", 1);
+            assert!(InviteCode::parse(&swapped).is_err());
         }
     }
 }

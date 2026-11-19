@@ -49,6 +49,9 @@ pub enum CommitOutcome {
         /// SHA-256 (hex) of the change taken last.
         taken: String,
     },
+    /// The chat named the accounts that may change it, and this one is
+    /// not among them.
+    NotAllowed,
 }
 
 /// The database.
@@ -103,7 +106,8 @@ impl Db {
                  at INTEGER NOT NULL
              );
              -- Chats, only to order changes: random id, next epoch, hash of
-             -- the last change taken. Not who is in them.
+             -- the last change taken, and (once a chat names them) the
+             -- accounts that may change it. Not who is in them.
              CREATE TABLE IF NOT EXISTS groups (
                  id TEXT PRIMARY KEY,
                  next_epoch INTEGER NOT NULL,
@@ -124,6 +128,15 @@ impl Db {
             conn.execute_batch(
                 "ALTER TABLE keypackages ADD COLUMN last_resort INTEGER NOT NULL DEFAULT 0;",
             )?;
+        }
+        // Databases from before groups lack the committers column.
+        let has_committers: bool = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('groups') WHERE name = 'committers'",
+            [],
+            |r| r.get::<_, i64>(0).map(|n| n > 0),
+        )?;
+        if !has_committers {
+            conn.execute_batch("ALTER TABLE groups ADD COLUMN committers TEXT;")?;
         }
         Ok(Db { conn })
     }
@@ -247,6 +260,15 @@ impl Db {
         Ok(n as usize)
     }
 
+    /// Delete the one-time key packages of a device (an update made the
+    /// old ones useless).
+    pub fn drop_keypackages(&self, user: &str, device: &str) -> DbResult<usize> {
+        self.conn.execute(
+            "DELETE FROM keypackages WHERE user = ?1 AND device = ?2 AND last_resort = 0",
+            params![user, device],
+        )
+    }
+
     /// Replace the last-resort key package of a device. It is handed out
     /// only when no one-time package is left, and never deleted by that.
     pub fn set_last_resort(&self, user: &str, device: &str, package: &[u8]) -> DbResult<()> {
@@ -322,6 +344,11 @@ impl Db {
     /// Take a change of a chat if it is the first for its epoch: store
     /// the new epoch and queue the commit and welcome, all or nothing.
     /// Otherwise nothing is queued and the answer names what was taken.
+    ///
+    /// Once a chat named the accounts that may change it (`committers`,
+    /// sent along with a change), a change from any other account (`by`)
+    /// is refused. A new list replaces the old one with a taken change.
+    #[allow(clippy::too_many_arguments)]
     pub fn commit(
         &self,
         group: &str,
@@ -329,16 +356,24 @@ impl Db {
         hash: &str,
         deliveries: &[(&str, &str, &[u8])],
         now: u64,
+        by: &str,
+        committers: Option<&[String]>,
     ) -> DbResult<CommitOutcome> {
         let tx = self.conn.unchecked_transaction()?;
-        let known: Option<(i64, String)> = tx
+        let known: Option<(i64, String, Option<String>)> = tx
             .query_row(
-                "SELECT next_epoch, last_hash FROM groups WHERE id = ?1",
+                "SELECT next_epoch, last_hash, committers FROM groups WHERE id = ?1",
                 params![group],
-                |r| Ok((r.get(0)?, r.get(1)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .optional()?;
-        if let Some((next, taken)) = known
+        if let Some((_, _, Some(list))) = &known {
+            let allowed: Vec<String> = serde_json::from_str(list).unwrap_or_default();
+            if !allowed.iter().any(|u| u == by) {
+                return Ok(CommitOutcome::NotAllowed);
+            }
+        }
+        if let Some((next, taken, _)) = known
             && next as u64 != epoch
         {
             return Ok(CommitOutcome::Refused {
@@ -346,11 +381,14 @@ impl Db {
                 taken,
             });
         }
+        let list = committers.map(|c| serde_json::to_string(c).unwrap_or_default());
         tx.execute(
-            "INSERT INTO groups (id, next_epoch, last_hash, updated) VALUES (?1, ?2, ?3, ?4)
+            "INSERT INTO groups (id, next_epoch, last_hash, updated, committers)
+             VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT (id) DO UPDATE SET next_epoch = excluded.next_epoch,
-                 last_hash = excluded.last_hash, updated = excluded.updated",
-            params![group, (epoch + 1) as i64, hash, now as i64],
+                 last_hash = excluded.last_hash, updated = excluded.updated,
+                 committers = COALESCE(excluded.committers, groups.committers)",
+            params![group, (epoch + 1) as i64, hash, now as i64, list],
         )?;
         for (user, device, body) in deliveries {
             tx.execute(

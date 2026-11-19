@@ -41,6 +41,14 @@ pub enum CoreError {
     /// damaged file or a full disk. Nothing was sent.
     #[error("chat storage: {0}")]
     Storage(String),
+    /// The group's rules do not allow this (for example: only admins
+    /// remove members).
+    #[error("not allowed: {0}")]
+    NotAllowed(String),
+    /// A device runs a Trair too old for this (its key packages do not
+    /// know groups yet).
+    #[error("outdated device: {0}")]
+    Outdated(String),
     /// Internal error from the MLS library or the crypto provider.
     #[error("internal error: {0}")]
     Internal(String),

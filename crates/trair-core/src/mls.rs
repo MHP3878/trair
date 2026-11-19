@@ -20,10 +20,68 @@ use serde::{Deserialize, Serialize};
 use crate::account::{Account, DeviceCertificate, Fingerprint, SCHEME};
 use crate::devices::DeviceIdentity;
 use crate::error::{CoreError, Result, internal};
+use crate::groups::{self, Accounts, Acct, GroupState, TRAIR_EXTENSION};
 use crate::policy::{Policy, PolicyState, Trust};
 
 /// The only cipher suite Trair uses: X25519, AES-128-GCM, SHA-256, Ed25519.
 pub const CIPHERSUITE: Ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
+
+/// What every Trair device announces in its leaves: it understands the
+/// Trair group state (and, for the reserve package, last resort).
+fn leaf_capabilities(last_resort: bool) -> Capabilities {
+    let mut extensions = vec![ExtensionType::Unknown(TRAIR_EXTENSION)];
+    if last_resort {
+        extensions.push(ExtensionType::LastResort);
+    }
+    Capabilities::builder().extensions(extensions).build()
+}
+
+/// The group context extensions that carry a Trair group state. Every
+/// member must understand it.
+fn state_extensions(state: &GroupState) -> Result<Extensions<GroupContext>> {
+    Extensions::from_vec(vec![
+        Extension::RequiredCapabilities(RequiredCapabilitiesExtension::new(
+            &[ExtensionType::Unknown(TRAIR_EXTENSION)],
+            &[],
+            &[],
+        )),
+        Extension::Unknown(TRAIR_EXTENSION, UnknownExtension(state.to_bytes())),
+    ])
+    .map_err(internal)
+}
+
+fn read_state(extensions: &Extensions<GroupContext>) -> Result<Option<GroupState>> {
+    extensions
+        .unknown(TRAIR_EXTENSION)
+        .map(|u| GroupState::parse(&u.0))
+        .transpose()
+}
+
+/// The account of a leaf, from its checked certificate.
+fn leaf_acct(identity: &[u8], signature_key: &[u8]) -> Option<Acct> {
+    DeviceCertificate::check(identity, signature_key)
+        .ok()
+        .map(|c| Acct {
+            user: c.user,
+            fp: c.account.as_str().to_string(),
+        })
+}
+
+/// Collect accounts; one user under two keys is refused.
+fn collect_accounts<'a>(accts: impl IntoIterator<Item = &'a Acct>) -> Result<Accounts> {
+    let mut out = Accounts::new();
+    for a in accts {
+        if let Some(fp) = out.insert(a.user.clone(), a.fp.clone())
+            && fp != a.fp
+        {
+            return Err(CoreError::Blocked(format!(
+                "{} is in the group under two keys",
+                a.user
+            )));
+        }
+    }
+    Ok(out)
+}
 
 /// A key package as handed out by the server, together with the device
 /// the server claims it belongs to. The claim is checked, never trusted.
@@ -79,6 +137,9 @@ pub enum Event {
         /// The welcome used the last-resort key package. Call
         /// [`Device::self_update`] for this group right away.
         via_last_resort: bool,
+        /// The group's state (a Trair group or join chat), already checked
+        /// against the members and the adder's role.
+        state: Option<GroupState>,
     },
     /// A chat message.
     Message {
@@ -124,6 +185,8 @@ pub enum Event {
         removed: Vec<String>,
         /// This device is no longer a member.
         i_was_removed: bool,
+        /// The group state changed (name, admins, guests, end).
+        state_changed: bool,
     },
     /// Something else that needs no action (for example a proposal).
     Other {
@@ -387,6 +450,7 @@ impl Device {
         (0..n)
             .map(|_| {
                 let bundle = KeyPackage::builder()
+                    .leaf_node_capabilities(leaf_capabilities(false))
                     .build(
                         CIPHERSUITE,
                         &self.provider,
@@ -407,11 +471,8 @@ impl Device {
     pub fn last_resort_key_package(&mut self) -> Result<Vec<u8>> {
         // The leaf must announce that it understands the last-resort
         // extension, or other devices refuse the package (RFC 9420, 10).
-        let capabilities = Capabilities::builder()
-            .extensions(vec![ExtensionType::LastResort])
-            .build();
         let bundle = KeyPackage::builder()
-            .leaf_node_capabilities(capabilities)
+            .leaf_node_capabilities(leaf_capabilities(true))
             .mark_as_last_resort()
             .build(
                 CIPHERSUITE,
@@ -431,20 +492,91 @@ impl Device {
             .map_err(internal)
     }
 
+    /// The group a message is for (`None` for a welcome or bytes that are
+    /// not an MLS message).
+    pub fn group_of(&self, bytes: &[u8]) -> Option<String> {
+        let msg = MlsMessageIn::tls_deserialize_exact(bytes).ok()?;
+        let pm = msg.try_into_protocol_message().ok()?;
+        Some(String::from_utf8_lossy(pm.group_id().as_slice()).into_owned())
+    }
+
+    /// The accounts behind key packages (checked like any offer).
+    pub fn offer_accounts(&self, offers: &[KeyPackageOffer]) -> Result<Vec<Acct>> {
+        offers
+            .iter()
+            .map(|o| {
+                let (kp, member) = self.check_offer(o)?;
+                let leaf = kp.leaf_node();
+                leaf_acct(
+                    leaf.credential().serialized_content(),
+                    leaf.signature_key().as_slice(),
+                )
+                .ok_or(CoreError::Forged(member.id))
+            })
+            .collect()
+    }
+
+    /// Members asked for new keys; an admin's next commit carries them.
+    pub fn has_proposals(&self, group: &str) -> Result<bool> {
+        Ok(self.group(group)?.pending_proposals().next().is_some())
+    }
+
     /// Does this device hold the group?
     pub fn has_group(&self, group: &str) -> bool {
         self.groups.contains_key(group)
     }
 
+    /// This device's account.
+    pub fn acct(&self) -> Acct {
+        Acct {
+            user: self.user.clone(),
+            fp: self.account.as_str().to_string(),
+        }
+    }
+
+    /// The Trair state of a group; `None` for a plain one-to-one chat.
+    pub fn group_state(&self, group: &str) -> Result<Option<GroupState>> {
+        read_state(self.group(group)?.extensions())
+    }
+
+    /// The accounts in a group (user → account fingerprint).
+    pub fn accounts(&self, group: &str) -> Result<Accounts> {
+        let g = self.group(group)?;
+        let accts: Vec<Acct> = g
+            .members()
+            .filter_map(|m| leaf_acct(m.credential.serialized_content(), &m.signature_key))
+            .collect();
+        collect_accounts(&accts)
+    }
+
     /// Create a new group with only this device in it.
     pub fn create_group(&mut self, group: &str) -> Result<()> {
+        self.create_group_with(group, None)
+    }
+
+    /// Create a Trair group (or join chat) with its state, with only this
+    /// device in it.
+    pub fn create_trair_group(&mut self, group: &str, state: &GroupState) -> Result<()> {
+        if !state.is_admin(&self.acct()) && state.kind == groups::GroupKind::Group {
+            return Err(CoreError::NotAllowed(
+                "the creator must own the group".into(),
+            ));
+        }
+        self.create_group_with(group, Some(state))
+    }
+
+    fn create_group_with(&mut self, group: &str, state: Option<&GroupState>) -> Result<()> {
         if self.groups.contains_key(group) {
             return Err(CoreError::GroupExists(group.to_string()));
         }
-        let cfg = MlsGroupCreateConfig::builder()
+        let mut cfg = MlsGroupCreateConfig::builder()
             .ciphersuite(CIPHERSUITE)
             .use_ratchet_tree_extension(true)
-            .build();
+            .capabilities(leaf_capabilities(false));
+        if let Some(s) = state {
+            cfg = cfg.with_group_context_extensions(state_extensions(s)?);
+        }
+        let cfg = cfg.build();
         let g = MlsGroup::new_with_group_id(
             &self.provider,
             &self.keys,
@@ -686,6 +818,169 @@ impl Device {
         })
     }
 
+    /// Change a Trair group in one commit: add devices (`offers`), remove
+    /// devices (`remove`, as `user:device`) and set a new state. The change
+    /// is checked against the group's rules first, exactly as every other
+    /// member will check it. `allow` are accounts verified another way (a
+    /// group key's token); strict mode lets them in although they are not
+    /// contacts.
+    pub fn change(
+        &mut self,
+        group: &str,
+        offers: &[KeyPackageOffer],
+        remove: &[String],
+        new_state: Option<&GroupState>,
+        allow: &[Acct],
+    ) -> Result<Outgoing> {
+        let old = self
+            .group_state(group)?
+            .ok_or_else(|| CoreError::Rejected("not a group".into()))?;
+        let g = self.group(group)?;
+        let leaves: Vec<(LeafNodeIndex, String, Option<Acct>)> = g
+            .members()
+            .map(|m| {
+                let member = self.judge(m.credential.serialized_content(), &m.signature_key);
+                (
+                    m.index,
+                    member.id,
+                    leaf_acct(m.credential.serialized_content(), &m.signature_key),
+                )
+            })
+            .collect();
+        let mut kps = Vec::new();
+        let mut added = Vec::new();
+        let mut added_accts = Vec::new();
+        for offer in offers {
+            if offer.claimed_device == self.id || leaves.iter().any(|l| l.1 == offer.claimed_device)
+            {
+                continue;
+            }
+            let (kp, member) = self.check_offer(offer)?;
+            let leaf = kp.leaf_node();
+            if !leaf
+                .capabilities()
+                .extensions()
+                .contains(&ExtensionType::Unknown(TRAIR_EXTENSION))
+            {
+                return Err(CoreError::Outdated(member.id));
+            }
+            let acct = leaf_acct(
+                leaf.credential().serialized_content(),
+                leaf.signature_key().as_slice(),
+            )
+            .ok_or_else(|| CoreError::Forged(member.id.clone()))?;
+            kps.push(kp);
+            added.push(member);
+            added_accts.push(acct);
+        }
+        let blocked = self.policy.blocking(
+            added
+                .iter()
+                .zip(&added_accts)
+                .filter(|(_, a)| !allow.contains(a))
+                .map(|(m, _)| (m.id.as_str(), m.trust)),
+        );
+        if !blocked.is_empty() {
+            return Err(CoreError::Blocked(format!(
+                "not verified: {}",
+                blocked.join(", ")
+            )));
+        }
+        let targets: Vec<&(LeafNodeIndex, String, Option<Acct>)> = leaves
+            .iter()
+            .filter(|l| remove.contains(&l.1) && l.1 != self.id)
+            .collect();
+        if kps.is_empty()
+            && targets.is_empty()
+            && new_state.is_none_or(|n| *n == old)
+            && !self.has_proposals(group)?
+        {
+            return Err(CoreError::Rejected("nothing to change".into()));
+        }
+        // The same check every member makes before following it.
+        let after = collect_accounts(
+            leaves
+                .iter()
+                .filter(|l| !targets.iter().any(|t| t.0 == l.0))
+                .filter_map(|l| l.2.as_ref())
+                .chain(&added_accts),
+        )?;
+        let removed_users: Vec<String> = targets
+            .iter()
+            .filter_map(|t| t.2.as_ref().map(|a| a.user.clone()))
+            .collect();
+        let new = new_state.unwrap_or(&old);
+        groups::check_change(&old, new, &self.acct(), &removed_users, &after)?;
+        let extensions = match new_state {
+            Some(n) if *n != old => Some(state_extensions(n)?),
+            _ => None,
+        };
+        let epoch = self.epoch(group)?;
+        let removed: Vec<String> = targets.iter().map(|t| t.1.clone()).collect();
+        let indices: Vec<LeafNodeIndex> = targets.iter().map(|t| t.0).collect();
+        let (provider, keys) = (&self.provider, &self.keys);
+        let g = self
+            .groups
+            .get_mut(group)
+            .ok_or_else(|| CoreError::UnknownGroup(group.to_string()))?;
+        let mut builder = g
+            .commit_builder()
+            .propose_adds(kps)
+            .propose_removals(indices);
+        if let Some(e) = extensions {
+            builder = builder
+                .propose_group_context_extensions(e)
+                .map_err(internal)?;
+        }
+        let bundle = builder
+            .load_psks(provider.storage())
+            .map_err(internal)?
+            // Besides this commit's own proposals only the stored key
+            // updates of members (see `receive`).
+            .build(provider.rand(), provider.crypto(), keys, |p| {
+                matches!(
+                    p.proposal().proposal_type(),
+                    ProposalType::Add
+                        | ProposalType::Remove
+                        | ProposalType::Update
+                        | ProposalType::GroupContextExtensions
+                )
+            })
+            .map_err(internal)?
+            .stage_commit(provider)
+            .map_err(internal)?;
+        let (commit, welcome, _) = bundle.into_messages();
+        Ok(Outgoing {
+            group: group.to_string(),
+            epoch,
+            commit: commit.to_bytes().map_err(internal)?,
+            welcome: welcome
+                .map(|w| w.to_bytes())
+                .transpose()
+                .map_err(internal)?,
+            added,
+            removed,
+        })
+    }
+
+    /// Ask for new keys of this device in a Trair group where it may not
+    /// commit itself (after joining through the last-resort package). The
+    /// next change by an admin carries it. Send the bytes to the members.
+    pub fn propose_update(&mut self, group: &str) -> Result<Vec<u8>> {
+        if self.group_state(group)?.is_none() {
+            return Err(CoreError::Rejected("not a group".into()));
+        }
+        let (provider, keys) = (&self.provider, &self.keys);
+        let g = self
+            .groups
+            .get_mut(group)
+            .ok_or_else(|| CoreError::UnknownGroup(group.to_string()))?;
+        let (m, _) = g
+            .propose_self_update(provider, keys, LeafNodeParameters::default())
+            .map_err(internal)?;
+        m.to_bytes().map_err(internal)
+    }
+
     /// Replace this device's keys in a group (needed after joining through
     /// the last-resort key package, and useful from time to time).
     pub fn self_update(&mut self, group: &str) -> Result<Outgoing> {
@@ -780,6 +1075,33 @@ impl Device {
         )
     }
 
+    /// Encrypt a group setting that must go out even while a withdrawn or
+    /// unverified device is still in the group: leaving, or asking to
+    /// remove one's own withdrawn device. It carries no secret. A forged
+    /// device still stops it.
+    pub fn encrypt_control_anyway(
+        &mut self,
+        group: &str,
+        control: &serde_json::Value,
+    ) -> Result<Vec<u8>> {
+        if let Some(f) = self
+            .members(group)?
+            .into_iter()
+            .find(|m| m.trust == Trust::Forged)
+        {
+            return Err(CoreError::Forged(f.id));
+        }
+        self.seal(
+            group,
+            &Payload {
+                seq: 0,
+                text: String::new(),
+                profile: None,
+                control: Some(control.clone()),
+            },
+        )
+    }
+
     /// Nothing goes to a group with a forged, withdrawn or (in strict mode)
     /// unverified device.
     fn check_send(&self, group: &str) -> Result<()> {
@@ -800,9 +1122,16 @@ impl Device {
         if !withdrawn.is_empty() {
             return Err(CoreError::Withdrawn(withdrawn.join(", ")));
         }
-        let blocked = self
-            .policy
-            .blocking(members.iter().map(|m| (m.id.as_str(), m.trust)));
+        // In a Trair group every member was added by an admin (each device
+        // checked that): the admin vouches for those who are not contacts.
+        // A key that differs from a verified one still blocks.
+        let vouched = self.group_state(group)?.is_some();
+        let blocked = self.policy.blocking(
+            members
+                .iter()
+                .filter(|m| !(vouched && m.trust == Trust::Unverified))
+                .map(|m| (m.id.as_str(), m.trust)),
+        );
         if !blocked.is_empty() {
             return Err(CoreError::Blocked(format!(
                 "not verified: {}",
@@ -876,6 +1205,20 @@ impl Device {
         if let Some(w) = members.iter().find(|m| m.trust == Trust::Withdrawn) {
             return Err(CoreError::Withdrawn(format!("group contains {}", w.id)));
         }
+        let state = read_state(staged.group_context().extensions())?;
+        if let Some(s) = &state {
+            let accts: Vec<Acct> = staged
+                .members()
+                .filter_map(|m| leaf_acct(m.credential.serialized_content(), &m.signature_key))
+                .collect();
+            let adder = staged.welcome_sender().map_err(internal)?;
+            let adder = leaf_acct(
+                adder.credential().serialized_content(),
+                adder.signature_key().as_slice(),
+            )
+            .ok_or_else(|| CoreError::Forged("the adder".into()))?;
+            groups::check_welcome(s, &adder, &collect_accounts(&accts)?)?;
+        }
         let g = staged
             .into_group(&self.provider)
             .map_err(|e| CoreError::Rejected(format!("{e:?}")))?;
@@ -886,6 +1229,7 @@ impl Device {
             members,
             by,
             via_last_resort,
+            state,
         })
     }
 
@@ -897,6 +1241,15 @@ impl Device {
             .into_iter()
             .map(|(i, m)| (i.u32(), m))
             .collect();
+        let old_state = self.group_state(&group)?;
+        let accts_before: HashMap<u32, Acct> = self
+            .group(&group)?
+            .members()
+            .filter_map(|m| {
+                leaf_acct(m.credential.serialized_content(), &m.signature_key)
+                    .map(|a| (m.index.u32(), a))
+            })
+            .collect();
         let provider = &self.provider;
         let g = self
             .groups
@@ -905,11 +1258,14 @@ impl Device {
         let processed = g
             .process_message(provider, pm)
             .map_err(|e| CoreError::Rejected(format!("{e:?}")))?;
-        let sender = match processed.sender() {
-            Sender::Member(i) => before
-                .get(&i.u32())
-                .map(|m| m.id.clone())
-                .ok_or_else(|| CoreError::Rejected("sender not in group".into()))?,
+        let (sender, sender_index) = match processed.sender() {
+            Sender::Member(i) => (
+                before
+                    .get(&i.u32())
+                    .map(|m| m.id.clone())
+                    .ok_or_else(|| CoreError::Rejected("sender not in group".into()))?,
+                i.u32(),
+            ),
             _ => return Err(CoreError::Rejected("sender is not a member".into())),
         };
         match processed.into_content() {
@@ -974,6 +1330,64 @@ impl Device {
                     .filter_map(|r| before.get(&r.remove_proposal().removed().u32()))
                     .map(|m| m.id.clone())
                     .collect();
+                let new_state = read_state(sc.group_context().extensions())?;
+                let state_changed = new_state != old_state;
+                match (&old_state, &new_state) {
+                    (None, None) => {}
+                    (Some(old), Some(new)) => {
+                        // Follow only changes the group's rules allow.
+                        for p in sc.queued_proposals() {
+                            if !matches!(
+                                p.proposal().proposal_type(),
+                                ProposalType::Add
+                                    | ProposalType::Remove
+                                    | ProposalType::Update
+                                    | ProposalType::GroupContextExtensions
+                            ) {
+                                return Err(CoreError::NotAllowed(format!(
+                                    "{sender} sent a kind of change Trair does not use"
+                                )));
+                            }
+                        }
+                        let committer = accts_before
+                            .get(&sender_index)
+                            .ok_or_else(|| CoreError::Rejected("committer unknown".into()))?;
+                        let removed_idx: Vec<u32> = sc
+                            .remove_proposals()
+                            .map(|r| r.remove_proposal().removed().u32())
+                            .collect();
+                        let removed_users: Vec<String> = removed_idx
+                            .iter()
+                            .filter_map(|i| accts_before.get(i).map(|a| a.user.clone()))
+                            .collect();
+                        let mut after_accts: Vec<Acct> = accts_before
+                            .iter()
+                            .filter(|(i, _)| !removed_idx.contains(i))
+                            .map(|(_, a)| a.clone())
+                            .collect();
+                        for a in sc.add_proposals() {
+                            let leaf = a.add_proposal().key_package().leaf_node();
+                            if let Some(acct) = leaf_acct(
+                                leaf.credential().serialized_content(),
+                                leaf.signature_key().as_slice(),
+                            ) {
+                                after_accts.push(acct);
+                            }
+                        }
+                        groups::check_change(
+                            old,
+                            new,
+                            committer,
+                            &removed_users,
+                            &collect_accounts(&after_accts)?,
+                        )?;
+                    }
+                    _ => {
+                        return Err(CoreError::NotAllowed(
+                            "a chat cannot turn into a group or back".into(),
+                        ));
+                    }
+                }
                 let self_removed = sc.self_removed();
                 let provider = &self.provider;
                 let g = self
@@ -988,7 +1402,22 @@ impl Device {
                     added,
                     removed,
                     i_was_removed,
+                    state_changed,
                 })
+            }
+            ProcessedMessageContent::ProposalMessage(p) => {
+                // In a Trair group members ask for new keys this way; the
+                // next admin's commit carries it. Nothing else is kept.
+                if old_state.is_some() && p.proposal().proposal_type() == ProposalType::Update {
+                    let provider = &self.provider;
+                    let g = self
+                        .groups
+                        .get_mut(&group)
+                        .ok_or_else(|| CoreError::UnknownGroup(group.clone()))?;
+                    g.store_pending_proposal(provider.storage(), *p)
+                        .map_err(internal)?;
+                }
+                Ok(Event::Other { group })
             }
             _ => Ok(Event::Other { group }),
         }

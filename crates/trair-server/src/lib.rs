@@ -542,6 +542,10 @@ struct Upload {
     /// Replaces the device's last-resort package.
     #[serde(default)]
     last_resort: Option<String>,
+    /// Delete this device's one-time packages first (after an update the
+    /// old ones lack what groups need).
+    #[serde(default)]
+    replace: bool,
 }
 
 async fn upload_keypackages(
@@ -563,6 +567,10 @@ async fn upload_keypackages(
         .map(|p| decode(p, MAX_KEYPACKAGE))
         .transpose()?;
     let db = s.db();
+    if r.replace {
+        db.drop_keypackages(&me.user, &me.device)
+            .map_err(internal)?;
+    }
     let stored = db
         .add_keypackages(&me.user, &me.device, &packages, MAX_KEYPACKAGES)
         .map_err(internal)?;
@@ -663,7 +671,14 @@ struct CommitRequest {
     welcome: Option<String>,
     #[serde(default)]
     welcome_to: Vec<To>,
+    /// The accounts that may change the chat from now on (sent by groups;
+    /// once a chat has such a list, nobody else's change is taken).
+    #[serde(default)]
+    committers: Option<Vec<String>>,
 }
+
+/// Most accounts that may change one chat (owner plus admins).
+pub const MAX_COMMITTERS: usize = 128;
 
 /// A chat id as the Trair core makes them: 16 random bytes, hex.
 fn is_group_id(id: &str) -> bool {
@@ -678,9 +693,14 @@ fn is_group_id(id: &str) -> bool {
 /// the chat only by its random id, not who is in it. A refused change
 /// gets the epoch and the hash of the change that was taken; a device
 /// that resends its own change after a crash recognises it that way.
+///
+/// A group sends the accounts that may change it (owner and admins) with
+/// its changes; from then on the server takes changes only from them, so
+/// a member cannot block the group with a change everyone refuses (403
+/// `not_allowed`). Name, roles and members stay encrypted.
 async fn commit(
     State(s): State<Arc<Server>>,
-    _me: Session,
+    me: Session,
     Json(r): Json<CommitRequest>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     if !is_group_id(&r.group) {
@@ -691,6 +711,11 @@ async fn commit(
     }
     if r.to.len() + r.welcome_to.len() > MAX_RECIPIENTS {
         return Err(bad("recipients"));
+    }
+    if let Some(c) = &r.committers
+        && (c.is_empty() || c.len() > MAX_COMMITTERS || c.iter().any(|u| validate_name(u).is_err()))
+    {
+        return Err(bad("committers"));
     }
     let commit = decode(&r.commit, MAX_MESSAGE)?;
     let welcome = match (&r.welcome, r.welcome_to.is_empty()) {
@@ -723,7 +748,15 @@ async fn commit(
     let hash = hex::encode(Sha256::digest(&commit));
     let outcome = s
         .db()
-        .commit(&r.group, r.epoch, &hash, &deliveries, s.now())
+        .commit(
+            &r.group,
+            r.epoch,
+            &hash,
+            &deliveries,
+            s.now(),
+            &me.user,
+            r.committers.as_deref(),
+        )
         .map_err(internal)?;
     match outcome {
         CommitOutcome::Taken { epoch } => {
@@ -735,6 +768,10 @@ async fn commit(
         CommitOutcome::Refused { epoch, taken } => Ok((
             StatusCode::CONFLICT,
             Json(json!({"ok": false, "error": "wrong_epoch", "epoch": epoch, "taken": taken})),
+        )),
+        CommitOutcome::NotAllowed => Ok((
+            StatusCode::FORBIDDEN,
+            Json(json!({"ok": false, "error": "not_allowed"})),
         )),
     }
 }
