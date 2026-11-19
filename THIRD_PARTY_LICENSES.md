@@ -14,8 +14,12 @@ This file lists every third-party component and its license.
 | aes-gcm | 0.10.3 | Apache-2.0 OR MIT | https://github.com/RustCrypto/AEADs |
 | aho-corasick | 1.1.5 | Unlicense OR MIT | https://github.com/BurntSushi/aho-corasick |
 | argon2 | 0.6.0 | MIT OR Apache-2.0 | https://github.com/RustCrypto/password-hashes |
+| atomic-waker | 1.1.2 | Apache-2.0 OR MIT | https://github.com/smol-rs/atomic-waker |
 | autocfg | 1.5.1 | Apache-2.0 OR MIT | https://github.com/cuviper/autocfg |
+| axum | 0.8.9 | MIT | https://github.com/tokio-rs/axum |
+| axum-core | 0.5.6 | MIT | https://github.com/tokio-rs/axum |
 | base16ct | 0.2.0 | Apache-2.0 OR MIT | https://github.com/RustCrypto/formats/tree/master/base16ct |
+| base64 | 0.22.1 | MIT OR Apache-2.0 | https://github.com/marshallpierce/rust-base64 |
 | base64ct | 1.8.3 | Apache-2.0 OR MIT | https://github.com/RustCrypto/formats |
 | bindgen | 0.72.1 | BSD-3-Clause | https://github.com/rust-lang/rust-bindgen |
 | bitflags | 2.13.2 | MIT OR Apache-2.0 | https://github.com/bitflags/bitflags |
@@ -23,6 +27,7 @@ This file lists every third-party component and its license.
 | block-buffer | 0.10.4 | MIT OR Apache-2.0 | https://github.com/RustCrypto/utils |
 | block-buffer | 0.12.1 | MIT OR Apache-2.0 | https://github.com/RustCrypto/utils |
 | bumpalo | 3.20.4 | MIT OR Apache-2.0 | https://github.com/fitzgen/bumpalo |
+| bytes | 1.12.2 | MIT | https://github.com/tokio-rs/bytes |
 | cc | 1.11.2 | MIT OR Apache-2.0 | https://github.com/rust-lang/cc-rs |
 | cexpr | 0.6.0 | Apache-2.0/MIT | https://github.com/jethrogb/rust-cexpr |
 | cfg-if | 1.0.5 | MIT OR Apache-2.0 | https://github.com/rust-lang/cfg-if |
@@ -58,10 +63,15 @@ This file lists every third-party component and its license.
 | ed25519-dalek | 2.2.0 | BSD-3-Clause | https://github.com/dalek-cryptography/curve25519-dalek/tree/main/ed25519-dalek |
 | either | 1.19.0 | MIT OR Apache-2.0 | https://github.com/rayon-rs/either |
 | elliptic-curve | 0.13.8 | Apache-2.0 OR MIT | https://github.com/RustCrypto/traits/tree/master/elliptic-curve |
+| errno | 0.3.15 | MIT OR Apache-2.0 | https://github.com/lambda-fairy/rust-errno |
+| fallible-iterator | 0.3.0 | MIT/Apache-2.0 | https://github.com/sfackler/rust-fallible-iterator |
+| fallible-streaming-iterator | 0.1.9 | MIT/Apache-2.0 | https://github.com/sfackler/fallible-streaming-iterator |
 | ff | 0.13.1 | MIT/Apache-2.0 | https://github.com/zkcrypto/ff |
 | fiat-crypto | 0.2.9 | MIT OR Apache-2.0 OR BSD-1-Clause | https://github.com/mit-plv/fiat-crypto |
 | fiat-crypto | 0.3.0 | MIT OR Apache-2.0 OR BSD-1-Clause | https://github.com/mit-plv/fiat-crypto |
 | find-msvc-tools | 0.1.15 | MIT OR Apache-2.0 | https://github.com/rust-lang/cc-rs |
+| foldhash | 0.2.0 | Zlib | https://github.com/orlp/foldhash |
+| form_urlencoded | 1.2.2 | MIT OR Apache-2.0 | https://github.com/servo/rust-url |
 | futures-core | 0.3.34 | MIT OR Apache-2.0 | https://github.com/rust-lang/futures-rs |
 | futures-task | 0.3.34 | MIT OR Apache-2.0 | https://github.com/rust-lang/futures-rs |
 | futures-util | 0.3.34 | MIT OR Apache-2.0 | https://github.com/rust-lang/futures-rs |
@@ -71,6 +81,8 @@ This file lists every third-party component and its license.
 | ghash | 0.5.1 | Apache-2.0 OR MIT | https://github.com/RustCrypto/universal-hashes |
 | glob | 0.3.4 | MIT OR Apache-2.0 | https://github.com/rust-lang/glob |
 | group | 0.13.0 | MIT/Apache-2.0 | https://github.com/zkcrypto/group |
+| hashbrown | 0.17.1 | MIT OR Apache-2.0 | https://github.com/rust-lang/hashbrown |
+| hashlink | 0.12.2 | MIT OR Apache-2.0 | https://github.com/djc/hashlink |
 | hax-lib | 0.3.7 | Apache-2.0 | https://github.com/hacspec/hax |
 | hax-lib-macros | 0.3.7 | Apache-2.0 | https://github.com/hacspec/hax |
 | hax-lib-macros-types | 0.3.7 | Apache-2.0 | https://github.com/hacspec/hax |
@@ -83,7 +95,14 @@ This file lists every third-party component and its license.
 | hpke-rs-crypto | 0.7.0 | MPL-2.0 | https://github.com/celabshq/libcrux |
 | hpke-rs-libcrux | 0.7.0 | MPL-2.0 | https://github.com/celabshq/libcrux |
 | hpke-rs-rust-crypto | 0.7.0 | MPL-2.0 | https://github.com/celabshq/libcrux |
+| http | 1.5.0 | MIT OR Apache-2.0 | https://github.com/hyperium/http |
+| http-body | 1.1.0 | MIT | https://github.com/hyperium/http-body |
+| http-body-util | 0.1.5 | MIT | https://github.com/hyperium/http-body |
+| httparse | 1.10.1 | MIT OR Apache-2.0 | https://github.com/seanmonstar/httparse |
+| httpdate | 1.0.3 | MIT OR Apache-2.0 | https://github.com/pyfisch/httpdate |
 | hybrid-array | 0.4.15 | MIT OR Apache-2.0 | https://github.com/RustCrypto/hybrid-array |
+| hyper | 1.12.0 | MIT | https://github.com/hyperium/hyper |
+| hyper-util | 0.1.21 | MIT | https://github.com/hyperium/hyper-util |
 | inout | 0.1.4 | MIT OR Apache-2.0 | https://github.com/RustCrypto/utils |
 | itertools | 0.13.0 | MIT OR Apache-2.0 | https://github.com/rust-itertools/itertools |
 | itoa | 1.0.19 | MIT OR Apache-2.0 | https://github.com/dtolnay/itoa |
@@ -112,9 +131,13 @@ This file lists every third-party component and its license.
 | libcrux-sha3 | 0.0.10 | Apache-2.0 | https://github.com/cryspen/libcrux |
 | libcrux-traits | 0.0.8 | Apache-2.0 | https://github.com/cryspen/libcrux |
 | libloading | 0.8.9 | ISC | https://github.com/nagisa/rust_libloading/ |
+| libsqlite3-sys | 0.40.0 | MIT | https://github.com/rusqlite/rusqlite |
 | log | 0.4.35 | MIT OR Apache-2.0 | https://github.com/rust-lang/log |
+| matchit | 0.8.4 | MIT AND BSD-3-Clause | https://github.com/ibraheemdev/matchit |
 | memchr | 2.8.3 | Unlicense OR MIT | https://github.com/BurntSushi/memchr |
+| mime | 0.3.18 | MIT OR Apache-2.0 | https://github.com/hyperium/mime |
 | minimal-lexical | 0.2.1 | MIT/Apache-2.0 | https://github.com/Alexhuszagh/minimal-lexical |
+| mio | 1.2.5 | MIT | https://github.com/tokio-rs/mio |
 | ml-dsa | 0.1.2 | Apache-2.0 OR MIT | https://github.com/RustCrypto/signatures |
 | ml-kem | 0.3.4 | Apache-2.0 OR MIT | https://github.com/RustCrypto/KEMs |
 | module-lattice | 0.2.4 | Apache-2.0 OR MIT | https://github.com/RustCrypto/KEMs |
@@ -134,6 +157,7 @@ This file lists every third-party component and its license.
 | password-hash | 0.6.1 | MIT OR Apache-2.0 | https://github.com/RustCrypto/traits |
 | pastey | 0.2.3 | MIT OR Apache-2.0 | https://github.com/as1100k/pastey |
 | pem-rfc7468 | 0.7.0 | Apache-2.0 OR MIT | https://github.com/RustCrypto/formats/tree/master/pem-rfc7468 |
+| percent-encoding | 2.3.2 | MIT OR Apache-2.0 | https://github.com/servo/rust-url/ |
 | phc | 0.6.1 | Apache-2.0 OR MIT | https://github.com/RustCrypto/formats |
 | pin-project-lite | 0.2.17 | Apache-2.0 OR MIT | https://github.com/taiki-e/pin-project-lite |
 | pkcs8 | 0.10.2 | Apache-2.0 OR MIT | https://github.com/RustCrypto/formats/tree/master/pkcs8 |
@@ -161,10 +185,13 @@ This file lists every third-party component and its license.
 | regex-syntax | 0.8.12 | MIT OR Apache-2.0 | https://github.com/rust-lang/regex |
 | rfc6979 | 0.4.0 | Apache-2.0 OR MIT | https://github.com/RustCrypto/signatures/tree/master/rfc6979 |
 | rpassword | 7.5.5 | Apache-2.0 | https://github.com/conradkleinespel/rpassword |
+| rsqlite-vfs | 0.2.0 | MIT | https://github.com/Spxg/sqlite-wasm-rs |
 | rtoolbox | 0.0.6 | Apache-2.0 | https://github.com/conradkleinespel/rtoolbox |
+| rusqlite | 0.43.0 | MIT | https://github.com/rusqlite/rusqlite |
 | rustc-hash | 2.1.3 | Apache-2.0 OR MIT | https://github.com/rust-lang/rustc-hash |
 | rustc_version | 0.4.1 | MIT OR Apache-2.0 | https://github.com/djc/rustc-version-rs |
 | rustversion | 1.0.23 | MIT OR Apache-2.0 | https://github.com/dtolnay/rustversion |
+| ryu | 1.0.23 | Apache-2.0 OR BSL-1.0 | https://github.com/dtolnay/ryu |
 | sec1 | 0.7.3 | Apache-2.0 OR MIT | https://github.com/RustCrypto/formats/tree/master/sec1 |
 | semver | 1.0.28 | MIT OR Apache-2.0 | https://github.com/dtolnay/semver |
 | serde | 1.0.229 | MIT OR Apache-2.0 | https://github.com/serde-rs/serde |
@@ -172,30 +199,43 @@ This file lists every third-party component and its license.
 | serde_core | 1.0.229 | MIT OR Apache-2.0 | https://github.com/serde-rs/serde |
 | serde_derive | 1.0.229 | MIT OR Apache-2.0 | https://github.com/serde-rs/serde |
 | serde_json | 1.0.154 | MIT OR Apache-2.0 | https://github.com/serde-rs/json |
+| serde_path_to_error | 0.1.20 | MIT OR Apache-2.0 | https://github.com/dtolnay/path-to-error |
+| serde_urlencoded | 0.7.1 | MIT/Apache-2.0 | https://github.com/nox/serde_urlencoded |
 | sha2 | 0.10.9 | MIT OR Apache-2.0 | https://github.com/RustCrypto/hashes |
 | sha2 | 0.11.1 | MIT OR Apache-2.0 | https://github.com/RustCrypto/hashes |
 | sha3 | 0.12.0 | MIT OR Apache-2.0 | https://github.com/RustCrypto/hashes |
 | shake | 0.1.0 | MIT OR Apache-2.0 | https://github.com/RustCrypto/XOFs |
 | shlex | 1.3.0 | MIT OR Apache-2.0 | https://github.com/comex/rust-shlex |
 | shlex | 2.0.1 | MIT OR Apache-2.0 | https://github.com/comex/rust-shlex |
+| signal-hook-registry | 1.4.8 | MIT OR Apache-2.0 | https://github.com/vorner/signal-hook |
 | signature | 2.2.0 | Apache-2.0 OR MIT | https://github.com/RustCrypto/traits/tree/master/signature |
 | signature | 3.0.0 | Apache-2.0 OR MIT | https://github.com/RustCrypto/traits |
 | slab | 0.4.12 | MIT | https://github.com/tokio-rs/slab |
+| smallvec | 1.16.6 | MIT OR Apache-2.0 | https://github.com/smallvec/smallvec |
+| socket2 | 0.6.5 | MIT OR Apache-2.0 | https://github.com/rust-lang/socket2 |
 | spake2 | 0.4.0 | MIT OR Apache-2.0 | https://github.com/RustCrypto/PAKEs/tree/master/spake2 |
 | spki | 0.7.3 | Apache-2.0 OR MIT | https://github.com/RustCrypto/formats/tree/master/spki |
 | spki | 0.8.1 | Apache-2.0 OR MIT | https://github.com/RustCrypto/formats |
 | sponge-cursor | 0.1.0 | MIT OR Apache-2.0 | https://github.com/RustCrypto/utils |
+| sqlite-wasm-rs | 0.6.3 | MIT | https://github.com/Spxg/sqlite-wasm-rs |
 | subtle | 2.6.1 | BSD-3-Clause | https://github.com/dalek-cryptography/subtle |
 | syn | 2.0.119 | MIT OR Apache-2.0 | https://github.com/dtolnay/syn |
 | syn | 3.0.10 | MIT OR Apache-2.0 | https://github.com/dtolnay/syn |
+| sync_wrapper | 1.0.2 | Apache-2.0 | https://github.com/Actyx/sync_wrapper |
 | thiserror | 2.0.21 | MIT OR Apache-2.0 | https://github.com/dtolnay/thiserror |
 | thiserror-impl | 2.0.21 | MIT OR Apache-2.0 | https://github.com/dtolnay/thiserror |
 | tls_codec | 0.5.0 | Apache-2.0 OR MIT | https://github.com/RustCrypto/formats |
 | tls_codec_derive | 0.5.0 | Apache-2.0 OR MIT | https://github.com/RustCrypto/formats |
+| tokio | 1.54.1 | MIT | https://github.com/tokio-rs/tokio |
+| tokio-macros | 2.7.2 | MIT | https://github.com/tokio-rs/tokio |
+| tower | 0.5.3 | MIT | https://github.com/tower-rs/tower |
+| tower-layer | 0.3.3 | MIT | https://github.com/tower-rs/tower |
+| tower-service | 0.3.3 | MIT | https://github.com/tower-rs/tower |
 | typenum | 1.20.1 | MIT OR Apache-2.0 | https://github.com/paholg/typenum |
 | unicode-ident | 1.0.27 | (MIT OR Apache-2.0) AND Unicode-3.0 | https://github.com/dtolnay/unicode-ident |
 | universal-hash | 0.5.1 | MIT OR Apache-2.0 | https://github.com/RustCrypto/traits |
 | uuid | 1.29.3 | Apache-2.0 OR MIT | https://github.com/uuid-rs/uuid |
+| vcpkg | 0.2.15 | MIT/Apache-2.0 | https://github.com/mcgoo/vcpkg-rs |
 | version_check | 0.9.5 | MIT/Apache-2.0 | https://github.com/SergioBenitez/version_check |
 | wasi | 0.11.1+wasi-snapshot-preview1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | https://github.com/bytecodealliance/wasi |
 | wasm-bindgen | 0.2.130 | MIT OR Apache-2.0 | https://github.com/wasm-bindgen/wasm-bindgen |

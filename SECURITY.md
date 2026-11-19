@@ -164,6 +164,47 @@ Code: `crates/trair-core/src/teamkey.rs`, `crates/trair-team`; tests:
 Known limit: while the tool runs, malware on the same computer could
 read the key. The tool is needed about once a year.
 
+## The server (M3, step 2)
+
+Code: `crates/trair-server`, `crates/trair-core/src/proofs.rs`; tests:
+`crates/trair-server/tests/server.rs` (real Trair clients against the
+server: registration, login, MLS chat, pairing through the relay,
+withdrawal, clean-up, limits).
+
+- **No passwords on the server.** A device logs in by signing a random
+  challenge (60 seconds, single use, only for the device it was made
+  for). Only devices on the account's current signed device list can log
+  in. Session tokens last 12 hours and are stored only as SHA-256 hashes.
+- **Accounts** are registered with the public account key and a device
+  list signed by it. Device lists only move forward; when a device leaves
+  the list, its sessions, key packages and waiting messages are deleted
+  at once. Deleting an account needs a fresh signature of the account
+  key, not only a session.
+- **Messages** are MLS ciphertext, stored without sender, deleted when
+  the device acknowledges them, at the latest after 30 days. Accounts
+  unused for 6 months are deleted with all their data. SQLite runs with
+  `secure_delete`, so deleted rows are overwritten.
+- **Pairing relay:** the server hands out a channel number; the new
+  device (no account yet) gets exactly one attempt per channel; channels
+  expire after 10 minutes; only the owner reads the guest's messages.
+  The relay only sees SPAKE2 messages and ciphertext.
+- **Limits:** 256 KiB per message, 1 MiB per request, 10,000 waiting
+  messages per device, 100 key packages per device, registrations,
+  login challenges and pairing attempts per IP address and hour. IP
+  addresses are kept only in memory for these limits, never stored.
+- In this step the server only listens on 127.0.0.1 / ::1; other
+  addresses are refused until TLS is built in.
+
+Known limits of the server:
+
+- It sees metadata: which device receives messages, from which account a
+  session sends, and when. "Sealed sender" can reduce this later.
+- A stranger who guesses a pairing channel number can use up its one
+  attempt and so spoil that pairing (not take it over); the person then
+  starts a new code.
+- The database is not encrypted at rest; it holds public keys, hashes
+  and ciphertext.
+
 ## Rules for this repository
 
 No private keys, passwords, recovery keys, tokens or user data are ever
