@@ -70,6 +70,25 @@ CREATE TABLE IF NOT EXISTS seen (
     hash BLOB PRIMARY KEY,
     at INTEGER NOT NULL
 ) WITHOUT ROWID;
+-- Profiles of other accounts as they sent them: checked, newest only.
+-- (Added after version 1; only new tables, so older databases simply get
+-- them when they are opened.)
+CREATE TABLE IF NOT EXISTS profiles (
+    user TEXT PRIMARY KEY,
+    rev INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    glow INTEGER,
+    about TEXT NOT NULL,
+    picture BLOB,
+    badges TEXT NOT NULL,
+    account_key BLOB NOT NULL,
+    at INTEGER NOT NULL
+) WITHOUT ROWID;
+-- Which version of this account's own profile each chat already has.
+CREATE TABLE IF NOT EXISTS profile_sent (
+    chat TEXT PRIMARY KEY,
+    rev INTEGER NOT NULL
+) WITHOUT ROWID;
 ";
 
 /// An open chat database.

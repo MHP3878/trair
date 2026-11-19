@@ -37,3 +37,8 @@ spake2 = "=0.4.0"
 # file. Its crypto comes from OpenSSL (Apache-2.0), built from source with
 # the program, so no system library is needed. Same rusqlite as the server.
 rusqlite = { version = "=0.43.0", features = ["bundled-sqlcipher-vendored-openssl"] }
+# Profile pictures from other people (step 3): decoded with limits and
+# written anew, so a crafted file never reaches the app. Pure Rust,
+# MIT OR Apache-2.0.
+png = "=0.18.1"
+base64 = "=0.22.1"

@@ -26,6 +26,7 @@ use crate::devices::{DeviceIdentity, DeviceList};
 use crate::error::{CoreError, Result, internal};
 use crate::mls::{Device, DeviceState, Event, KeyPackageOffer, Member, Outgoing};
 use crate::policy::Trust;
+use crate::profiles;
 use crate::store::{Store, put_meta, sql};
 
 /// File name of the chat database in the data folder.
@@ -179,8 +180,40 @@ pub enum Incoming {
         /// This device is no longer in the chat.
         left: bool,
     },
+    /// The chat partner sent a newer profile (stored; see
+    /// [`Messenger::profile`]).
+    Profile {
+        /// Whose profile.
+        user: String,
+    },
     /// Nothing to show (for example a proposal).
     Other,
+}
+
+/// Another account's profile, as stored.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PeerProfile {
+    /// Whose profile.
+    pub user: String,
+    /// What they sent, checked.
+    pub profile: profiles::Checked,
+    /// Their account key (to check badges against).
+    pub account_key: Vec<u8>,
+    /// When it arrived.
+    pub at: u64,
+}
+
+/// This account's profile, ready for one chat.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfileOut {
+    /// The chat.
+    pub chat: String,
+    /// Which version.
+    pub rev: u64,
+    /// The encrypted message.
+    pub bytes: Vec<u8>,
+    /// Devices that get it.
+    pub to: Vec<String>,
 }
 
 /// The chats of this device.
@@ -821,6 +854,12 @@ impl Messenger {
                     missing,
                 }))
             }
+            Event::Profile {
+                group,
+                from,
+                account_key,
+                profile,
+            } => self.got_profile(&group, &from, account_key, &profile, now, mark),
             Event::Commit {
                 group,
                 by,
@@ -934,6 +973,103 @@ impl Messenger {
             chat,
             update_keys: via_last_resort,
         })
+    }
+
+    /// This account's profile for every active chat that does not have
+    /// this version yet. `only_contacts`: only chats with contacts (not
+    /// with someone whose request was accepted). Nothing is stored: once
+    /// the server took a message, call [`Messenger::profile_sent`]. A chat
+    /// that cannot get it now (for example strict mode) is left out.
+    pub fn share_profile(
+        &mut self,
+        profile: &serde_json::Value,
+        only_contacts: bool,
+    ) -> Result<Vec<ProfileOut>> {
+        let checked = profiles::check(profile)?;
+        let wire = checked.to_wire();
+        let mut out = Vec::new();
+        for chat in self.chats()? {
+            if chat.state != ChatState::Active {
+                continue;
+            }
+            if only_contacts && self.contact(&chat.peer)?.is_none() {
+                continue;
+            }
+            let sent: Option<i64> = self
+                .store
+                .conn()
+                .query_row(
+                    "SELECT rev FROM profile_sent WHERE chat = ?1",
+                    [&chat.id],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(sql)?;
+            if sent.is_some_and(|s| to_u64(s) >= checked.rev) {
+                continue;
+            }
+            let Ok(bytes) = self.device.encrypt_profile(&chat.id, &wire) else {
+                continue;
+            };
+            out.push(ProfileOut {
+                to: self.recipients(&chat.id)?,
+                chat: chat.id,
+                rev: checked.rev,
+                bytes,
+            });
+        }
+        // The ratchet moved: keep disk and memory the same.
+        self.save(|_| Ok(()))?;
+        Ok(out)
+    }
+
+    /// The server took the profile for `chat`.
+    pub fn profile_sent(&mut self, chat: &str, rev: u64) -> Result<()> {
+        let (c, r) = (chat.to_string(), to_i64(rev));
+        self.save(move |tx| {
+            tx.execute(
+                "INSERT INTO profile_sent (chat, rev) VALUES (?1, ?2)
+                 ON CONFLICT (chat) DO UPDATE SET rev = max(rev, excluded.rev)",
+                params![c, r],
+            )
+            .map_err(sql)?;
+            Ok(())
+        })
+    }
+
+    /// The stored profile of `user`.
+    pub fn profile(&self, user: &str) -> Result<Option<PeerProfile>> {
+        let mut st = self
+            .store
+            .conn()
+            .prepare(
+                "SELECT user, rev, name, glow, about, picture, badges, account_key, at
+                 FROM profiles WHERE user = ?1",
+            )
+            .map_err(sql)?;
+        let mut rows = st.query_map([user], row_profile).map_err(sql)?;
+        match rows.next() {
+            Some(r) => Ok(Some(r.map_err(sql)??)),
+            None => Ok(None),
+        }
+    }
+
+    /// Every stored profile.
+    pub fn profiles(&self) -> Result<Vec<PeerProfile>> {
+        let mut st = self
+            .store
+            .conn()
+            .prepare(
+                "SELECT user, rev, name, glow, about, picture, badges, account_key, at
+                 FROM profiles ORDER BY user",
+            )
+            .map_err(sql)?;
+        let rows = st.query_map([], row_profile).map_err(sql)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r.map_err(sql)??);
+        }
+        Ok(out)
     }
 
     /// Accept a request: the other account becomes a contact with the key
@@ -1059,6 +1195,87 @@ impl Messenger {
         out.reverse();
         Ok(out)
     }
+}
+
+impl Messenger {
+    /// A profile arrived. Kept only from the chat partner, only if it
+    /// passes the checks and only if it is newer; otherwise just marked
+    /// as seen.
+    fn got_profile(
+        &mut self,
+        group: &str,
+        from: &str,
+        account_key: Vec<u8>,
+        profile: &serde_json::Value,
+        now: u64,
+        mark: impl FnOnce(&Transaction) -> Result<()>,
+    ) -> Result<Incoming> {
+        let user = user_of(from).to_string();
+        let checked = match self.chat(group) {
+            Ok(chat) if chat.peer == user && user != self.user => profiles::check(profile).ok(),
+            _ => None,
+        };
+        let newer = match &checked {
+            Some(c) => self
+                .profile(&user)?
+                .is_none_or(|old| old.profile.rev < c.rev),
+            None => false,
+        };
+        let Some(c) = checked.filter(|_| newer) else {
+            self.save(mark)?;
+            return Ok(Incoming::Other);
+        };
+        let badges =
+            serde_json::to_string(&c.badges).map_err(|e| CoreError::Storage(e.to_string()))?;
+        let u = user.clone();
+        self.save(move |tx| {
+            mark(tx)?;
+            tx.execute(
+                "INSERT INTO profiles (user, rev, name, glow, about, picture, badges, account_key, at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                 ON CONFLICT (user) DO UPDATE SET rev = excluded.rev, name = excluded.name,
+                   glow = excluded.glow, about = excluded.about, picture = excluded.picture,
+                   badges = excluded.badges, account_key = excluded.account_key, at = excluded.at",
+                params![
+                    u,
+                    to_i64(c.rev),
+                    c.name,
+                    c.glow.map(i64::from),
+                    c.about,
+                    c.picture,
+                    badges,
+                    account_key,
+                    to_i64(now)
+                ],
+            )
+            .map_err(sql)?;
+            Ok(())
+        })?;
+        Ok(Incoming::Profile { user })
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn row_profile(r: &rusqlite::Row) -> rusqlite::Result<Result<PeerProfile>> {
+    let glow: Option<i64> = r.get(3)?;
+    let badges: String = r.get(6)?;
+    let badges = match serde_json::from_str(&badges) {
+        Ok(b) => b,
+        Err(e) => return Ok(Err(CoreError::Storage(e.to_string()))),
+    };
+    Ok(Ok(PeerProfile {
+        user: r.get(0)?,
+        profile: profiles::Checked {
+            rev: to_u64(r.get(1)?),
+            name: r.get(2)?,
+            glow: glow.and_then(|g| u32::try_from(g).ok()),
+            about: r.get(4)?,
+            picture: r.get(5)?,
+            badges,
+        },
+        account_key: r.get(7)?,
+        at: to_u64(r.get(8)?),
+    }))
 }
 
 fn clean_name(name: &str, user: &str) -> String {

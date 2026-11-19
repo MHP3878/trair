@@ -1306,3 +1306,132 @@ fn d22_setting_pins_needs_the_password_and_follows_the_rules() {
     call(json!({"op": "lock"}));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A small PNG with a hidden text chunk.
+fn png_picture(side: u32) -> Vec<u8> {
+    let mut pixels = vec![0u8; (side * side * 4) as usize];
+    getrandom::fill(&mut pixels).unwrap();
+    let mut out = Vec::new();
+    {
+        let mut e = png::Encoder::new(&mut out, side, side);
+        e.set_color(png::ColorType::Rgba);
+        e.set_depth(png::BitDepth::Eight);
+        e.add_text_chunk("Kamera".into(), "Standort geheim".into())
+            .unwrap();
+        let mut w = e.write_header().unwrap();
+        w.write_image_data(&pixels).unwrap();
+        w.finish().unwrap();
+    }
+    out
+}
+
+#[test]
+fn d23_profiles_go_to_contacts_and_come_back_checked() {
+    use trair_core::badges::{Badge, BadgeKind, Community};
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let dir = fresh_dir();
+    call(json!({"op": "init", "dir": dir}));
+    call(json!({"op": "create", "password": PW, "profile": {}}));
+    let mut bob = Bob::new();
+    let my_code = call(json!({"op": "contact_code"}))["code"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    bob.m
+        .add_contact(&my_code, "Julian", 1_800_000_000)
+        .unwrap();
+    call(json!({"op": "add_contact", "code": bob.m.contact_code(), "name": "Bob"}));
+    let started = call(json!({"op": "start_chat", "user": "local-bob", "offers": bob.offer()}));
+    let chat = started["chat"]["id"].as_str().unwrap().to_string();
+    call(json!({"op": "commit_answer", "chat": chat, "accepted": true}));
+    bob.m
+        .receive(&unb64(&started["commit"]["welcome"]), 1_800_000_000)
+        .unwrap();
+
+    // Julian shares: one message for the chat with Bob, then not again.
+    let pic = png_picture(48);
+    let mine = json!({"v": 1, "rev": 5, "name": "Julian", "glow": 0xFFA18DFFu32,
+        "about": "Hallo", "picture": b64(&pic), "badges": []});
+    let shared = call(json!({"op": "share_profile", "profile": mine, "only_contacts": true}));
+    assert_eq!(shared["out"].as_array().unwrap().len(), 1, "{shared}");
+    let out = &shared["out"][0];
+    assert_eq!(out["to"], json!([bob.m.device_id()]));
+    assert_eq!(
+        call(json!({"op": "profile_sent", "chat": chat, "rev": 5}))["ok"],
+        true
+    );
+    let again = call(json!({"op": "share_profile", "profile": mine, "only_contacts": true}));
+    assert!(again["out"].as_array().unwrap().is_empty());
+    let got = bob.m.receive(&unb64(&out["body"]), 1_800_000_000).unwrap();
+    assert!(
+        matches!(got, trair_core::Incoming::Profile { .. }),
+        "{got:?}"
+    );
+    let julian = bob.m.profiles().unwrap().remove(0);
+    assert_eq!(julian.profile.name, "Julian");
+    assert!(
+        !String::from_utf8_lossy(julian.profile.picture.as_ref().unwrap()).contains("Standort")
+    );
+    // A broken profile of one's own is refused before anything goes out.
+    let bad = call(
+        json!({"op": "share_profile", "profile": {"v": 1, "rev": 6, "name": ""}, "only_contacts": false}),
+    );
+    assert_eq!(error(&bad), "rejected");
+
+    // Bob's profile with one real badge (he founded a community) and one
+    // he copied from someone else.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let community = Community::create("Bobs Runde", &bob.account).unwrap();
+    let real = Badge::issue(
+        &bob.account,
+        BadgeKind::Founder,
+        bob.account.public_key(),
+        Some(community.clone()),
+        now,
+        3600,
+        None,
+    )
+    .unwrap();
+    let other = trair_core::Account::generate("lena").unwrap();
+    let theirs = Community::create("Lenas Runde", &other).unwrap();
+    let copied = Badge::issue(
+        &other,
+        BadgeKind::Founder,
+        other.public_key(),
+        Some(theirs),
+        now,
+        3600,
+        None,
+    )
+    .unwrap();
+    let bobs = json!({"v": 1, "rev": 9, "name": "Robert", "glow": 0xFF5EE6B0u32, "about": "",
+        "picture": null, "badges": [real, copied]});
+    let out = bob.m.share_profile(&bobs, true).unwrap();
+    let got = call(json!({"op": "receive", "body": b64(&out[0].bytes)}));
+    assert_eq!(got["incoming"]["kind"], "profile", "{got}");
+    assert_eq!(got["incoming"]["user"], "local-bob");
+    let list = call(json!({"op": "profiles"}));
+    let p = &list["profiles"][0];
+    assert_eq!(p["name"], "Robert");
+    assert_eq!(p["glow"], 0xFF5EE6B0u32);
+    assert!(p["picture"].is_null());
+    assert_eq!(
+        p["badges"].as_array().unwrap().len(),
+        1,
+        "only his own badge: {p}"
+    );
+    assert_eq!(p["badges"][0]["community"], "Bobs Runde");
+    // Locking and opening again keeps it.
+    call(json!({"op": "lock"}));
+    assert_eq!(error(&call(json!({"op": "profiles"}))), "locked");
+    call(json!({"op": "unlock", "password": PW}));
+    assert_eq!(
+        call(json!({"op": "profiles"}))["profiles"][0]["name"],
+        "Robert"
+    );
+    call(json!({"op": "lock"}));
+    let _ = std::fs::remove_dir_all(&dir);
+}

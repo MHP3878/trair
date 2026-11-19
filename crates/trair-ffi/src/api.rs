@@ -235,6 +235,15 @@ enum Request {
     Receive {
         body: String,
     },
+    ShareProfile {
+        profile: Value,
+        only_contacts: bool,
+    },
+    ProfileSent {
+        chat: String,
+        rev: u64,
+    },
+    Profiles {},
     #[serde(rename = "accept_request")]
     AcceptChat {
         chat: String,
@@ -440,6 +449,12 @@ fn chat_op(state: &mut State, req: Request) -> Value {
         } => chats::commit_answer(m, &chat, accepted, taken.as_deref()),
         Request::SendMessage { chat, text } => chats::send_message(m, &chat, &text),
         Request::Receive { body } => chats::receive(m, &body),
+        Request::ShareProfile {
+            profile,
+            only_contacts,
+        } => chats::share_profile(m, &profile, only_contacts),
+        Request::ProfileSent { chat, rev } => chats::profile_sent(m, &chat, rev),
+        Request::Profiles {} => chats::profiles(m),
         Request::AcceptChat { chat, name } => chats::accept_request(m, &chat, &name),
         Request::DeclineChat { chat } => chats::decline_request(m, &chat),
         Request::KeyPackages { n, last_resort } => chats::key_packages(m, n, last_resort),
