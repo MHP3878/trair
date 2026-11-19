@@ -1272,4 +1272,198 @@ void main() {
       expect(find.text('Bob'), findsNothing);
     });
   });
+
+  group('Gruppen', () {
+    Future<(FakeDoor, FakeServer)> online(WidgetTester tester, {void Function(FakeDoor)? setup}) async {
+      final server = FakeServer();
+      final door = FakeDoor(password: pw, profile: {'name': 'Julian'})..chatsEnabled = true;
+      door.contacts.add({'user': 'local-bob', 'name': 'Bob', 'fingerprint': 'ff' * 16, 'confirmed': false});
+      setup?.call(door);
+      await _start(tester, door: door, server: server);
+      await _unlock(tester);
+      await _openSettings(tester);
+      await tester.ensureVisible(find.widgetWithText(PillButton, 'Verbinden'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Verbinden'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Chats'));
+      await tester.pumpAndSettle();
+      return (door, server);
+    }
+
+    String kindOf(Map<String, Object?> sent) => FakeDoor.unwire(sent['body'] as String)['kind'] as String;
+
+    /// Bob's group "Band" with Julian as a plain member.
+    void bobsBand(FakeDoor door) {
+      door.groups['g9'] = {
+        'name': 'Band',
+        'owner': 'local-bob',
+        'admins': <String>[],
+        'guests': <String, int>{},
+        'members': ['local-bob', 'local-julian'],
+        'ends': null,
+        'changed': <String>[],
+        'epoch': 3,
+      };
+      door.chats.add({
+        'id': 'g9',
+        'peer': '',
+        'kind': 'group',
+        'name': 'Band',
+        'state': 'active',
+        'role': 'member',
+        'members': 2,
+        'last': 0,
+      });
+    }
+
+    testWidgets('a group with a contact: made, roles shown, a key for guests', (tester) async {
+      final (door, server) = await online(tester);
+      await tester.tap(find.byTooltip('Neue Gruppe'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(_field('Gruppenname'));
+      await tester.enterText(_field('Gruppenname'), 'Abi 2026');
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.widgetWithText(PillButton, 'Bob'));
+      await tester.tap(find.widgetWithText(PillButton, 'Bob'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Gruppe erstellen'));
+      await tester.pumpAndSettle();
+      expect(door.groups.values.single['members'], ['local-julian', 'local-bob']);
+      expect(server.commits.single['committers'], ['local-julian'], reason: 'the server learns who may change it');
+      expect(server.commits.single['welcome_to'], [
+        {'user': 'local-bob', 'device': 'd-peer'},
+      ]);
+      // The group column is open: members with their roles, the history.
+      expect(find.text('MITGLIEDER · 2'), findsOneWidget);
+      expect(find.text('Besitzer'), findsOneWidget);
+      expect(find.text('Du hast die Gruppe erstellt'), findsOneWidget);
+      expect(find.text('Abi 2026'), findsWidgets);
+
+      // A key for guests, valid for a day.
+      await tester.ensureVisible(find.byWidgetPredicate((w) => w is PillSwitch && w.label == 'Als Gäste einladen'));
+      await tester.tap(find.byWidgetPredicate((w) => w is PillSwitch && w.label == 'Als Gäste einladen'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.widgetWithText(PillButton, 'Einladung erstellen'));
+      await tester.tap(find.widgetWithText(PillButton, 'Einladung erstellen'));
+      await tester.pumpAndSettle();
+      expect(door.groupInvites.single, {'chat': 'g1', 'minutes': 1440, 'guest': true});
+      expect(find.textContaining('trair3:local-julian:'), findsOneWidget);
+      expect(find.textContaining('dann gehen sie'), findsOneWidget);
+
+      // Bob becomes admin: the server learns it with the change.
+      await tester.ensureVisible(find.byTooltip('Mitglied verwalten'));
+      await tester.tap(find.byTooltip('Mitglied verwalten'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Zum Admin machen'));
+      await tester.pumpAndSettle();
+      expect(server.commits.last['committers'], ['local-julian', 'local-bob']);
+      expect(find.text('Admin'), findsOneWidget);
+    });
+
+    testWidgets('a pasted group key asks the admin and waits; an expired one is refused', (tester) async {
+      final (door, server) = await online(tester);
+      await tester.tap(find.byTooltip('Neuer Chat'));
+      await tester.pumpAndSettle();
+      final past = DateTime.now().millisecondsSinceEpoch ~/ 1000 - 5;
+      await tester.enterText(_field('trair1:…'), 'trair3:local-olga:${'ff' * 16}:${'11' * 16}:m$past:0000');
+      await tester.tap(find.widgetWithText(PillButton, 'Hinzufügen'));
+      await tester.pumpAndSettle();
+      expect(find.text('Dieser Gruppenschlüssel ist abgelaufen.'), findsOneWidget);
+      expect(server.commits, isEmpty);
+
+      final soon = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 600;
+      await tester.enterText(
+        find.byWidgetPredicate((w) => w is TextField && (w.controller?.text.startsWith('trair3:') ?? false)),
+        'trair3:local-olga:${'ff' * 16}:${'11' * 16}:m$soon:0000',
+      );
+      await tester.tap(find.widgetWithText(PillButton, 'Hinzufügen'));
+      await tester.pumpAndSettle();
+      expect(server.commits.single['committers'], ['local-julian', 'local-olga']);
+      expect(server.sent.map(kindOf), contains('join'), reason: 'the token went to the admin');
+      expect(door.contacts.map((c) => c['user']), isNot(contains('local-olga')), reason: 'no contact from a group key');
+      expect(find.text('Beitritt: wartet auf local-olga'), findsOneWidget);
+      expect(find.textContaining('Beitritt angefragt'), findsOneWidget);
+      expect(find.byKey(const Key('real-composer')), findsNothing);
+    });
+
+    testWidgets("an admin's Trair lets in whoever brings a valid key", (tester) async {
+      final (door, server) = await online(
+        tester,
+        setup: (d) {
+          d.groups['g1'] = {
+            'name': 'Party',
+            'owner': 'local-julian',
+            'admins': <String>[],
+            'guests': <String, int>{},
+            'members': ['local-julian'],
+            'ends': null,
+            'changed': <String>[],
+            'epoch': 1,
+          };
+          d.chats.add({'id': 'g1', 'peer': '', 'kind': 'group', 'name': 'Party', 'state': 'active', 'last': 0});
+        },
+      );
+      server.deliver(FakeDoor.wire({'kind': 'join_request', 'group': 'g1', 'user': 'local-gus'}));
+      await tester.pumpAndSettle();
+      expect(door.ops, containsAll(['admit', 'close_join']));
+      expect(door.joinRequests, isEmpty);
+      expect(server.commits.last['welcome_to'], [
+        {'user': 'local-gus', 'device': 'd-peer'},
+      ]);
+      expect(server.commits.last['committers'], ['local-julian']);
+      expect(door.groups['g1']!['members'], ['local-julian', 'local-gus']);
+      expect(find.text('2 Mitglieder · deine'), findsOneWidget);
+    });
+
+    testWidgets('a member sees names and notes, has no admin buttons, and can leave', (tester) async {
+      final (door, server) = await online(tester, setup: bobsBand);
+      server.deliver(
+        FakeDoor.wire({'kind': 'group_message', 'chat': 'g9', 'user': 'local-bob', 'text': 'Probe um acht'}),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Band'));
+      await tester.pumpAndSettle();
+      expect(find.text('Probe um acht'), findsOneWidget);
+      expect(find.text('Bob'), findsWidgets, reason: 'the sender stands above the bubble');
+      await tester.tap(find.byTooltip('Gruppe verwalten'));
+      await tester.pumpAndSettle();
+      expect(find.text('MITGLIEDER · 2'), findsOneWidget);
+      expect(find.widgetWithText(PillButton, 'Einladung erstellen'), findsNothing);
+      expect(find.byTooltip('Gruppe umbenennen'), findsNothing);
+      expect(find.byTooltip('Mitglied verwalten'), findsNothing);
+
+      await tester.ensureVisible(find.widgetWithText(PillButton, 'Gruppe verlassen'));
+      await tester.tap(find.widgetWithText(PillButton, 'Gruppe verlassen'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Verlassen'));
+      await tester.pumpAndSettle();
+      expect(door.ops, containsAll(['leave_prepare', 'leave_group']));
+      expect(server.sent.map(kindOf), contains('leave'));
+      expect(find.text('Du hast die Gruppe verlassen'), findsOneWidget);
+      expect(find.textContaining('Du bist nicht mehr in dieser Gruppe'), findsOneWidget);
+      await tester.tap(find.widgetWithText(PillButton, 'Chat löschen'));
+      await tester.pumpAndSettle();
+      expect(door.chats.where((c) => c['id'] == 'g9'), isEmpty);
+      expect(find.text('Band'), findsNothing);
+    });
+
+    testWidgets("strict mode stops a group where someone's key changed until it is checked", (tester) async {
+      final (door, server) = await online(tester, setup: bobsBand);
+      server.deliver(FakeDoor.wire({'kind': 'key_changed', 'chat': 'g9', 'user': 'local-bob'}));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Band'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Der Schlüssel von Bob hat sich geändert'), findsOneWidget);
+      await tester.tap(find.byTooltip('Gruppe verwalten'));
+      await tester.pumpAndSettle();
+      expect(find.text('Schlüssel geändert: erst prüfen'), findsOneWidget);
+      await tester.tap(find.byTooltip('Mitglied verwalten'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Neuen Schlüssel annehmen'));
+      await tester.pumpAndSettle();
+      expect(door.ops, contains('accept_new_key'));
+      expect(find.textContaining('Der Schlüssel von Bob hat sich geändert'), findsNothing);
+    });
+  });
 }

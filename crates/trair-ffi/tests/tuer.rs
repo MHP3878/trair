@@ -804,9 +804,13 @@ struct Bob {
 
 impl Bob {
     fn new() -> Bob {
+        Bob::named("local-bob")
+    }
+
+    fn named(user: &str) -> Bob {
         let dir = fresh_dir();
         std::fs::create_dir_all(&dir).unwrap();
-        let account = trair_core::Account::generate("local-bob").unwrap();
+        let account = trair_core::Account::generate(user).unwrap();
         let identity = trair_core::DeviceIdentity::generate().unwrap();
         let list = trair_core::SignedDeviceList::first(&account, identity.entry()).unwrap();
         let mut key = [0u8; 32];
@@ -1532,6 +1536,151 @@ fn d24_a_friendship_key_through_the_door_and_a_chat_that_vanishes() {
         call(json!({"op": "sweep"}))["deleted"],
         json!([]),
         "not yet"
+    );
+    call(json!({"op": "lock"}));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn d25_a_group_through_the_door_with_a_key_roles_and_closing() {
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let dir = fresh_dir();
+    call(json!({"op": "init", "dir": dir}));
+    call(json!({"op": "create", "password": PW, "profile": {}}));
+    let me = call(json!({"op": "server_identity"}));
+    let my_user = me["user"].as_str().unwrap().to_string();
+    let my_device = format!("{my_user}:{}", me["device"].as_str().unwrap());
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let mut bob = Bob::new();
+    let my_code = call(json!({"op": "contact_code"}))["code"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    bob.m.add_contact(&my_code, "Julian", t).unwrap();
+    let added = call(json!({"op": "add_contact", "code": bob.m.contact_code(), "name": "Bob"}));
+    assert_eq!(added["ok"], true, "{added}");
+
+    // Julian starts a group with Bob.
+    let made = call(
+        json!({"op": "create_group", "name": "Abi 2026", "minutes": null,
+        "offers": bob.offer()}),
+    );
+    assert_eq!(made["ok"], true, "{made}");
+    assert_eq!(made["chat"]["kind"], "group");
+    assert_eq!(made["commit"]["committers"], json!([my_user]));
+    let chat = made["chat"]["id"].as_str().unwrap().to_string();
+    let ok = call(json!({"op": "commit_answer", "chat": chat, "accepted": true, "taken": null}));
+    assert_eq!(ok["applied"], true, "{ok}");
+    match bob
+        .m
+        .receive(&unb64(&made["commit"]["welcome"]), t)
+        .unwrap()
+    {
+        trair_core::Incoming::Chat { chat: c, .. } => {
+            assert_eq!(c.kind, trair_core::ChatKind::Group);
+            assert_eq!(c.state, trair_core::ChatState::Active);
+        }
+        other => panic!("{other:?}"),
+    }
+    let listed = call(json!({"op": "chats"}));
+    assert_eq!(listed["chats"][0]["name"], "Abi 2026", "{listed}");
+    assert_eq!(listed["chats"][0]["role"], "owner");
+    assert_eq!(listed["chats"][0]["members"], 2);
+
+    // A key for guests; Gus (a stranger) uses it.
+    assert_eq!(
+        error(&call(
+            json!({"op": "create_group_invite", "chat": chat, "minutes": 0})
+        )),
+        "bad_request"
+    );
+    let key =
+        call(json!({"op": "create_group_invite", "chat": chat, "minutes": 60, "guest": true}));
+    assert_eq!(key["ok"], true, "{key}");
+    let code = key["code"].as_str().unwrap().to_string();
+    assert!(code.starts_with("trair3:"));
+    assert_eq!(
+        call(json!({"op": "group_invites", "chat": chat}))["count"],
+        1
+    );
+    let mut gus = Bob::named("local-gus");
+    let kp = call(json!({"op": "key_packages", "n": 1, "last_resort": false}));
+    let offers = vec![trair_core::KeyPackageOffer {
+        claimed_device: my_device.clone(),
+        bytes: unb64(&kp["packages"][0]),
+    }];
+    let (jc, out) = gus.m.join_group(&code, &offers, t).unwrap();
+    let mut both = vec!["local-gus".to_string(), my_user.clone()];
+    both.sort();
+    assert_eq!(out.committers, Some(both));
+    gus.m.commit_answer(&jc.id, true, None, t).unwrap();
+    let hidden = call(json!({"op": "receive", "body": b64(out.welcome.as_ref().unwrap())}));
+    assert_eq!(hidden["incoming"]["kind"], "other", "{hidden}");
+    let (bytes, _) = gus.m.join_message(&jc.id).unwrap().unwrap();
+    let req = call(json!({"op": "receive", "body": b64(&bytes)}));
+    assert_eq!(req["incoming"]["kind"], "join_request", "{req}");
+    assert_eq!(req["incoming"]["user"], "local-gus");
+    assert_eq!(req["incoming"]["group"], chat.as_str());
+    let jchat = req["incoming"]["chat"].as_str().unwrap().to_string();
+    let waiting = call(json!({"op": "join_requests"}));
+    assert_eq!(waiting["requests"][0]["chat"], jchat.as_str(), "{waiting}");
+    let admitted = call(json!({"op": "admit", "chat": jchat, "offers": gus.offer()}));
+    assert_eq!(admitted["ok"], true, "{admitted}");
+    let ok = call(json!({"op": "commit_answer", "chat": chat, "accepted": true, "taken": null}));
+    assert_eq!(ok["applied"], true);
+    assert_eq!(call(json!({"op": "close_join", "chat": jchat}))["ok"], true);
+    assert!(
+        call(json!({"op": "join_requests"}))["requests"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let joined = gus
+        .m
+        .receive(&unb64(&admitted["commit"]["welcome"]), t)
+        .unwrap();
+    assert!(
+        matches!(joined, trair_core::Incoming::Chat { .. }),
+        "{joined:?}"
+    );
+    bob.m
+        .receive(&unb64(&admitted["commit"]["commit"]), t)
+        .unwrap();
+    let info = call(json!({"op": "group_info", "chat": chat}));
+    let members = info["group"]["members"].as_array().unwrap();
+    assert_eq!(members.len(), 3, "{info}");
+    let g = members.iter().find(|m| m["user"] == "local-gus").unwrap();
+    assert_eq!(g["role"], "guest");
+    assert_eq!(g["guest_until"], key["ends"]);
+
+    // Bob becomes admin; the server learns him as one who may change it.
+    let p = call(json!({"op": "set_admin", "chat": chat, "user": "local-bob", "admin": true}));
+    let mut both = vec!["local-bob".to_string(), my_user.clone()];
+    both.sort();
+    assert_eq!(p["commit"]["committers"], json!(both), "{p}");
+    call(json!({"op": "commit_answer", "chat": chat, "accepted": true, "taken": null}));
+    // The owner cannot just leave; nothing to tidy right now.
+    assert_eq!(
+        error(&call(json!({"op": "leave_group", "chat": chat}))),
+        "not_allowed"
+    );
+    let tidy = call(json!({"op": "tidy_group", "chat": chat}));
+    assert!(tidy["commit"].is_null() && tidy["body"].is_null(), "{tidy}");
+    // Kick Gus, then close the group: gone here.
+    let p = call(json!({"op": "kick", "chat": chat, "user": "local-gus"}));
+    assert_eq!(p["commit"]["removed"].as_array().unwrap().len(), 1, "{p}");
+    call(json!({"op": "commit_answer", "chat": chat, "accepted": true, "taken": null}));
+    let p = call(json!({"op": "close_group", "chat": chat}));
+    assert_eq!(p["ok"], true, "{p}");
+    call(json!({"op": "commit_answer", "chat": chat, "accepted": true, "taken": null}));
+    assert!(
+        call(json!({"op": "chats"}))["chats"]
+            .as_array()
+            .unwrap()
+            .is_empty()
     );
     call(json!({"op": "lock"}));
     let _ = std::fs::remove_dir_all(&dir);

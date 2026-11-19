@@ -95,6 +95,7 @@ use trair_core::vault::{Vault, VaultError};
 use zeroize::Zeroizing;
 
 use crate::chats::{self, Offer};
+use crate::groups;
 use crate::notfall;
 use crate::platform;
 use trair_core::Messenger;
@@ -257,6 +258,94 @@ enum Request {
         minutes: Option<u64>,
     },
     Sweep {},
+    CreateGroup {
+        name: String,
+        minutes: Option<u64>,
+        offers: Vec<Offer>,
+    },
+    GroupInfo {
+        chat: String,
+    },
+    AddToGroup {
+        chat: String,
+        offers: Vec<Offer>,
+    },
+    Kick {
+        chat: String,
+        user: String,
+    },
+    SetAdmin {
+        chat: String,
+        user: String,
+        admin: bool,
+    },
+    HandOver {
+        chat: String,
+        user: String,
+    },
+    RenameGroup {
+        chat: String,
+        name: String,
+    },
+    SetGroupEnd {
+        chat: String,
+        minutes: Option<u64>,
+    },
+    CloseGroup {
+        chat: String,
+    },
+    LeavePrepare {
+        chat: String,
+    },
+    LeaveGroup {
+        chat: String,
+    },
+    AcceptGroup {
+        chat: String,
+    },
+    DeleteChat {
+        chat: String,
+    },
+    AcceptNewKey {
+        chat: String,
+        user: String,
+    },
+    ProposeUpdate {
+        chat: String,
+    },
+    TidyGroup {
+        chat: String,
+    },
+    CreateGroupInvite {
+        chat: String,
+        minutes: u64,
+        #[serde(default)]
+        guest: bool,
+    },
+    RevokeGroupInvites {
+        chat: String,
+    },
+    GroupInvites {
+        chat: String,
+    },
+    JoinGroup {
+        code: String,
+        offers: Vec<Offer>,
+    },
+    JoinMessage {
+        chat: String,
+    },
+    JoinRequests {},
+    Admit {
+        chat: String,
+        offers: Vec<Offer>,
+    },
+    CloseJoin {
+        chat: String,
+    },
+    DenyJoin {
+        chat: String,
+    },
     #[serde(rename = "accept_request")]
     AcceptChat {
         chat: String,
@@ -472,6 +561,39 @@ fn chat_op(state: &mut State, req: Request) -> Value {
         Request::InviteMessage { chat } => chats::invite_message(m, &chat),
         Request::SetChatEnd { chat, minutes } => chats::set_chat_end(m, &chat, minutes),
         Request::Sweep {} => chats::sweep(m),
+        Request::CreateGroup {
+            name,
+            minutes,
+            offers,
+        } => groups::create_group(m, &name, minutes, offers),
+        Request::GroupInfo { chat } => groups::group_info(m, &chat),
+        Request::AddToGroup { chat, offers } => groups::add_to_group(m, &chat, offers),
+        Request::Kick { chat, user } => groups::kick(m, &chat, &user),
+        Request::SetAdmin { chat, user, admin } => groups::set_admin(m, &chat, &user, admin),
+        Request::HandOver { chat, user } => groups::hand_over(m, &chat, &user),
+        Request::RenameGroup { chat, name } => groups::rename_group(m, &chat, &name),
+        Request::SetGroupEnd { chat, minutes } => groups::set_group_end(m, &chat, minutes),
+        Request::CloseGroup { chat } => groups::close_group(m, &chat),
+        Request::LeavePrepare { chat } => groups::leave_prepare(m, &chat),
+        Request::LeaveGroup { chat } => groups::leave_group(m, &chat),
+        Request::AcceptGroup { chat } => groups::accept_group(m, &chat),
+        Request::DeleteChat { chat } => groups::delete_chat(m, &chat),
+        Request::AcceptNewKey { chat, user } => groups::accept_new_key(m, &chat, &user),
+        Request::ProposeUpdate { chat } => groups::propose_update(m, &chat),
+        Request::TidyGroup { chat } => groups::tidy_group(m, &chat),
+        Request::CreateGroupInvite {
+            chat,
+            minutes,
+            guest,
+        } => groups::create_group_invite(m, &chat, minutes, guest),
+        Request::RevokeGroupInvites { chat } => groups::revoke_group_invites(m, &chat),
+        Request::GroupInvites { chat } => groups::group_invites(m, &chat),
+        Request::JoinGroup { code, offers } => groups::join_group(m, &code, offers),
+        Request::JoinMessage { chat } => groups::join_message(m, &chat),
+        Request::JoinRequests {} => groups::join_requests(m),
+        Request::Admit { chat, offers } => groups::admit(m, &chat, offers),
+        Request::CloseJoin { chat } => groups::close_join(m, &chat),
+        Request::DenyJoin { chat } => groups::deny_join(m, &chat),
         Request::AcceptChat { chat, name } => chats::accept_request(m, &chat, &name),
         Request::DeclineChat { chat } => chats::decline_request(m, &chat),
         Request::KeyPackages { n, last_resort } => chats::key_packages(m, n, last_resort),

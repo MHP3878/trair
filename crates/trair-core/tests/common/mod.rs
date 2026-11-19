@@ -42,6 +42,7 @@ pub struct Net {
     boxes: HashMap<String, VecDeque<Vec<u8>>>,
     epochs: HashMap<String, u64>,
     taken: HashMap<String, String>,
+    committers: HashMap<String, Vec<String>>,
     drops: HashSet<(String, String)>,
     pub log: Vec<Vec<u8>>,
 }
@@ -55,6 +56,7 @@ impl Default for Net {
             boxes: HashMap::new(),
             epochs: HashMap::new(),
             taken: HashMap::new(),
+            committers: HashMap::new(),
             drops: HashSet::new(),
             log: Vec::new(),
         }
@@ -179,11 +181,41 @@ impl Net {
         welcome_to: &[String],
         recipients: &[String],
     ) -> Result<(), String> {
+        self.commit_as(
+            from, group, epoch, commit, welcome, welcome_to, recipients, None,
+        )
+    }
+
+    /// Like `commit_raw`, with the list of accounts that may change the
+    /// group from now on. Once a group has such a list, an honest server
+    /// takes changes only from those accounts.
+    #[allow(clippy::too_many_arguments)]
+    pub fn commit_as(
+        &mut self,
+        from: &str,
+        group: &str,
+        epoch: u64,
+        commit: &[u8],
+        welcome: Option<&[u8]>,
+        welcome_to: &[String],
+        recipients: &[String],
+        committers: Option<&[String]>,
+    ) -> Result<(), String> {
+        let user = from.split(':').next().unwrap_or_default().to_string();
+        if self.honest
+            && let Some(list) = self.committers.get(group)
+            && !list.contains(&user)
+        {
+            return Err(format!("403 not_allowed: {user}"));
+        }
         if self.honest
             && let Some(&e) = self.epochs.get(group)
             && e != epoch
         {
             return Err(format!("409 wrong epoch: server {e}, commit {epoch}"));
+        }
+        if let Some(c) = committers {
+            self.committers.insert(group.to_string(), c.to_vec());
         }
         self.epochs.insert(group.to_string(), epoch + 1);
         self.taken
@@ -199,6 +231,11 @@ impl Net {
             }
         }
         Ok(())
+    }
+
+    /// The accounts that may change a group, as the server holds them.
+    pub fn committers_of(&self, group: &str) -> Option<Vec<String>> {
+        self.committers.get(group).cloned()
     }
 
     /// Hash of the last commit the server took for a group.

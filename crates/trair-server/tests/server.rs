@@ -1102,6 +1102,7 @@ fn commit_body(p: &PendingCommit) -> Value {
         "to": targets(&p.to),
         "welcome": p.welcome.as_ref().map(|w| B64.encode(w)),
         "welcome_to": targets(&p.welcome_to),
+        "committers": p.committers,
     })
 }
 
@@ -1319,6 +1320,148 @@ fn s13_a_database_from_m3_gets_the_new_column() {
         Some(vec![1])
     );
     // Opening again does not try to add it twice.
+    drop(db);
+    Db::open(&path).unwrap();
+}
+
+#[tokio::test]
+async fn s14_only_owner_and_admins_change_a_group_on_the_server() {
+    let w = World::new();
+    let mut olga = ChatClient::register(&w, "local-olga").await;
+    let mut ada = ChatClient::register(&w, "local-ada").await;
+    let mut max = ChatClient::register(&w, "local-max").await;
+    ada.upload(&w, 3).await;
+    max.upload(&w, 3).await;
+    for other in [&mut ada, &mut max] {
+        let a = olga.m.contact_code();
+        let b = other.m.contact_code();
+        olga.m.add_contact(&b, "x", w.now()).unwrap();
+        other.m.add_contact(&a, "Olga", w.now()).unwrap();
+    }
+    let mut offers = olga.claim(&w, ada.c.user()).await;
+    offers.extend(olga.claim(&w, max.c.user()).await);
+    let (chat, p) = olga
+        .m
+        .create_group("Geheime Runde", None, &offers, w.now())
+        .unwrap();
+    let p = p.unwrap();
+    assert_eq!(
+        p.committers.as_deref(),
+        Some(&["local-olga".to_string()][..])
+    );
+    assert_eq!(olga.push(&w, &p).await, (StatusCode::OK, true));
+    ada.read(&w).await;
+    max.read(&w).await;
+    max.say(&w, &chat.id, "Hallo Runde").await;
+    assert!(matches!(&ada.read(&w).await[..], [Incoming::Message(m)] if m.text == "Hallo Runde"));
+    olga.read(&w).await;
+
+    // Max's own Trair would not even make a change; a modified one meets
+    // the server: changes of this group come only from Olga.
+    let epoch = max.m.epoch(&chat.id).unwrap();
+    let forged = json!({"group": chat.id, "epoch": epoch, "commit": B64.encode(b"kick everyone"),
+        "to": [], "welcome": null, "welcome_to": []});
+    let (status, body) = w
+        .call(
+            "POST",
+            "/v1/commits",
+            Some(&max.c.token),
+            Some(forged.clone()),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"], "not_allowed");
+    // Not even with a list of his own.
+    let mut sneaky = forged.clone();
+    sneaky["committers"] = json!(["local-max"]);
+    let (status, _) = w
+        .call("POST", "/v1/commits", Some(&max.c.token), Some(sneaky))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Olga makes Ada an admin: from then on Ada's changes are taken too.
+    let p = olga.m.set_admin(&chat.id, ada.c.user(), true).unwrap();
+    assert_eq!(olga.push(&w, &p).await, (StatusCode::OK, true));
+    ada.read(&w).await;
+    max.read(&w).await;
+    let p = ada.m.kick(&chat.id, max.c.user()).unwrap();
+    assert_eq!(ada.push(&w, &p).await, (StatusCode::OK, true));
+    max.read(&w).await;
+    assert_eq!(
+        max.m.chat(&chat.id).unwrap().state,
+        trair_core::ChatState::Left
+    );
+    olga.read(&w).await;
+
+    // Strange lists are refused.
+    for bad in [json!([]), json!(["Not A Name!"])] {
+        let mut b = forged.clone();
+        b["committers"] = bad;
+        let (status, _) = w
+            .call("POST", "/v1/commits", Some(&olga.c.token), Some(b))
+            .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    // The server holds only the account names that may change it: no
+    // group name, no texts, no roles.
+    let db = w.server.db_dump();
+    for needle in ["Geheime Runde", "Hallo Runde", "admins", "owner"] {
+        assert!(
+            !db.windows(needle.len()).any(|x| x == needle.as_bytes()),
+            "{needle} on the server"
+        );
+    }
+}
+
+#[tokio::test]
+async fn s15_an_update_replaces_old_key_packages() {
+    let w = World::new();
+    let mut bob = ChatClient::register(&w, "local-bob").await;
+    bob.upload(&w, 5).await;
+    let packages: Vec<String> = bob
+        .m
+        .key_packages(2)
+        .unwrap()
+        .iter()
+        .map(|p| B64.encode(p))
+        .collect();
+    let (status, body) = w
+        .call(
+            "POST",
+            "/v1/keypackages",
+            Some(&bob.c.token),
+            Some(json!({"packages": packages, "replace": true})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["count"], 2, "the five old ones are gone");
+}
+
+#[test]
+fn s16_a_database_from_before_groups_gets_the_committers_column() {
+    let dir = TempDir::new();
+    let path = dir.0.join("old.db");
+    {
+        let c = rusqlite::Connection::open(&path).unwrap();
+        c.execute_batch(
+            "CREATE TABLE groups (id TEXT PRIMARY KEY, next_epoch INTEGER NOT NULL,
+                 last_hash TEXT NOT NULL, updated INTEGER NOT NULL);
+             INSERT INTO groups VALUES ('aa', 3, 'h', 1);",
+        )
+        .unwrap();
+    }
+    let db = Db::open(&path).unwrap();
+    assert!(
+        db.tables()
+            .unwrap()
+            .contains(&"groups.committers".to_string())
+    );
+    // An old chat keeps working for both sides.
+    let out = db
+        .commit("aa", 3, "h2", &[], 2, "local-anyone", None)
+        .unwrap();
+    assert_eq!(out, trair_server::CommitOutcome::Taken { epoch: 4 });
     drop(db);
     Db::open(&path).unwrap();
 }

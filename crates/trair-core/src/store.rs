@@ -112,6 +112,55 @@ CREATE TABLE IF NOT EXISTS contact_ends (
     user TEXT PRIMARY KEY,
     ends INTEGER NOT NULL
 ) WITHOUT ROWID;
+-- Groups. What kind a chat is (no row: one-to-one): g group, j own
+-- join request waiting for an admin, a an admin's side of a join request.
+CREATE TABLE IF NOT EXISTS chat_kinds (
+    chat TEXT PRIMARY KEY,
+    kind TEXT NOT NULL
+) WITHOUT ROWID;
+-- Who may change a chat (for the server), with the waiting change.
+CREATE TABLE IF NOT EXISTS outbox_committers (
+    chat TEXT PRIMARY KEY,
+    committers TEXT NOT NULL
+) WITHOUT ROWID;
+-- Group keys this admin made: only the token's hash; usable until ends
+-- unless taken back (then refused until ends, and forgotten after).
+CREATE TABLE IF NOT EXISTS group_invites (
+    hash BLOB PRIMARY KEY,
+    chat TEXT NOT NULL,
+    guest INTEGER NOT NULL,
+    ends INTEGER NOT NULL,
+    revoked INTEGER NOT NULL DEFAULT 0
+) WITHOUT ROWID;
+-- A group key this account used, until its token went out.
+CREATE TABLE IF NOT EXISTS join_tokens (
+    chat TEXT PRIMARY KEY,
+    token BLOB NOT NULL,
+    ends INTEGER NOT NULL
+) WITHOUT ROWID;
+-- Join requests with a valid token, waiting until this admin adds them.
+CREATE TABLE IF NOT EXISTS join_requests (
+    chat TEXT PRIMARY KEY,
+    grp TEXT NOT NULL,
+    user TEXT NOT NULL,
+    fp TEXT NOT NULL,
+    guest_until INTEGER,
+    at INTEGER NOT NULL
+) WITHOUT ROWID;
+-- Devices that left a group or whose account asked to remove them; an
+-- admin's device removes them.
+CREATE TABLE IF NOT EXISTS group_leaving (
+    chat TEXT NOT NULL,
+    device TEXT NOT NULL,
+    PRIMARY KEY (chat, device)
+) WITHOUT ROWID;
+-- Account keys of members as first seen in a group (strict mode).
+CREATE TABLE IF NOT EXISTS group_pins (
+    chat TEXT NOT NULL,
+    user TEXT NOT NULL,
+    fp TEXT NOT NULL,
+    PRIMARY KEY (chat, user)
+) WITHOUT ROWID;
 ";
 
 /// An open chat database.

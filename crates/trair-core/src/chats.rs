@@ -24,6 +24,7 @@ use crate::account::{Account, Fingerprint};
 use crate::contacts::{ContactCode, InviteCode, InviteKind};
 use crate::devices::{DeviceIdentity, DeviceList};
 use crate::error::{CoreError, Result, internal};
+use crate::group_chats::note;
 use crate::mls::{Device, DeviceState, Event, KeyPackageOffer, Member, Outgoing};
 use crate::policy::Trust;
 use crate::profiles;
@@ -85,13 +86,60 @@ impl ChatState {
     }
 }
 
-/// A one-to-one chat.
+/// What a chat is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatKind {
+    /// Two accounts.
+    Direct,
+    /// A group chat (see [`crate::groups`]).
+    Group,
+    /// This account's request to join a group, waiting for an admin.
+    Join,
+    /// An admin's side of someone's join request (not shown).
+    Admit,
+}
+
+impl ChatKind {
+    pub(crate) fn letter(self) -> &'static str {
+        match self {
+            ChatKind::Direct => "d",
+            ChatKind::Group => "g",
+            ChatKind::Join => "j",
+            ChatKind::Admit => "a",
+        }
+    }
+
+    fn parse(s: &str) -> Result<Self> {
+        match s {
+            "d" => Ok(ChatKind::Direct),
+            "g" => Ok(ChatKind::Group),
+            "j" => Ok(ChatKind::Join),
+            "a" => Ok(ChatKind::Admit),
+            other => Err(CoreError::Storage(format!("unknown chat kind {other}"))),
+        }
+    }
+
+    /// Name for the app.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ChatKind::Direct => "direct",
+            ChatKind::Group => "group",
+            ChatKind::Join => "join",
+            ChatKind::Admit => "admit",
+        }
+    }
+}
+
+/// A chat: one-to-one, a group, or a join request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Chat {
     /// Random id, also the MLS group id.
     pub id: String,
-    /// The other account.
+    /// The other account (empty for a group; for a join request the
+    /// admin, or on the admin's side the one who wants to join).
     pub peer: String,
+    /// What it is.
+    pub kind: ChatKind,
     /// Active, request or left.
     pub state: ChatState,
     /// When the chat started (seconds since 1970).
@@ -142,6 +190,9 @@ pub struct PendingCommit {
     pub welcome_to: Vec<String>,
     /// Devices that will be removed.
     pub removed: Vec<String>,
+    /// The accounts that may change the chat from now on, for the server
+    /// (`None`: as before).
+    pub committers: Option<Vec<String>>,
 }
 
 impl PendingCommit {
@@ -193,6 +244,34 @@ pub enum Incoming {
         /// Whose profile.
         user: String,
     },
+    /// Something in a group changed or happened (someone left, a note in
+    /// the history). Admins: run [`Messenger::tidy_group`].
+    Group {
+        /// The group chat.
+        chat: String,
+    },
+    /// Someone brought a valid key of this admin's group. Get key
+    /// packages for `user` and call [`Messenger::admit`].
+    JoinRequest {
+        /// The join chat.
+        chat: String,
+        /// The group.
+        group: String,
+        /// Who wants to join.
+        user: String,
+    },
+    /// Someone brought a key of this admin that does not work (expired or
+    /// taken back). Call [`Messenger::deny_join`].
+    JoinRefused {
+        /// The join chat.
+        chat: String,
+    },
+    /// The admin refused this account's join request (the key expired or
+    /// was taken back). The request is deleted.
+    JoinFailed {
+        /// The join chat (gone now).
+        chat: String,
+    },
     /// Nothing to show (for example a proposal).
     Other,
 }
@@ -225,11 +304,11 @@ pub struct ProfileOut {
 
 /// The chats of this device.
 pub struct Messenger {
-    device: Device,
-    store: Store,
+    pub(crate) device: Device,
+    pub(crate) store: Store,
     /// SHA-256 of every stored OpenMLS value, to write only changes.
     saved: HashMap<Vec<u8>, [u8; 32]>,
-    user: String,
+    pub(crate) user: String,
 }
 
 impl std::fmt::Debug for Messenger {
@@ -240,25 +319,25 @@ impl std::fmt::Debug for Messenger {
     }
 }
 
-fn digest(v: &[u8]) -> [u8; 32] {
+pub(crate) fn digest(v: &[u8]) -> [u8; 32] {
     Sha256::digest(v).into()
 }
 
-fn random_chat_id() -> Result<String> {
+pub(crate) fn random_chat_id() -> Result<String> {
     let mut b = [0u8; 16];
     getrandom::fill(&mut b).map_err(internal)?;
     Ok(hex::encode(b))
 }
 
-fn user_of(device_id: &str) -> &str {
+pub(crate) fn user_of(device_id: &str) -> &str {
     device_id.split(':').next().unwrap_or("")
 }
 
-fn to_i64(v: u64) -> i64 {
+pub(crate) fn to_i64(v: u64) -> i64 {
     i64::try_from(v).unwrap_or(i64::MAX)
 }
 
-fn to_u64(v: i64) -> u64 {
+pub(crate) fn to_u64(v: i64) -> u64 {
     u64::try_from(v).unwrap_or(0)
 }
 
@@ -327,7 +406,7 @@ impl Messenger {
     }
 
     /// Store the device state and whatever `f` writes, in one transaction.
-    fn save<T>(&mut self, f: impl FnOnce(&Transaction) -> Result<T>) -> Result<T> {
+    pub(crate) fn save<T>(&mut self, f: impl FnOnce(&Transaction) -> Result<T>) -> Result<T> {
         let state = serde_json::to_vec(&self.device.export_state()).map_err(internal)?;
         let saved = &self.saved;
         let (upserts, deletes, next) = self.device.with_values(|map| {
@@ -417,6 +496,11 @@ impl Messenger {
         let Ok(invite) = InviteCode::parse(code) else {
             return self.add_contact_code(ContactCode::parse(code)?, name, now);
         };
+        if invite.kind.is_group() {
+            return Err(CoreError::Rejected(
+                "this is a group key: join with it".into(),
+            ));
+        }
         if invite.ends <= now {
             return Err(CoreError::Rejected(
                 "this friendship key has expired".into(),
@@ -471,7 +555,10 @@ impl Messenger {
         // their devices really belong to the key in the code.
         let mut accepted = Vec::new();
         for chat in self.chats()? {
-            if chat.peer == code.user && chat.state == ChatState::Request {
+            if chat.kind == ChatKind::Direct
+                && chat.peer == code.user
+                && chat.state == ChatState::Request
+            {
                 if self.device.account_of(&chat.id, &code.user)? == Some(code.fingerprint.clone()) {
                     accepted.push(chat.id);
                 } else {
@@ -579,10 +666,14 @@ impl Messenger {
                 return Err(e);
             }
         };
-        let pending = self.pending(out, Vec::new());
+        let mut pending = self.pending(out, Vec::new());
+        let mut committers = vec![self.user.clone(), contact.user.clone()];
+        committers.sort();
+        pending.committers = Some(committers);
         let chat = Chat {
             id,
             peer: contact.user,
+            kind: ChatKind::Direct,
             state: ChatState::Active,
             created: now,
             last: now,
@@ -595,7 +686,7 @@ impl Messenger {
         Ok((chat, pending))
     }
 
-    fn pending(&self, out: Outgoing, to: Vec<String>) -> PendingCommit {
+    pub(crate) fn pending(&self, out: Outgoing, to: Vec<String>) -> PendingCommit {
         PendingCommit {
             chat: out.group,
             epoch: out.epoch,
@@ -604,12 +695,13 @@ impl Messenger {
             welcome: out.welcome,
             welcome_to: out.added.into_iter().map(|m| m.id).collect(),
             removed: out.removed,
+            committers: None,
         }
     }
 
     /// The devices that get a commit for this chat: everyone but this
     /// device and withdrawn devices.
-    fn commit_recipients(&self, chat: &str) -> Result<Vec<String>> {
+    pub(crate) fn commit_recipients(&self, chat: &str) -> Result<Vec<String>> {
         Ok(self
             .device
             .members(chat)?
@@ -620,7 +712,7 @@ impl Messenger {
     }
 
     /// Only one change per chat at a time.
-    fn no_pending(&self, chat: &str) -> Result<()> {
+    pub(crate) fn no_pending(&self, chat: &str) -> Result<()> {
         if self.pending_commit(chat)?.is_some() {
             return Err(CoreError::Rejected(
                 "a change of this chat is still waiting for the server".into(),
@@ -634,8 +726,10 @@ impl Messenger {
         self.store
             .conn()
             .query_row(
-                "SELECT chat, epoch, commit_bytes, recipients, welcome, welcome_to, removed
-                 FROM outbox WHERE chat = ?1",
+                "SELECT o.chat, o.epoch, o.commit_bytes, o.recipients, o.welcome, o.welcome_to,
+                   o.removed, c.committers
+                 FROM outbox o LEFT JOIN outbox_committers c ON c.chat = o.chat
+                 WHERE o.chat = ?1",
                 [chat],
                 row_pending,
             )
@@ -651,8 +745,10 @@ impl Messenger {
             .store
             .conn()
             .prepare(
-                "SELECT chat, epoch, commit_bytes, recipients, welcome, welcome_to, removed
-                 FROM outbox ORDER BY chat",
+                "SELECT o.chat, o.epoch, o.commit_bytes, o.recipients, o.welcome, o.welcome_to,
+                   o.removed, c.committers
+                 FROM outbox o LEFT JOIN outbox_committers c ON c.chat = o.chat
+                 ORDER BY o.chat",
             )
             .map_err(sql)?;
         let rows = stmt.query_map([], row_pending).map_err(sql)?;
@@ -685,6 +781,9 @@ impl Messenger {
         if c.state == ChatState::Left {
             return Err(CoreError::Rejected("this device left the chat".into()));
         }
+        if c.kind != ChatKind::Direct {
+            return Err(CoreError::Rejected("use the group functions".into()));
+        }
         self.no_pending(chat)?;
         self.check_offers(&c.peer, offers)?;
         let to = self.commit_recipients(chat)?;
@@ -692,7 +791,11 @@ impl Messenger {
         self.store_pending(out, to)
     }
 
-    fn store_pending(&mut self, out: Outgoing, to: Vec<String>) -> Result<PendingCommit> {
+    pub(crate) fn store_pending(
+        &mut self,
+        out: Outgoing,
+        to: Vec<String>,
+    ) -> Result<PendingCommit> {
         let p = self.pending(out, to);
         let q = p.clone();
         self.save(move |tx| put_outbox(tx, &q))?;
@@ -701,7 +804,9 @@ impl Messenger {
 
     /// Remove devices from a chat (for example a withdrawn one).
     pub fn remove_devices(&mut self, chat: &str, ids: &[String]) -> Result<PendingCommit> {
-        self.chat(chat)?;
+        if self.chat(chat)?.kind != ChatKind::Direct {
+            return Err(CoreError::Rejected("use tidy_group for a group".into()));
+        }
         self.no_pending(chat)?;
         // Removed devices get the commit too, so they learn it (unless
         // they were withdrawn: the server knows them no more).
@@ -725,7 +830,12 @@ impl Messenger {
     /// New keys for this device in a chat (after joining through the
     /// last-resort key package).
     pub fn update_keys(&mut self, chat: &str) -> Result<PendingCommit> {
-        self.chat(chat)?;
+        let c = self.chat(chat)?;
+        if c.kind == ChatKind::Group && !self.is_group_admin(chat)? {
+            return Err(CoreError::NotAllowed(
+                "only admins change a group; use propose_update".into(),
+            ));
+        }
         self.no_pending(chat)?;
         let to = self.commit_recipients(chat)?;
         let out = self.device.self_update(chat)?;
@@ -737,12 +847,16 @@ impl Messenger {
         if self.pending_commit(chat)?.is_none() {
             return Err(CoreError::Rejected("no change is waiting".into()));
         }
+        let before = self.group_snapshot(chat)?;
         self.device.confirm(chat)?;
         let id = chat.to_string();
         self.save(move |tx| {
             del_outbox(tx, &id)?;
             touch(tx, &id, now)
-        })
+        })?;
+        let by = self.user.clone();
+        self.group_changed(chat, before, &by, now)?;
+        Ok(())
     }
 
     /// The server took another commit first: throw this one away. Read
@@ -814,6 +928,13 @@ impl Messenger {
         if text.trim().is_empty() || text.len() > MAX_TEXT {
             return Err(CoreError::Rejected("empty or too long".into()));
         }
+        match c.kind {
+            ChatKind::Direct => {}
+            ChatKind::Group => self.check_group_keys(chat)?,
+            ChatKind::Join | ChatKind::Admit => {
+                return Err(CoreError::Rejected("nothing to write here".into()));
+            }
+        }
         let bytes = self.device.encrypt(chat, text)?;
         let from = self.device.id().to_string();
         let user = self.user.clone();
@@ -860,6 +981,11 @@ impl Messenger {
             .map_err(sql)?;
             Ok(())
         };
+        // A group's state and members before a change, for the history.
+        let mut before_snapshot = match self.device.group_of(bytes) {
+            Some(g) if self.device.has_group(&g) => self.group_snapshot(&g)?,
+            _ => None,
+        };
         let event = match self.device.receive(bytes) {
             Ok(e) => e,
             Err(e) => {
@@ -875,6 +1001,14 @@ impl Messenger {
                 members,
                 by,
                 via_last_resort,
+                state: Some(state),
+            } => self.joined_group(group, members, by, via_last_resort, state, now, mark),
+            Event::Joined {
+                group,
+                members,
+                by,
+                via_last_resort,
+                state: None,
             } => self.joined(group, members, by, via_last_resort, now, mark),
             Event::Message {
                 group,
@@ -884,6 +1018,10 @@ impl Messenger {
             } => {
                 let user = user_of(&from).to_string();
                 let outgoing = user == self.user;
+                if !self.may_write(&group, &user, now)? {
+                    self.save(mark)?;
+                    return Ok(Incoming::Other);
+                }
                 let (g, f, u, t) = (group.clone(), from.clone(), user.clone(), text.clone());
                 let id = self.save(move |tx| {
                     mark(tx)?;
@@ -919,20 +1057,36 @@ impl Messenger {
                 added,
                 removed,
                 i_was_removed,
+                state_changed: _,
             } => {
+                let before = before_snapshot.take();
                 if i_was_removed {
                     // Keys of a chat this device is no longer in go away.
                     self.device.forget_group(&group)?;
                 }
                 let g = group.clone();
+                let by_user = user_of(&by).to_string();
+                let me = self.user.clone();
+                let kicked = i_was_removed && before.is_some();
                 self.save(move |tx| {
                     mark(tx)?;
                     if i_was_removed {
                         set_state(tx, &g, ChatState::Left)?;
                         del_outbox(tx, &g)?;
                     }
+                    if kicked {
+                        note(
+                            tx,
+                            &g,
+                            now,
+                            &serde_json::json!({"event": "removed", "users": [me], "by": by_user}),
+                        )?;
+                    }
                     touch(tx, &g, now)
                 })?;
+                if !i_was_removed {
+                    self.group_changed(&group, before, user_of(&by), now)?;
+                }
                 Ok(Incoming::Changed {
                     chat: group,
                     by,
@@ -971,7 +1125,9 @@ impl Messenger {
                 "a device in this chat is signed by an unknown key".into(),
             ))
         } else if peers.len() != 1 {
-            Some(CoreError::Rejected("only one-to-one chats for now".into()))
+            Some(CoreError::Rejected(
+                "a chat for more than two accounts needs a group state".into(),
+            ))
         } else {
             None
         };
@@ -1010,6 +1166,7 @@ impl Messenger {
         let chat = Chat {
             id: group,
             peer,
+            kind: ChatKind::Direct,
             state,
             created: now,
             last: now,
@@ -1069,6 +1226,9 @@ impl Messenger {
         now: u64,
     ) -> Result<Option<(Vec<u8>, Vec<String>)>> {
         let c = self.chat(chat)?;
+        if c.kind != ChatKind::Direct {
+            return Ok(None);
+        }
         let row: Option<(Vec<u8>, String, i64)> = self
             .store
             .conn()
@@ -1118,6 +1278,11 @@ impl Messenger {
         let c = self.chat(chat)?;
         if c.state != ChatState::Active {
             return Err(CoreError::Blocked("only in an active chat".into()));
+        }
+        if c.kind != ChatKind::Direct {
+            return Err(CoreError::Rejected(
+                "a group's end is set with set_group_end".into(),
+            ));
         }
         if let Some(e) = ends
             && (e <= now || e > now + MAX_END_SECS)
@@ -1171,12 +1336,7 @@ impl Messenger {
         let (c2, u2) = (chats.clone(), users);
         self.save(move |tx| {
             for id in &c2 {
-                for table in ["messages", "outbox", "profile_sent", "chat_ends"] {
-                    tx.execute(&format!("DELETE FROM {table} WHERE chat = ?1"), [id])
-                        .map_err(sql)?;
-                }
-                tx.execute("DELETE FROM chats WHERE id = ?1", [id])
-                    .map_err(sql)?;
+                purge(tx, id)?;
             }
             for user in &u2 {
                 for table in ["contacts", "contact_ends", "profiles", "redeem"] {
@@ -1187,6 +1347,8 @@ impl Messenger {
             tx.execute("DELETE FROM invites WHERE ends <= ?1", [n])
                 .map_err(sql)?;
             tx.execute("DELETE FROM redeem WHERE ends <= ?1", [n])
+                .map_err(sql)?;
+            tx.execute("DELETE FROM group_invites WHERE ends <= ?1", [n])
                 .map_err(sql)?;
             Ok(())
         })?;
@@ -1210,8 +1372,15 @@ impl Messenger {
             if chat.state != ChatState::Active {
                 continue;
             }
-            if only_contacts && self.contact(&chat.peer)?.is_none() {
-                continue;
+            match chat.kind {
+                ChatKind::Direct => {
+                    if only_contacts && self.contact(&chat.peer)?.is_none() {
+                        continue;
+                    }
+                }
+                // A group holds people who are not contacts.
+                ChatKind::Group if !only_contacts => {}
+                _ => continue,
             }
             let sent: Option<i64> = self
                 .store
@@ -1297,6 +1466,11 @@ impl Messenger {
         if c.state != ChatState::Request {
             return Err(CoreError::Rejected("not a request".into()));
         }
+        if c.kind != ChatKind::Direct {
+            return Err(CoreError::Rejected(
+                "accept a group with accept_group".into(),
+            ));
+        }
         let Some(fingerprint) = self.device.account_of(chat, &c.peer)? else {
             return Err(CoreError::Blocked(format!(
                 "the devices of {} do not agree on one key",
@@ -1340,6 +1514,11 @@ impl Messenger {
         if c.state != ChatState::Request {
             return Err(CoreError::Rejected("not a request".into()));
         }
+        if c.kind != ChatKind::Direct {
+            return Err(CoreError::Rejected(
+                "decline a group with decline_group".into(),
+            ));
+        }
         self.device.forget_group(chat)?;
         let id = chat.to_string();
         self.save(move |tx| {
@@ -1356,7 +1535,8 @@ impl Messenger {
         self.store
             .conn()
             .query_row(
-                "SELECT id, peer, state, created, last FROM chats WHERE id = ?1",
+                "SELECT c.id, c.peer, c.state, c.created, c.last, k.kind
+                 FROM chats c LEFT JOIN chat_kinds k ON k.chat = c.id WHERE c.id = ?1",
                 [id],
                 row_chat,
             )
@@ -1366,12 +1546,25 @@ impl Messenger {
             .ok_or_else(|| CoreError::UnknownGroup(id.to_string()))
     }
 
-    /// All chats, newest first.
+    /// All chats, newest first (without the admin's side of join
+    /// requests).
     pub fn chats(&self) -> Result<Vec<Chat>> {
+        Ok(self
+            .all_chats()?
+            .into_iter()
+            .filter(|c| c.kind != ChatKind::Admit)
+            .collect())
+    }
+
+    pub(crate) fn all_chats(&self) -> Result<Vec<Chat>> {
         let mut stmt = self
             .store
             .conn()
-            .prepare("SELECT id, peer, state, created, last FROM chats ORDER BY last DESC, id")
+            .prepare(
+                "SELECT c.id, c.peer, c.state, c.created, c.last, k.kind
+                 FROM chats c LEFT JOIN chat_kinds k ON k.chat = c.id
+                 ORDER BY c.last DESC, c.id",
+            )
             .map_err(sql)?;
         let rows = stmt.query_map([], row_chat).map_err(sql)?;
         let mut out = Vec::new();
@@ -1418,7 +1611,7 @@ impl Messenger {
 /// Longest time a friendship key or a vanishing chat may run: 30 days.
 pub const MAX_END_SECS: u64 = 30 * 86_400;
 
-fn set_end(tx: &Transaction, chat: &str, ends: Option<i64>) -> Result<()> {
+pub(crate) fn set_end(tx: &Transaction, chat: &str, ends: Option<i64>) -> Result<()> {
     match ends {
         Some(e) => tx.execute(
             "INSERT INTO chat_ends (chat, ends) VALUES (?1, ?2)
@@ -1449,6 +1642,9 @@ impl Messenger {
             self.save(mark)?;
             return Ok(Incoming::Other);
         };
+        if chat.kind != ChatKind::Direct {
+            return self.group_control(&chat, &user, control, now, mark);
+        }
         if let Some(token) = control.get("invite").and_then(|t| t.as_str()) {
             if user != chat.peer {
                 self.save(mark)?;
@@ -1573,9 +1769,17 @@ impl Messenger {
         mark: impl FnOnce(&Transaction) -> Result<()>,
     ) -> Result<Incoming> {
         let user = user_of(from).to_string();
-        let checked = match self.chat(group) {
-            Ok(chat) if chat.peer == user && user != self.user => profiles::check(profile).ok(),
-            _ => None,
+        let from_partner = match self.chat(group) {
+            Ok(chat) if chat.kind == ChatKind::Direct => chat.peer == user,
+            Ok(chat) if chat.kind == ChatKind::Group => {
+                chat.state == ChatState::Active && self.device.accounts(group)?.contains_key(&user)
+            }
+            _ => false,
+        };
+        let checked = if from_partner && user != self.user {
+            profiles::check(profile).ok()
+        } else {
+            None
         };
         let newer = match &checked {
             Some(c) => self
@@ -1640,7 +1844,7 @@ fn row_profile(r: &rusqlite::Row) -> rusqlite::Result<Result<PeerProfile>> {
     }))
 }
 
-fn clean_name(name: &str, user: &str) -> String {
+pub(crate) fn clean_name(name: &str, user: &str) -> String {
     let n: String = name
         .trim()
         .chars()
@@ -1665,16 +1869,20 @@ fn row_chat(r: &rusqlite::Row) -> rusqlite::Result<Result<Chat>> {
     let state: String = r.get(2)?;
     let (id, peer, created, last): (String, String, i64, i64) =
         (r.get(0)?, r.get(1)?, r.get(3)?, r.get(4)?);
-    Ok(ChatState::parse(&state).map(|state| Chat {
-        id,
-        peer,
-        state,
-        created: to_u64(created),
-        last: to_u64(last),
-    }))
+    let kind: Option<String> = r.get(5)?;
+    Ok((|| {
+        Ok(Chat {
+            id,
+            peer,
+            kind: ChatKind::parse(kind.as_deref().unwrap_or("d"))?,
+            state: ChatState::parse(&state)?,
+            created: to_u64(created),
+            last: to_u64(last),
+        })
+    })())
 }
 
-fn ids_json(ids: &[String]) -> Result<String> {
+pub(crate) fn ids_json(ids: &[String]) -> Result<String> {
     serde_json::to_string(ids).map_err(internal)
 }
 
@@ -1682,7 +1890,15 @@ fn ids_from(text: &str) -> Result<Vec<String>> {
     serde_json::from_str(text).map_err(|_| CoreError::Storage("unreadable device list".into()))
 }
 
-fn put_outbox(tx: &Transaction, p: &PendingCommit) -> Result<()> {
+pub(crate) fn put_outbox(tx: &Transaction, p: &PendingCommit) -> Result<()> {
+    if let Some(c) = &p.committers {
+        tx.execute(
+            "INSERT INTO outbox_committers (chat, committers) VALUES (?1, ?2)
+             ON CONFLICT (chat) DO UPDATE SET committers = excluded.committers",
+            params![p.chat, ids_json(c)?],
+        )
+        .map_err(sql)?;
+    }
     tx.execute(
         "INSERT INTO outbox (chat, epoch, commit_bytes, recipients, welcome, welcome_to, removed)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -1700,8 +1916,35 @@ fn put_outbox(tx: &Transaction, p: &PendingCommit) -> Result<()> {
     Ok(())
 }
 
-fn del_outbox(tx: &Transaction, chat: &str) -> Result<()> {
+pub(crate) fn del_outbox(tx: &Transaction, chat: &str) -> Result<()> {
     tx.execute("DELETE FROM outbox WHERE chat = ?1", [chat])
+        .map_err(sql)?;
+    tx.execute("DELETE FROM outbox_committers WHERE chat = ?1", [chat])
+        .map_err(sql)?;
+    Ok(())
+}
+
+/// Delete everything of a chat on this device.
+pub(crate) fn purge(tx: &Transaction, chat: &str) -> Result<()> {
+    for table in [
+        "messages",
+        "outbox",
+        "outbox_committers",
+        "profile_sent",
+        "chat_ends",
+        "chat_kinds",
+        "group_invites",
+        "join_tokens",
+        "join_requests",
+        "group_leaving",
+        "group_pins",
+    ] {
+        tx.execute(&format!("DELETE FROM {table} WHERE chat = ?1"), [chat])
+            .map_err(sql)?;
+    }
+    tx.execute("DELETE FROM join_requests WHERE grp = ?1", [chat])
+        .map_err(sql)?;
+    tx.execute("DELETE FROM chats WHERE id = ?1", [chat])
         .map_err(sql)?;
     Ok(())
 }
@@ -1724,6 +1967,7 @@ fn row_pending(r: &rusqlite::Row) -> rusqlite::Result<Result<PendingCommit>> {
         r.get(5)?,
         r.get(6)?,
     );
+    let committers: Option<String> = r.get(7)?;
     Ok((|| {
         Ok(PendingCommit {
             chat,
@@ -1733,11 +1977,12 @@ fn row_pending(r: &rusqlite::Row) -> rusqlite::Result<Result<PendingCommit>> {
             welcome,
             welcome_to: ids_from(&welcome_to)?,
             removed: ids_from(&removed)?,
+            committers: committers.as_deref().map(ids_from).transpose()?,
         })
     })())
 }
 
-fn insert_contact(tx: &Transaction, c: &Contact) -> Result<()> {
+pub(crate) fn insert_contact(tx: &Transaction, c: &Contact) -> Result<()> {
     tx.execute(
         "INSERT INTO contacts (user, fingerprint, name, confirmed, added) VALUES (?1, ?2, ?3, ?4, ?5)",
         params![
@@ -1752,7 +1997,7 @@ fn insert_contact(tx: &Transaction, c: &Contact) -> Result<()> {
     Ok(())
 }
 
-fn insert_chat(tx: &Transaction, c: &Chat) -> Result<()> {
+pub(crate) fn insert_chat(tx: &Transaction, c: &Chat) -> Result<()> {
     tx.execute(
         "INSERT INTO chats (id, peer, state, created, last) VALUES (?1, ?2, ?3, ?4, ?5)",
         params![
@@ -1764,10 +2009,17 @@ fn insert_chat(tx: &Transaction, c: &Chat) -> Result<()> {
         ],
     )
     .map_err(sql)?;
+    if c.kind != ChatKind::Direct {
+        tx.execute(
+            "INSERT INTO chat_kinds (chat, kind) VALUES (?1, ?2)",
+            params![c.id, c.kind.letter()],
+        )
+        .map_err(sql)?;
+    }
     Ok(())
 }
 
-fn set_state(tx: &Transaction, chat: &str, state: ChatState) -> Result<()> {
+pub(crate) fn set_state(tx: &Transaction, chat: &str, state: ChatState) -> Result<()> {
     tx.execute(
         "UPDATE chats SET state = ?2 WHERE id = ?1",
         params![chat, state.as_str()],
@@ -1776,7 +2028,7 @@ fn set_state(tx: &Transaction, chat: &str, state: ChatState) -> Result<()> {
     Ok(())
 }
 
-fn touch(tx: &Transaction, chat: &str, now: u64) -> Result<()> {
+pub(crate) fn touch(tx: &Transaction, chat: &str, now: u64) -> Result<()> {
     tx.execute(
         "UPDATE chats SET last = max(last, ?2) WHERE id = ?1",
         params![chat, to_i64(now)],
@@ -1786,7 +2038,7 @@ fn touch(tx: &Transaction, chat: &str, now: u64) -> Result<()> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn insert_message(
+pub(crate) fn insert_message(
     tx: &Transaction,
     chat: &str,
     from: &str,

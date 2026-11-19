@@ -423,6 +423,74 @@ Code: `InviteCode` in `crates/trair-core/src/contacts.rs`, `create_invite`,
   stop screenshots or photos of the screen. Messages still waiting on the
   server expire there as usual. The end time is at most 30 days away.
 
+## Groups (M5, step 2)
+
+Code: `crates/trair-core/src/groups.rs` (the rules), `group_chats.rs`,
+`mls.rs` (`change`, `create_trair_group`, the checks in `process` and
+`join`), the server's `commit` in `crates/trair-server/src/{lib,db}.rs`;
+tests: `groups.rs` (unit), `tests/gruppen.rs` (g01-g12, real MLS),
+`server.rs` (s14-s16), `tuer.rs` (d25), `widget_test.dart` (group
+"Gruppen").
+
+- **The group state is part of the keys.** Name, owner, admins, guests,
+  end time and "closed" are a JSON value in a private MLS group context
+  extension (type 0xF7A1, listed as required). Every member's epoch keys
+  depend on the group context, so members with a different state cannot
+  read each other. It changes only by a commit.
+- **Every device checks every change before following it**
+  (`groups::check_change`): only owner and admins commit; admins remove
+  members and guests, only the owner removes admins; only the owner names
+  admins, hands the group on or closes it; an admin may step down; owner,
+  admins and guests must be members, each account under one key; Trair
+  uses no other proposal types. A change that breaks a rule is not
+  followed. A welcome is taken only from an admin of the state it brings.
+  The committer's own core runs the same check before anything is sent.
+- **The server only lets owner and admins change a group.** Each change of
+  a group carries `committers`, the account names of owner and admins.
+  Once a group has such a list, the server takes changes only from those
+  accounts (403 `not_allowed`). Without this, a member with a modified
+  Trair could post a forbidden change: everyone would refuse it, but the
+  server would hold it as the change of that epoch and nobody could change
+  the group any more. The server learns which accounts administer a
+  random group id (it already sees which devices get a group's messages);
+  name, members, roles and texts stay encrypted. Old one-to-one chats
+  without a list work as before; new ones name both accounts.
+- **Members who are not admins never commit.** Leaving is a "leave"
+  control message: the device deletes the group's keys at once, an
+  admin's device removes the account's devices later (`tidy_group`). A
+  member asks for the removal of its own withdrawn devices the same way.
+  New keys after joining through the last-resort package go as an MLS
+  update proposal, which the next admin commit carries. Owners hand the
+  group on and admins step down (a commit) before they leave.
+- **Strict mode in groups:** an admin vouches for whoever it adds, so
+  members who are not contacts do not block sending. The account key each
+  member had when first seen in the group is pinned for that group; if it
+  changes (someone removed and re-added under the same name with another
+  key), strict mode blocks the group until the user takes the new key. A
+  verified contact under another key blocks as before. Contacts added by
+  an admin must come with the key pinned for them, strict mode or not.
+- **Group keys** (`trair3:`) name the admin who made them, carry a random
+  128-bit token (the admin's device keeps only its hash) and an end time,
+  and work for many people until the end or until taken back. The joiner
+  opens a short join chat (kind "join" in the state) with that admin's
+  devices and sends the token there; the admin's device checks it (made
+  on this device, not expired, not taken back, the group still run by
+  this account), takes the joiner's account key from the join chat and
+  adds exactly that account's devices. A key this device never made gets
+  no answer; a refused one gets a "join_denied". Joining needs the
+  admin's Trair to run. Guests (`g` keys) are listed with an end time:
+  from then on their messages are dropped by every device, their own
+  device deletes the group, and an admin's device removes them.
+- **Vanishing and closing:** an admin can set an end for everyone; the
+  owner can close the group, which every device deletes on following the
+  change. Like vanishing chats this relies on the other devices running
+  Trair; nobody can stop screenshots.
+- **Limits:** a malicious admin can still freeze or split a group (it is
+  trusted by the owner); the server's list of administering accounts is
+  forgotten with the group after the idle limit; adding an account's new
+  device to existing groups and keeping one's own devices' contacts in
+  step are not built yet.
+
 ## Emergency PINs
 
 Code: `crates/trair-core/src/notfall.rs`, `crates/trair-ffi/src/

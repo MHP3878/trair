@@ -65,6 +65,7 @@ class FakeDoor implements CoreDoor {
     chats.clear();
     messages.clear();
     pending.clear();
+    groups.clear();
     _running = null;
   }
 
@@ -243,6 +244,8 @@ class FakeDoor implements CoreDoor {
         } on FormatException {
           return _fail('rejected');
         }
+        final grouped = _groupReceive(w);
+        if (grouped != null) return grouped;
         if (w['kind'] == 'ends') {
           final chat = _chat(w['chat']);
           if (chat == null) return _fail('unknown_chat');
@@ -380,7 +383,386 @@ class FakeDoor implements CoreDoor {
       case 'withdrawn_members':
         return {'ok': true, 'ids': <String>[]};
     }
-    return _fail('bad_request');
+    return _groupOp(op, r) ?? _fail('bad_request');
+  }
+
+  // ----- groups (M5) -----
+
+  /// Groups by chat: name, owner, admins, guests (user → until), members,
+  /// ends, and members whose key changed.
+  final Map<String, Map<String, Object?>> groups = {};
+
+  /// Group keys made here: chat, minutes, guest.
+  final List<Map<String, Object?>> groupInvites = [];
+
+  /// Join requests waiting for this admin: join chat → {group, user}.
+  final Map<String, Map<String, Object?>> joinRequests = {};
+
+  /// Tokens of group keys used here, by join chat.
+  final Map<String, String> joinTokens = {};
+
+  static const me = 'local-julian';
+
+  List<String> _members(String chat) => (groups[chat]!['members'] as List).cast<String>();
+  List<String> _admins(String chat) => (groups[chat]!['admins'] as List).cast<String>();
+
+  String _role(String chat, String user) {
+    final g = groups[chat]!;
+    if (g['owner'] == user) return 'owner';
+    if (_admins(chat).contains(user)) return 'admin';
+    if ((g['guests'] as Map).containsKey(user)) return 'guest';
+    return 'member';
+  }
+
+  bool _isAdmin(String chat) => const {'owner', 'admin'}.contains(_role(chat, me));
+
+  void _syncChat(String chat) {
+    final c = _chat(chat);
+    final g = groups[chat];
+    if (c == null || g == null) return;
+    c['name'] = g['name'];
+    c['role'] = _role(chat, me);
+    c['members'] = _members(chat).length;
+    c['ends'] = g['ends'];
+  }
+
+  void _note(String chat, Map<String, Object?> what) {
+    (messages[chat] ??= []).add({
+      'id': ++_ids,
+      'chat': chat,
+      'user': '',
+      'from': 'trair',
+      'text': jsonEncode(what),
+      'outgoing': false,
+      'at': _now,
+      'missing': 0,
+    });
+  }
+
+  Map<String, Object?> _groupCommit(String chat, {List<String> welcomeTo = const [], List<String> removed = const []}) {
+    final g = groups[chat]!;
+    final commit = {
+      'chat': chat,
+      'epoch': (g['epoch'] as int?) ?? 0,
+      'commit': 'Y29tbWl0',
+      'to': [
+        for (final u in _members(chat))
+          if (u != me) '$u:d-peer',
+      ],
+      'welcome': welcomeTo.isEmpty ? null : 'd2VsY29tZQ==',
+      'welcome_to': welcomeTo,
+      'removed': removed,
+      'committers': [g['owner'], ..._admins(chat)],
+      'hash': 'h-$chat-${g['epoch']}',
+    };
+    g['epoch'] = ((g['epoch'] as int?) ?? 0) + 1;
+    pending[chat] = commit;
+    return {'ok': true, 'commit': commit};
+  }
+
+  Map<String, Object?>? _groupOp(String op, Map<String, Object?> r) {
+    final chatId = r['chat'] as String? ?? '';
+    final g = groups[chatId];
+    switch (op) {
+      case 'create_group':
+        final name = (r['name'] as String).trim();
+        if (name.isEmpty) return _fail('rejected');
+        final offers = (r['offers'] as List).cast<Map<String, Object?>>();
+        final users = {
+          for (final o in offers)
+            if (!(o['device'] as String).startsWith('$me:')) (o['device'] as String).split(':').first,
+        };
+        if (users.any((u) => !_isContact(u))) return _fail('rejected');
+        final id = 'g${groups.length + 1}';
+        final minutes = (r['minutes'] as num?)?.toInt();
+        groups[id] = {
+          'name': name,
+          'owner': me,
+          'admins': <String>[],
+          'guests': <String, int>{},
+          'members': [me, ...users],
+          'ends': minutes == null ? null : _now + minutes * 60,
+          'changed': <String>[],
+          'epoch': 0,
+        };
+        chats.add({'id': id, 'peer': '', 'kind': 'group', 'state': 'active', 'last': 0});
+        _syncChat(id);
+        _note(id, {'event': 'created', 'by': me});
+        final out = users.isEmpty
+            ? <String, Object?>{'ok': true, 'commit': null}
+            : _groupCommit(id, welcomeTo: [for (final u in users) '$u:d-peer']);
+        return {...out, 'chat': Map.of(_chat(id)!)};
+      case 'group_info':
+        if (g == null) return _fail('rejected');
+        return {
+          'ok': true,
+          'group': {
+            'chat': chatId,
+            'name': g['name'],
+            'me': _role(chatId, me),
+            'ends': g['ends'],
+            'my_end': (g['guests'] as Map)[me] ?? g['ends'],
+            'members': [
+              for (final u in _members(chatId))
+                {
+                  'user': u,
+                  'role': _role(chatId, u),
+                  'guest_until': (g['guests'] as Map)[u],
+                  'devices': ['$u:d-peer'],
+                  'leaving': false,
+                  'key_changed': (g['changed'] as List).contains(u),
+                },
+            ],
+          },
+        };
+      case 'kick' || 'set_admin' || 'hand_over' || 'rename_group' || 'set_group_end' || 'close_group' || 'add_to_group':
+        if (g == null) return _fail('rejected');
+        if (!_isAdmin(chatId)) return _fail('not_allowed');
+        final user = r['user'] as String? ?? '';
+        var removed = <String>[];
+        var welcomeTo = <String>[];
+        switch (op) {
+          case 'kick':
+            if (!_members(chatId).contains(user)) return _fail('rejected');
+            if (_role(chatId, user) != 'member' && _role(chatId, user) != 'guest' && _role(chatId, me) != 'owner') {
+              return _fail('not_allowed');
+            }
+            _members(chatId).remove(user);
+            _admins(chatId).remove(user);
+            (g['guests'] as Map).remove(user);
+            removed = ['$user:d-peer'];
+          case 'set_admin':
+            if (_role(chatId, me) != 'owner') return _fail('not_allowed');
+            _admins(chatId).remove(user);
+            if (r['admin'] == true) _admins(chatId).add(user);
+          case 'hand_over':
+            if (_role(chatId, me) != 'owner') return _fail('not_allowed');
+            _admins(chatId)
+              ..remove(user)
+              ..add(me);
+            g['owner'] = user;
+          case 'rename_group':
+            final name = (r['name'] as String).trim();
+            if (name.isEmpty) return _fail('rejected');
+            g['name'] = name;
+          case 'set_group_end':
+            final minutes = (r['minutes'] as num?)?.toInt();
+            g['ends'] = minutes == null ? null : _now + minutes * 60;
+          case 'close_group':
+            if (_role(chatId, me) != 'owner') return _fail('not_allowed');
+          case 'add_to_group':
+            final offers = (r['offers'] as List).cast<Map<String, Object?>>();
+            final users = {for (final o in offers) (o['device'] as String).split(':').first};
+            if (users.any((u) => !_isContact(u))) return _fail('rejected');
+            _members(chatId).addAll(users.where((u) => !_members(chatId).contains(u)));
+            welcomeTo = [for (final u in users) '$u:d-peer'];
+        }
+        final out = _groupCommit(chatId, welcomeTo: welcomeTo, removed: removed);
+        if (op == 'close_group') {
+          chats.removeWhere((c) => c['id'] == chatId);
+          groups.remove(chatId);
+          messages.remove(chatId);
+          pending.remove(chatId);
+          return {...out, 'ok': true};
+        }
+        _syncChat(chatId);
+        return out;
+      case 'leave_prepare':
+        if (g == null) return _fail('rejected');
+        if (_role(chatId, me) == 'owner' && _members(chatId).length > 1) {
+          final next = _admins(chatId).isNotEmpty ? _admins(chatId).first : _members(chatId).firstWhere((u) => u != me);
+          _admins(chatId).remove(next);
+          g['owner'] = next;
+          return _groupCommit(chatId);
+        }
+        if (_role(chatId, me) == 'admin') {
+          _admins(chatId).remove(me);
+          return _groupCommit(chatId);
+        }
+        return {'ok': true, 'commit': null};
+      case 'leave_group':
+        final c = _chat(chatId);
+        if (c == null || g == null) return _fail('rejected');
+        if (_isAdmin(chatId) && _members(chatId).length > 1) return _fail('not_allowed');
+        final to = [
+          for (final u in _members(chatId))
+            if (u != me) '$u:d-peer',
+        ];
+        if (c['state'] == 'request') {
+          chats.remove(c);
+          messages.remove(chatId);
+        } else {
+          c['state'] = 'left';
+          _note(chatId, {
+            'event': 'left',
+            'users': [me],
+          });
+        }
+        groups.remove(chatId);
+        return {
+          'ok': true,
+          'body': wire({'kind': 'leave', 'chat': chatId}),
+          'to': to,
+        };
+      case 'accept_group':
+        final c = _chat(chatId);
+        if (c == null || c['state'] != 'request') return _fail('rejected');
+        c['state'] = 'active';
+        return {'ok': true};
+      case 'delete_chat':
+        final c = _chat(chatId);
+        if (c == null || c['state'] != 'left') return _fail('rejected');
+        chats.remove(c);
+        messages.remove(chatId);
+        return {'ok': true};
+      case 'accept_new_key':
+        if (g == null) return _fail('rejected');
+        (g['changed'] as List).remove(r['user']);
+        return {'ok': true};
+      case 'propose_update' || 'tidy_group':
+        if (g == null) return _fail('rejected');
+        return {'ok': true};
+      case 'create_group_invite':
+        if (g == null) return _fail('rejected');
+        if (!_isAdmin(chatId)) return _fail('not_allowed');
+        final minutes = (r['minutes'] as num).toInt();
+        if (minutes <= 0 || minutes > 30 * 24 * 60) return _fail('bad_request');
+        final guest = r['guest'] == true;
+        final ends = _now + minutes * 60;
+        groupInvites.add({'chat': chatId, 'minutes': minutes, 'guest': guest});
+        return {
+          'ok': true,
+          'code': 'trair3:$me:${'a1' * 16}:${'0e' * 16}:${guest ? 'g' : 'm'}$ends:beef',
+          'ends': ends,
+          'guest': guest,
+        };
+      case 'revoke_group_invites':
+        final n = groupInvites.where((i) => i['chat'] == chatId).length;
+        groupInvites.removeWhere((i) => i['chat'] == chatId);
+        return {'ok': true, 'revoked': n};
+      case 'group_invites':
+        return {'ok': true, 'count': groupInvites.where((i) => i['chat'] == chatId).length, 'last': null};
+      case 'join_group':
+        final parts = (r['code'] as String).trim().split(':');
+        if (parts.length != 6 || parts[0] != 'trair3') return _fail('rejected');
+        final admin = parts[1];
+        final offers = (r['offers'] as List).cast<Map<String, Object?>>();
+        if (!offers.any((o) => (o['device'] as String).startsWith('$admin:'))) return _fail('bad_package');
+        final id = 'j${chats.length + 1}';
+        chats.add({'id': id, 'peer': admin, 'kind': 'join', 'name': admin, 'state': 'active', 'last': 0});
+        joinTokens[id] = parts[3];
+        pending[id] = {
+          'chat': id,
+          'epoch': 0,
+          'commit': 'Y29tbWl0',
+          'to': <String>[],
+          'welcome': 'd2VsY29tZQ==',
+          'welcome_to': ['$admin:d-peer'],
+          'removed': <String>[],
+          'committers': [me, admin]..sort(),
+          'hash': 'h-$id',
+        };
+        return {'ok': true, 'chat': Map.of(chats.last), 'commit': pending[id]};
+      case 'join_message':
+        final token = joinTokens.remove(chatId);
+        if (token == null) return {'ok': true};
+        return {
+          'ok': true,
+          'body': wire({'kind': 'join', 'chat': chatId, 'token': token}),
+          'to': ['${_chat(chatId)!['peer']}:d-peer'],
+        };
+      case 'join_requests':
+        return {
+          'ok': true,
+          'requests': [
+            for (final e in joinRequests.entries) {'chat': e.key, ...e.value},
+          ],
+        };
+      case 'admit':
+        final req = joinRequests[chatId];
+        if (req == null) return _fail('rejected');
+        final group = req['group'] as String;
+        final user = req['user'] as String;
+        if (_members(group).contains(user)) return _fail('rejected');
+        _members(group).add(user);
+        _note(group, {
+          'event': 'added',
+          'users': [user],
+          'by': me,
+        });
+        _syncChat(group);
+        return _groupCommit(group, welcomeTo: ['$user:d-peer']);
+      case 'close_join':
+        joinRequests.remove(chatId);
+        return {'ok': true};
+      case 'deny_join':
+        joinRequests.remove(chatId);
+        return {
+          'ok': true,
+          'body': wire({'kind': 'join_denied', 'chat': chatId}),
+          'to': ['x:d-peer'],
+        };
+    }
+    return null;
+  }
+
+  /// What a fake peer's group message does here (see `receive`).
+  Map<String, Object?>? _groupReceive(Map<String, Object?> w) {
+    switch (w['kind']) {
+      case 'group_welcome':
+        // Someone added this account to a group.
+        final id = w['chat'] as String;
+        final by = w['by'] as String;
+        final members = (w['members'] as List).cast<String>();
+        groups[id] = {
+          'name': w['name'],
+          'owner': by,
+          'admins': <String>[],
+          'guests': <String, int>{},
+          'members': members,
+          'ends': null,
+          'changed': <String>[],
+          'epoch': 1,
+        };
+        chats.add({'id': id, 'peer': '', 'kind': 'group', 'state': _isContact(by) ? 'active' : 'request', 'last': 0});
+        _syncChat(id);
+        _note(id, {'event': 'joined', 'by': by});
+        return {
+          'ok': true,
+          'incoming': {'kind': 'chat', 'chat': Map.of(chats.last), 'update_keys': false},
+        };
+      case 'join_request':
+        // A token of a key made here arrived in a join chat.
+        final chat = 'a${joinRequests.length + 1}';
+        joinRequests[chat] = {'group': w['group'], 'user': w['user']};
+        return {
+          'ok': true,
+          'incoming': {'kind': 'join_request', 'chat': chat, 'group': w['group'], 'user': w['user']},
+        };
+      case 'group_message':
+        final chat = w['chat'] as String;
+        final m = {
+          'id': ++_ids,
+          'chat': chat,
+          'user': w['user'],
+          'text': w['text'],
+          'outgoing': false,
+          'at': _now,
+          'missing': 0,
+        };
+        (messages[chat] ??= []).add(m);
+        return {
+          'ok': true,
+          'incoming': {'kind': 'message', 'message': m},
+        };
+      case 'key_changed':
+        (groups[w['chat']]!['changed'] as List).add(w['user']);
+        return {
+          'ok': true,
+          'incoming': {'kind': 'group', 'chat': w['chat']},
+        };
+    }
+    return null;
   }
 
   Map<String, Object?> _list() => {
@@ -568,7 +950,32 @@ class FakeDoor implements CoreDoor {
           'sweep' ||
           'share_profile' ||
           'profile_sent' ||
-          'profiles':
+          'profiles' ||
+          'create_group' ||
+          'group_info' ||
+          'add_to_group' ||
+          'kick' ||
+          'set_admin' ||
+          'hand_over' ||
+          'rename_group' ||
+          'set_group_end' ||
+          'close_group' ||
+          'leave_prepare' ||
+          'leave_group' ||
+          'accept_group' ||
+          'delete_chat' ||
+          'accept_new_key' ||
+          'propose_update' ||
+          'tidy_group' ||
+          'create_group_invite' ||
+          'revoke_group_invites' ||
+          'group_invites' ||
+          'join_group' ||
+          'join_message' ||
+          'join_requests' ||
+          'admit' ||
+          'close_join' ||
+          'deny_join':
         return _chatOp(op, r);
       case 'notfall_list' ||
           'notfall_add' ||

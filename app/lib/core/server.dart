@@ -134,8 +134,15 @@ class ServerApi {
   // ----- chats (M4) -----
 
   /// One-time key packages and the last-resort package of this device.
-  Future<ServerReply> uploadKeyPackages(List<Object?> packages, String? lastResort) =>
-      transport.send('POST', '/v1/keypackages', token: token, body: {'packages': packages, 'last_resort': ?lastResort});
+  /// With [replace] the old one-time packages go first (they lack what
+  /// groups need).
+  Future<ServerReply> uploadKeyPackages(List<Object?> packages, String? lastResort, {bool replace = false}) =>
+      transport.send(
+        'POST',
+        '/v1/keypackages',
+        token: token,
+        body: {'packages': packages, 'last_resort': ?lastResort, if (replace) 'replace': true},
+      );
 
   /// How many one-time key packages of this device are left.
   Future<ServerReply> keyPackageCount() => transport.send('GET', '/v1/keypackages', token: token);
@@ -151,7 +158,8 @@ class ServerApi {
   }
 
   /// A change of a chat as the core made it; the server takes the first
-  /// per chat and epoch.
+  /// per chat and epoch, and for a group only from its owner and admins
+  /// (`committers`, sent along with every change of a group).
   Future<ServerReply> postCommit(Map<String, Object?> c) => transport.send(
     'POST',
     '/v1/commits',
@@ -163,6 +171,7 @@ class ServerApi {
       'to': targets(c['to']),
       'welcome': c['welcome'],
       'welcome_to': targets(c['welcome_to']),
+      'committers': ?c['committers'],
     },
   );
 

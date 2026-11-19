@@ -27,7 +27,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use trair_core::chats::{CHATS_FILE, ChatState};
+use trair_core::chats::{CHATS_FILE, ChatKind, ChatState};
 use trair_core::{
     Chat, Contact, CoreError, Fingerprint, Incoming, KeyPackageOffer, Message, Messenger,
     PendingCommit, SignedDeviceList, Vault,
@@ -57,15 +57,17 @@ pub(crate) fn core_error(e: CoreError) -> Value {
         CoreError::Rejected(_) => "rejected",
         CoreError::InvalidName(_) => "bad_request",
         CoreError::Storage(_) => "storage",
+        CoreError::NotAllowed(_) => "not_allowed",
+        CoreError::Outdated(_) => "outdated",
         CoreError::Internal(_) => "internal",
     })
 }
 
-fn fail(code: &str) -> Value {
+pub(crate) fn fail(code: &str) -> Value {
     json!({"ok": false, "error": code})
 }
 
-fn now() -> u64 {
+pub(crate) fn now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -101,7 +103,7 @@ pub(crate) fn remove_files(dir: &Path) {
     }
 }
 
-fn b64(bytes: &[u8]) -> String {
+pub(crate) fn b64(bytes: &[u8]) -> String {
     B64.encode(bytes)
 }
 
@@ -119,10 +121,11 @@ fn contact_json(c: &Contact) -> Value {
     })
 }
 
-fn chat_json(c: &Chat, name: &str) -> Value {
+pub(crate) fn chat_json(c: &Chat, name: &str) -> Value {
     json!({
         "id": c.id,
         "peer": c.peer,
+        "kind": c.kind.as_str(),
         "name": name,
         "state": match c.state {
             ChatState::Active => "active",
@@ -134,7 +137,7 @@ fn chat_json(c: &Chat, name: &str) -> Value {
     })
 }
 
-fn message_json(m: &Message) -> Value {
+pub(crate) fn message_json(m: &Message) -> Value {
     json!({
         "id": m.id,
         "chat": m.chat,
@@ -147,7 +150,7 @@ fn message_json(m: &Message) -> Value {
     })
 }
 
-fn commit_json(p: &PendingCommit) -> Value {
+pub(crate) fn commit_json(p: &PendingCommit) -> Value {
     json!({
         "chat": p.chat,
         "epoch": p.epoch,
@@ -156,11 +159,12 @@ fn commit_json(p: &PendingCommit) -> Value {
         "welcome": p.welcome.as_deref().map(b64),
         "welcome_to": p.welcome_to,
         "removed": p.removed,
+        "committers": p.committers,
         "hash": p.hash(),
     })
 }
 
-fn offers(list: Vec<Offer>) -> Option<Vec<KeyPackageOffer>> {
+pub(crate) fn offers(list: Vec<Offer>) -> Option<Vec<KeyPackageOffer>> {
     list.into_iter()
         .map(|o| {
             Some(KeyPackageOffer {
@@ -177,6 +181,17 @@ fn name_of(m: &Messenger, user: &str) -> String {
         .flatten()
         .map(|c| c.name)
         .unwrap_or_else(|| user.to_string())
+}
+
+/// What a chat is called in the list: a group by its name, everything
+/// else by the other account.
+pub(crate) fn chat_name(m: &Messenger, c: &Chat) -> String {
+    if c.kind == ChatKind::Group
+        && let Ok(v) = m.group_view(&c.id)
+    {
+        return v.name;
+    }
+    name_of(m, &c.peer)
 }
 
 pub(crate) fn contact_code(m: &Messenger) -> Value {
@@ -211,8 +226,14 @@ pub(crate) fn chats(m: &Messenger) -> Value {
         Ok(list) => json!({
             "ok": true,
             "chats": list.iter().map(|c| {
-                let mut j = chat_json(c, &name_of(m, &c.peer));
+                let mut j = chat_json(c, &chat_name(m, c));
                 j["ends"] = json!(m.chat_end(&c.id).ok().flatten());
+                if c.kind == ChatKind::Group
+                    && let Ok(v) = m.group_view(&c.id)
+                {
+                    j["role"] = json!(v.me.as_str());
+                    j["members"] = json!(v.members.len());
+                }
                 j
             }).collect::<Vec<_>>(),
         }),
@@ -242,7 +263,7 @@ pub(crate) fn start_chat(m: &mut Messenger, user: &str, list: Vec<Offer>) -> Val
     match m.start_chat(user, &offers, now()) {
         Ok((chat, p)) => json!({
             "ok": true,
-            "chat": chat_json(&chat, &name_of(m, &chat.peer)),
+            "chat": chat_json(&chat, &chat_name(m, &chat)),
             "commit": commit_json(&p),
         }),
         Err(e) => core_error(e),
@@ -329,7 +350,7 @@ pub(crate) fn receive(m: &mut Messenger, body: &str) -> Value {
         Incoming::Duplicate => json!({"kind": "duplicate"}),
         Incoming::Chat { chat, update_keys } => json!({
             "kind": "chat",
-            "chat": chat_json(&chat, &name_of(m, &chat.peer)),
+            "chat": chat_json(&chat, &chat_name(m, &chat)),
             "update_keys": update_keys,
         }),
         Incoming::Message(msg) => json!({"kind": "message", "message": message_json(&msg)}),
@@ -349,6 +370,12 @@ pub(crate) fn receive(m: &mut Messenger, body: &str) -> Value {
         }),
         Incoming::Profile { user } => json!({"kind": "profile", "user": user}),
         Incoming::Ends { chat, ends } => json!({"kind": "ends", "chat": chat, "ends": ends}),
+        Incoming::Group { chat } => json!({"kind": "group", "chat": chat}),
+        Incoming::JoinRequest { chat, group, user } => {
+            json!({"kind": "join_request", "chat": chat, "group": group, "user": user})
+        }
+        Incoming::JoinRefused { chat } => json!({"kind": "join_refused", "chat": chat}),
+        Incoming::JoinFailed { chat } => json!({"kind": "join_failed", "chat": chat}),
         Incoming::Other => json!({"kind": "other"}),
     };
     json!({"ok": true, "incoming": what})

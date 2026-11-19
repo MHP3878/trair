@@ -11,5 +11,6 @@
 pub mod abi;
 pub mod api;
 mod chats;
+mod groups;
 mod notfall;
 mod platform;
