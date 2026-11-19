@@ -64,6 +64,8 @@ dart format --output=none --set-exit-if-changed .
 4. In beiden Fenstern oben auf „Neuer Chat“: den eigenen Kontaktcode kopieren und im anderen Fenster einfügen.
 5. „Chat starten“, schreiben. Die Nachrichten laufen verschlüsselt über den Server; er sieht nur Geheimtext.
 
+Sobald ein Chat läuft, bekommt das andere Konto automatisch dein Profil: Name, Leuchtfarbe, Profilbild, „Über mich“ und deine Abzeichen, verschlüsselt durch den Chat. Groß steht immer der Name, den *du* dem Kontakt gegeben hast; seinen selbst gewählten Namen zeigt Trair klein darunter. Fremde mit einer Anfrage sehen dein Profil erst, wenn du annimmst, und du ihres auch erst dann.
+
 ## Notfall-PINs
 
 Einstellungen → Notfall-PINs → Passwort eingeben → „Anzeigen“. Bis zu 3 PINs. Eine PIN tippst du auf dem Startbildschirm statt des Passworts ein: Trair löscht dann das Konto mit allen Nachrichten auf diesem PC, nach außen sieht es aus wie ein falsches Passwort. Pro PIN einstellbar: nur löschen oder vorher eine Nachricht an einen Chat schicken (diese PIN braucht 12 Zeichen), und ob das Konto danach aus der Liste verschwindet oder stehen bleibt und jedes Passwort als falsch gilt. Nicht zum Ausprobieren am echten Konto: Sie löscht wirklich. Details: [SECURITY.md](SECURITY.md#emergency-pins).

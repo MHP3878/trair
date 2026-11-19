@@ -744,3 +744,240 @@ fn a_change_the_server_took_before_a_crash_is_recognised() {
     assert_ne!(out.hash(), "0".repeat(64));
     assert!(alice.m().pending_commits().unwrap().is_empty());
 }
+
+// ---------------------------------------------------------------- profiles
+
+/// A PNG as an app would make it, with a hidden text chunk.
+fn picture(side: u32, color: png::ColorType, secret: &str) -> Vec<u8> {
+    let channels = match color {
+        png::ColorType::Rgba => 4,
+        png::ColorType::Rgb => 3,
+        png::ColorType::GrayscaleAlpha => 2,
+        _ => 1,
+    };
+    let mut pixels = vec![0u8; (side * side) as usize * channels];
+    getrandom::fill(&mut pixels).unwrap();
+    let mut out = Vec::new();
+    {
+        let mut e = png::Encoder::new(&mut out, side, side);
+        e.set_color(color);
+        e.set_depth(png::BitDepth::Eight);
+        e.add_text_chunk("Ort".into(), secret.into()).unwrap();
+        let mut w = e.write_header().unwrap();
+        w.write_image_data(&pixels).unwrap();
+        w.finish().unwrap();
+    }
+    out
+}
+
+fn own_profile(rev: u64, name: &str, pic: Option<&[u8]>) -> serde_json::Value {
+    use base64::Engine;
+    serde_json::json!({
+        "v": 1,
+        "rev": rev,
+        "name": name,
+        "glow": 0xFF5CC8FFu32,
+        "about": "Baut Trair.",
+        "picture": pic.map(|p| base64::engine::general_purpose::STANDARD.encode(p)),
+        "badges": [],
+    })
+}
+
+/// Share and hand everything to the server, as the app does.
+fn share(net: &mut Net, p: &mut Phone, profile: &serde_json::Value, only_contacts: bool) -> usize {
+    let out = p.m().share_profile(profile, only_contacts).unwrap();
+    let id = p.id();
+    for o in &out {
+        net.send(&id, &o.to, &o.bytes);
+        p.m().profile_sent(&o.chat, o.rev).unwrap();
+    }
+    out.len()
+}
+
+#[test]
+fn a_profile_reaches_the_chat_partner_checked_and_newest_only() {
+    let mut net = Net::default();
+    let mut alice = person("alice");
+    let mut bob = person("bob");
+    publish(&mut net, &mut bob, 2);
+    publish(&mut net, &mut alice, 2);
+    let chat = chat_between(&mut net, &mut alice, &mut bob);
+    poll_ok(&mut net, &mut bob);
+
+    let pic = picture(64, png::ColorType::Rgb, "Hauptstrasse 5");
+    assert_eq!(
+        share(
+            &mut net,
+            &mut alice,
+            &own_profile(10, "Alice", Some(&pic)),
+            false
+        ),
+        1
+    );
+    assert_eq!(
+        share(
+            &mut net,
+            &mut alice,
+            &own_profile(10, "Alice", Some(&pic)),
+            false
+        ),
+        0,
+        "this version is already there"
+    );
+    let got = poll_ok(&mut net, &mut bob);
+    assert!(matches!(&got[..], [Incoming::Profile { user }] if user == alice.account.user()));
+    let p = bob.m().profile(alice.account.user()).unwrap().unwrap();
+    assert_eq!((p.profile.rev, p.profile.name.as_str()), (10, "Alice"));
+    assert_eq!(p.profile.glow, Some(0xFF5CC8FF));
+    assert_eq!(p.profile.about, "Baut Trair.");
+    assert_eq!(p.account_key, alice.account.public_key());
+    // The picture was written anew: same size, no hidden text.
+    let stored = p.profile.picture.unwrap();
+    assert!(!stored.windows(4).any(|w| w == b"tEXt"));
+    assert!(!String::from_utf8_lossy(&stored).contains("Hauptstrasse"));
+    let info = png::Decoder::new(std::io::Cursor::new(&stored))
+        .read_info()
+        .unwrap();
+    assert_eq!((info.info().width, info.info().height), (64, 64));
+
+    // An older version arriving late changes nothing.
+    let newer = alice
+        .m()
+        .share_profile(&own_profile(30, "Alice B.", None), false)
+        .unwrap();
+    let older = alice
+        .m()
+        .share_profile(&own_profile(20, "Alte Alice", None), false)
+        .unwrap();
+    let id = alice.id();
+    net.send(&id, &newer[0].to, &newer[0].bytes);
+    net.send(&id, &older[0].to, &older[0].bytes);
+    let got = poll_ok(&mut net, &mut bob);
+    assert!(matches!(
+        &got[..],
+        [Incoming::Profile { .. }, Incoming::Other]
+    ));
+    let p = bob.m().profile(alice.account.user()).unwrap().unwrap();
+    assert_eq!((p.profile.rev, p.profile.name.as_str()), (30, "Alice B."));
+    assert!(p.profile.picture.is_none());
+
+    // A profile that never left counts as no missing message.
+    let _lost = alice
+        .m()
+        .share_profile(&own_profile(40, "Alice", None), false)
+        .unwrap();
+    send(&mut net, &mut alice, &chat, "hallo");
+    let got = poll_ok(&mut net, &mut bob);
+    assert!(matches!(&got[..], [Incoming::Message(m)] if m.text == "hallo" && m.missing == 0));
+
+    // Kept across a restart; Alice's own messages list shows no profile.
+    bob.restart();
+    assert_eq!(bob.m().profiles().unwrap().len(), 1);
+    assert_eq!(texts(&mut alice, &chat), ["hallo"]);
+    assert_eq!(texts(&mut bob, &chat), ["hallo"]);
+}
+
+#[test]
+fn requests_and_own_devices_get_no_profile_and_send_none_that_counts() {
+    let mut net = Net::default();
+    let mut alice = person("alice");
+    let mut mallory = person("mallory");
+    publish(&mut net, &mut alice, 2);
+    let a_code = alice.m().contact_code();
+    mallory.m().add_contact(&a_code, "Alice", NOW).unwrap();
+    let offers = net.fetch(alice.account.user());
+    let (chat, out) = mallory
+        .m()
+        .start_chat(alice.account.user(), &offers, NOW)
+        .unwrap();
+    assert!(commit(&mut net, &mut mallory, &out));
+    share(
+        &mut net,
+        &mut mallory,
+        &own_profile(5, "Mallory", None),
+        false,
+    );
+    poll_ok(&mut net, &mut alice);
+    // A stranger's profile is kept (the app shows no picture until accepted).
+    assert!(alice.m().profile(mallory.account.user()).unwrap().is_some());
+    // Alice's own profile does not go to a request, with either setting,
+    // even without strict mode (which would block the stranger anyway).
+    alice.m().set_strict(false).unwrap();
+    assert_eq!(
+        share(&mut net, &mut alice, &own_profile(7, "Alice", None), false),
+        0
+    );
+    assert_eq!(
+        share(&mut net, &mut alice, &own_profile(7, "Alice", None), true),
+        0
+    );
+    alice.m().set_strict(true).unwrap();
+    alice.m().accept_request(&chat.id, "Mallory", NOW).unwrap();
+    assert_eq!(
+        share(&mut net, &mut alice, &own_profile(7, "Alice", None), true),
+        1
+    );
+    let got = poll_ok(&mut net, &mut mallory);
+    assert!(matches!(&got[..], [Incoming::Profile { .. }]));
+
+    // A second device of Alice gets her profile but does not keep it as
+    // someone else's.
+    let mut bob = person("bob");
+    publish(&mut net, &mut bob, 2);
+    let mut alice2 = second_device(&mut alice);
+    publish(&mut net, &mut alice2, 2);
+    let chat2 = chat_between(&mut net, &mut alice, &mut bob);
+    poll_ok(&mut net, &mut alice2);
+    poll_ok(&mut net, &mut bob);
+    assert!(alice.m().members(&chat2).unwrap().len() >= 3);
+    share(&mut net, &mut alice, &own_profile(8, "Alice", None), false);
+    let got = poll_ok(&mut net, &mut alice2);
+    assert!(got.iter().all(|g| !matches!(g, Incoming::Profile { .. })));
+    assert!(alice2.m().profile(alice.account.user()).unwrap().is_none());
+}
+
+#[test]
+fn bad_profiles_are_refused_before_anything_is_kept() {
+    use trair_core::profiles::{self, MAX_ABOUT_CHARS, MAX_NAME_CHARS};
+    let ok = own_profile(1, "Alice", None);
+    assert!(profiles::check(&ok).is_ok());
+    let with = |k: &str, v: serde_json::Value| {
+        let mut p = ok.clone();
+        p[k] = v;
+        profiles::check(&p).is_err()
+    };
+    assert!(with("rev", 0.into()), "no version");
+    assert!(with("v", 2.into()), "unknown format");
+    assert!(with("name", "".into()));
+    assert!(with("name", "x".repeat(MAX_NAME_CHARS + 1).into()));
+    assert!(
+        with("name", "Alice\u{202e}\u{0007}".into()),
+        "control characters"
+    );
+    assert!(with("about", "x".repeat(MAX_ABOUT_CHARS + 1).into()));
+    assert!(with(
+        "badges",
+        serde_json::json!(vec![serde_json::json!({}); 17])
+    ));
+    assert!(with("badges", serde_json::json!(["kein objekt"])));
+    assert!(with("extra", "mehr".into()), "unknown fields");
+    use base64::Engine;
+    let b64 =
+        |b: &[u8]| serde_json::Value::from(base64::engine::general_purpose::STANDARD.encode(b));
+    assert!(with("picture", b64(b"GIF89a....")), "not a PNG");
+    assert!(
+        with("picture", b64(&picture(129, png::ColorType::Rgba, "x"))),
+        "too large"
+    );
+    assert!(with("picture", "!!kein base64!!".into()));
+    let mut damaged = picture(32, png::ColorType::Rgba, "x");
+    let n = damaged.len();
+    damaged.truncate(n - 30);
+    assert!(with("picture", b64(&damaged)), "damaged");
+    // Grey pictures come out as RGBA.
+    let grey = profiles::clean_picture(&picture(16, png::ColorType::Grayscale, "x")).unwrap();
+    let r = png::Decoder::new(std::io::Cursor::new(&grey))
+        .read_info()
+        .unwrap();
+    assert_eq!(r.info().color_type, png::ColorType::Rgba);
+}

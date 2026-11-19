@@ -91,6 +91,18 @@ pub enum Event {
         /// How many earlier messages from this sender never arrived.
         missing: u64,
     },
+    /// A profile from another member (name, picture, badges), not yet
+    /// checked. `account_key` is the sender's, from its certificate.
+    Profile {
+        /// Group id.
+        group: String,
+        /// Sender, proven by the MLS signature.
+        from: String,
+        /// The sender's account key (all its devices in the group agree).
+        account_key: Vec<u8>,
+        /// The profile as sent.
+        profile: serde_json::Value,
+    },
     /// The group changed.
     Commit {
         /// Group id.
@@ -111,10 +123,15 @@ pub enum Event {
     },
 }
 
+/// What is inside an MLS application message. A profile has `seq` 0: it
+/// is not counted, so one that never left this device leaves no gap.
 #[derive(Serialize, Deserialize)]
 struct Payload {
     seq: u64,
+    #[serde(default)]
     text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    profile: Option<serde_json::Value>,
 }
 
 /// What a device keeps besides the OpenMLS key-value store: which groups
@@ -293,6 +310,28 @@ impl Device {
             match &found {
                 Some(f) if *f != c.account => return Ok(None),
                 _ => found = Some(c.account),
+            }
+        }
+        Ok(found)
+    }
+
+    /// The account key of `user` in a group, if all its devices there
+    /// name the same one.
+    pub fn account_key_of(&self, group: &str, user: &str) -> Result<Option<Vec<u8>>> {
+        let g = self.group(group)?;
+        let mut found: Option<Vec<u8>> = None;
+        for m in g.members() {
+            let Ok(c) =
+                DeviceCertificate::check(m.credential.serialized_content(), &m.signature_key)
+            else {
+                continue;
+            };
+            if c.user != user {
+                continue;
+            }
+            match &found {
+                Some(k) if *k != c.account_key => return Ok(None),
+                _ => found = Some(c.account_key),
             }
         }
         Ok(found)
@@ -683,6 +722,38 @@ impl Device {
     /// Encrypt a chat message. Refused if the group contains a forged
     /// device, and in strict mode if anyone is not trusted.
     pub fn encrypt(&mut self, group: &str, text: &str) -> Result<Vec<u8>> {
+        self.check_send(group)?;
+        let seq = {
+            let s = self.seq_out.entry(group.to_string()).or_insert(0);
+            *s += 1;
+            *s
+        };
+        self.seal(
+            group,
+            &Payload {
+                seq,
+                text: text.to_string(),
+                profile: None,
+            },
+        )
+    }
+
+    /// Encrypt this account's profile for a group. Same checks as a text.
+    pub fn encrypt_profile(&mut self, group: &str, profile: &serde_json::Value) -> Result<Vec<u8>> {
+        self.check_send(group)?;
+        self.seal(
+            group,
+            &Payload {
+                seq: 0,
+                text: String::new(),
+                profile: Some(profile.clone()),
+            },
+        )
+    }
+
+    /// Nothing goes to a group with a forged, withdrawn or (in strict mode)
+    /// unverified device.
+    fn check_send(&self, group: &str) -> Result<()> {
         let members = self.members(group)?;
         let forged: Vec<String> = members
             .iter()
@@ -709,16 +780,11 @@ impl Device {
                 blocked.join(", ")
             )));
         }
-        let seq = {
-            let s = self.seq_out.entry(group.to_string()).or_insert(0);
-            *s += 1;
-            *s
-        };
-        let payload = serde_json::to_vec(&Payload {
-            seq,
-            text: text.to_string(),
-        })
-        .map_err(internal)?;
+        Ok(())
+    }
+
+    fn seal(&mut self, group: &str, payload: &Payload) -> Result<Vec<u8>> {
+        let payload = serde_json::to_vec(payload).map_err(internal)?;
         let (provider, keys) = (&self.provider, &self.keys);
         let g = self
             .groups
@@ -821,6 +887,18 @@ impl Device {
             ProcessedMessageContent::ApplicationMessage(a) => {
                 let p: Payload = serde_json::from_slice(&a.into_bytes())
                     .map_err(|_| CoreError::Rejected("unreadable payload".into()))?;
+                if let Some(profile) = p.profile {
+                    let user = sender.split(':').next().unwrap_or_default().to_string();
+                    let account_key = self
+                        .account_key_of(&group, &user)?
+                        .ok_or_else(|| CoreError::Rejected("sender's account unclear".into()))?;
+                    return Ok(Event::Profile {
+                        group,
+                        from: sender,
+                        account_key,
+                        profile,
+                    });
+                }
                 let last = self
                     .seq_in
                     .insert((group.clone(), sender.clone()), p.seq)

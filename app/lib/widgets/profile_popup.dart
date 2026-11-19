@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 The Trair contributors
 
+import 'dart:typed_data';
+
 import 'package:material_ui/material_ui.dart';
 
 import '../app_state.dart';
@@ -28,7 +30,23 @@ class ProfileView {
     this.isSelf = false,
     this.demoBadges = false,
     this.visibility,
+    this.picture,
+    this.chosenName,
+    this.showTrust = true,
   });
+
+  /// A real chat partner: your name for them is the big one, the name they
+  /// chose stands below it. Everything else is what they sent.
+  factory ProfileView.peer(RealChat chat, PeerProfile p) => ProfileView(
+    name: chat.name,
+    color: p.glow ?? TrairColors.accentLight,
+    about: p.about,
+    badges: p.badges,
+    nameWarning: p.nameWarning,
+    picture: p.picture,
+    chosenName: p.name.trim().toLowerCase() == chat.name.trim().toLowerCase() ? null : p.name,
+    showTrust: false,
+  );
 
   /// Someone else, or the user if [Person.isSelf].
   factory ProfileView.of(Person p, AppState state) {
@@ -55,6 +73,7 @@ class ProfileView {
     isSelf: true,
     demoBadges: state.ownBadgesIncludeDemo,
     visibility: profileVisibilityChoices[state.profileVisibility],
+    picture: state.picture,
   );
 
   final String name;
@@ -69,6 +88,15 @@ class ProfileView {
 
   /// Only for the own profile: who can see it.
   final String? visibility;
+
+  /// Profile picture (PNG), if any.
+  final Uint8List? picture;
+
+  /// The name a chat partner chose, when it differs from yours for them.
+  final String? chosenName;
+
+  /// Trust levels exist only in the demo so far.
+  final bool showTrust;
 }
 
 /// Open the profile card of [view] above everything else.
@@ -143,18 +171,24 @@ class ProfilePopup extends StatelessWidget {
                         height: 86,
                         padding: const EdgeInsets.all(6),
                         decoration: const BoxDecoration(color: Color(0xFF141420), shape: BoxShape.circle),
-                        child: Container(
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: v.color,
-                            shape: BoxShape.circle,
-                            boxShadow: [BoxShadow(color: v.color.withAlpha(0x66), blurRadius: 18)],
-                          ),
-                          child: Text(
-                            initial,
-                            style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w700, color: Color(0xFF0B0B12)),
-                          ),
-                        ),
+                        child: v.picture != null
+                            ? Avatar(initials: initial, color: v.color, size: 74, picture: v.picture)
+                            : Container(
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color: v.color,
+                                  shape: BoxShape.circle,
+                                  boxShadow: [BoxShadow(color: v.color.withAlpha(0x66), blurRadius: 18)],
+                                ),
+                                child: Text(
+                                  initial,
+                                  style: const TextStyle(
+                                    fontSize: 30,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFF0B0B12),
+                                  ),
+                                ),
+                              ),
                       ),
                     ),
                     if (v.badges.isNotEmpty)
@@ -198,6 +232,10 @@ class ProfilePopup extends StatelessWidget {
                         if (v.isSelf) ...[const SizedBox(width: 8), const Text('Du', style: TrairText.small)],
                       ],
                     ),
+                    if (v.chosenName != null) ...[
+                      const SizedBox(height: 2),
+                      Text('nennt sich „${v.chosenName}“', style: TrairText.small),
+                    ],
                     if (v.nameWarning) ...[const SizedBox(height: 10), const _NameWarning()],
                     const SizedBox(height: 14),
                     const Divider(height: 1, color: TrairColors.borderSoft),
@@ -208,25 +246,27 @@ class ProfilePopup extends StatelessWidget {
                       v.about.trim().isEmpty ? 'Noch nichts geschrieben.' : v.about.trim(),
                       style: v.about.trim().isEmpty ? TrairText.muted : TrairText.body.copyWith(fontSize: 14),
                     ),
-                    const SizedBox(height: 14),
-                    const Text('Trust', style: TrairText.label),
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        for (var i = 1; i <= 3; i++)
-                          Container(
-                            width: 22,
-                            height: 6,
-                            margin: const EdgeInsets.only(right: 4),
-                            decoration: BoxDecoration(
-                              color: i <= v.trust ? TrairColors.mint : const Color(0x1FFFFFFF),
-                              borderRadius: BorderRadius.circular(999),
+                    if (v.showTrust) ...[
+                      const SizedBox(height: 14),
+                      const Text('Trust', style: TrairText.label),
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          for (var i = 1; i <= 3; i++)
+                            Container(
+                              width: 22,
+                              height: 6,
+                              margin: const EdgeInsets.only(right: 4),
+                              decoration: BoxDecoration(
+                                color: i <= v.trust ? TrairColors.mint : const Color(0x1FFFFFFF),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
                             ),
-                          ),
-                        const SizedBox(width: 6),
-                        Text('Stufe ${v.trust} · ${_trustNames[v.trust.clamp(0, 3)]}', style: TrairText.small),
-                      ],
-                    ),
+                          const SizedBox(width: 6),
+                          Text('Stufe ${v.trust} · ${_trustNames[v.trust.clamp(0, 3)]}', style: TrairText.small),
+                        ],
+                      ),
+                    ],
                     if (v.badges.isNotEmpty && v.demoBadges) ...[
                       const SizedBox(height: 12),
                       const Text(

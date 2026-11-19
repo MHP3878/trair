@@ -5,6 +5,7 @@
 // what the app really looks like (CI uploads them as "Trair-Screenshots").
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -211,7 +212,48 @@ void main() {
       FakeDoor.wire({'kind': 'message', 'chat': 'c1', 'text': 'Angekommen! Und der Server sieht nichts davon.'}),
     );
     server.deliver(FakeDoor.wire({'kind': 'chat', 'chat': 'x1', 'peer': 'local-unbekannt'}));
+    // Lena's profile arrives: picture, colour, a badge, her chosen name.
+    final pic = await tester.runAsync(() async {
+      final rec = ui.PictureRecorder();
+      final c = ui.Canvas(rec);
+      c.drawRect(
+        const ui.Rect.fromLTWH(0, 0, 128, 128),
+        ui.Paint()
+          ..shader = ui.Gradient.linear(ui.Offset.zero, const ui.Offset(128, 128), const [
+            ui.Color(0xFF5EE6B0),
+            ui.Color(0xFF2B7BFF),
+          ]),
+      );
+      c.drawCircle(const ui.Offset(64, 50), 22, ui.Paint()..color = const ui.Color(0xEEFFFFFF));
+      c.drawCircle(const ui.Offset(64, 128), 46, ui.Paint()..color = const ui.Color(0xEEFFFFFF));
+      final img = await rec.endRecording().toImage(128, 128);
+      final bytes = await img.toByteData(format: ui.ImageByteFormat.png);
+      return bytes!.buffer.asUint8List();
+    });
+    server.deliver(
+      FakeDoor.wire({
+        'kind': 'profile',
+        'user': 'local-lena',
+        'profile': {
+          'rev': 3,
+          'name': 'Lena M.',
+          'glow': 0xFF5EE6B0,
+          'about': 'Fotografiert gern Züge und Sonnenuntergänge.',
+          'picture': base64.encode(pic!),
+          'badges': [
+            {'kind': 'founder', 'community': 'Bahnfotos'},
+          ],
+          'name_warning': false,
+        },
+      }),
+    );
+    await tester.pumpAndSettle();
+    final element = tester.element(find.byType(ChatsScreen));
+    await tester.runAsync(() => precacheImage(MemoryImage(pic), element));
     await _shot(tester, '20-echter-chat');
+    await tester.tap(find.textContaining('nennt sich „Lena M.“'));
+    await tester.pumpAndSettle();
+    await _shot(tester, '24-profil-eines-kontakts');
   });
 
   testWidgets('screenshots of the account list and a profile picture', (tester) async {

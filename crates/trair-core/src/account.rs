@@ -195,6 +195,8 @@ pub struct CheckedCertificate {
     pub user: String,
     /// Fingerprint of the account key that signed the device.
     pub account: Fingerprint,
+    /// The account key itself (public).
+    pub account_key: Vec<u8>,
 }
 
 impl DeviceCertificate {
@@ -241,6 +243,7 @@ impl DeviceCertificate {
             id: cert.id(),
             user: cert.user,
             account: Fingerprint::of(&account_key),
+            account_key,
         })
     }
 }

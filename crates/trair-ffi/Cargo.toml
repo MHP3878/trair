@@ -47,3 +47,7 @@ windows-sys = { version = "=0.61.2", features = [
   "Win32_UI_Controls_Dialogs",
   "Win32_UI_WindowsAndMessaging",
 ] }
+
+[dev-dependencies]
+# Test pictures for the profile tests.
+png = "=0.18.1"

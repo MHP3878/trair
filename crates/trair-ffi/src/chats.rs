@@ -343,9 +343,72 @@ pub(crate) fn receive(m: &mut Messenger, body: &str) -> Value {
             "removed": removed,
             "left": left,
         }),
+        Incoming::Profile { user } => json!({"kind": "profile", "user": user}),
         Incoming::Other => json!({"kind": "other"}),
     };
     json!({"ok": true, "incoming": what})
+}
+
+/// This account's profile for every chat that does not have this version
+/// yet. The app hands each to the server, then calls `profile_sent`.
+pub(crate) fn share_profile(m: &mut Messenger, profile: &Value, only_contacts: bool) -> Value {
+    match m.share_profile(profile, only_contacts) {
+        Ok(out) => json!({
+            "ok": true,
+            "out": out.iter().map(|o| json!({
+                "chat": o.chat,
+                "rev": o.rev,
+                "body": b64(&o.bytes),
+                "to": o.to,
+            })).collect::<Vec<_>>(),
+        }),
+        Err(e) => core_error(e),
+    }
+}
+
+pub(crate) fn profile_sent(m: &mut Messenger, chat: &str, rev: u64) -> Value {
+    match m.profile_sent(chat, rev) {
+        Ok(()) => json!({"ok": true}),
+        Err(e) => core_error(e),
+    }
+}
+
+/// Profiles of other accounts. Badges are checked now (they expire) with
+/// the account key the profile came with; the app gets only valid ones.
+pub(crate) fn profiles(m: &Messenger) -> Value {
+    let list = match m.profiles() {
+        Ok(l) => l,
+        Err(e) => return core_error(e),
+    };
+    let now = now();
+    let out: Vec<Value> = list
+        .iter()
+        .map(|p| {
+            let parsed: Vec<trair_core::badges::Badge> = p
+                .profile
+                .badges
+                .iter()
+                .filter_map(|b| serde_json::from_value(b.clone()).ok())
+                .collect();
+            let (shown, _) = trair_core::badges::verify_all(
+                &parsed,
+                &p.account_key,
+                now,
+                trair_core::badges::TEAM_KEYS,
+            );
+            json!({
+                "user": p.user,
+                "rev": p.profile.rev,
+                "name": p.profile.name,
+                "glow": p.profile.glow,
+                "about": p.profile.about,
+                "picture": p.profile.picture.as_deref().map(b64),
+                "badges": shown,
+                "name_warning": trair_core::badges::name_needs_warning(&p.profile.name, &shown),
+            })
+        })
+        .collect();
+    json!({"ok": true, "profiles": out})
 }
 
 pub(crate) fn accept_request(m: &mut Messenger, chat: &str, name: &str) -> Value {

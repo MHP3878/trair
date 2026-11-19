@@ -759,11 +759,16 @@ void main() {
       ]);
       expect(door.pending, isEmpty, reason: 'the server took the change');
       expect(find.text('Echt Ende-zu-Ende verschlüsselt'), findsWidgets);
+      // The new chat got the own profile right away, once.
+      expect(server.sent, hasLength(1));
+      expect(FakeDoor.unwire(server.sent.single['body'] as String)['kind'], 'profile');
+      expect(door.profileSent, {'c1': door.shared!['rev']});
 
       await tester.enterText(find.byKey(const Key('real-composer')), 'Hallo Bob');
       await tester.tap(find.byTooltip('Senden'));
       await tester.pumpAndSettle();
-      expect(server.sent.single['to'], [
+      expect(server.sent, hasLength(2));
+      expect(server.sent.last['to'], [
         {'user': 'local-bob', 'device': 'd-peer'},
       ]);
       expect(find.text('Hallo Bob'), findsOneWidget);
@@ -1081,6 +1086,115 @@ void main() {
       expect(door.ops.last, 'notfall_finish');
       expect(door.password, isNull);
       expect(find.text('Weiter'), findsOneWidget);
+    });
+  });
+
+  group('Profile an Kontakte', () {
+    /// A valid 1 × 1 PNG.
+    const dot = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+    /// Julian with a chat with his contact Bob and a request from a
+    /// stranger, connected to the server.
+    Future<(FakeDoor, FakeServer)> online(WidgetTester tester) async {
+      final server = FakeServer();
+      final door = FakeDoor(password: pw, profile: {'name': 'Julian', 'glow': 0xFFA18DFF})..chatsEnabled = true;
+      door.contacts.add({'user': 'local-bob', 'name': 'Bob', 'fingerprint': 'ff' * 16, 'confirmed': false});
+      door.chats.addAll([
+        {'id': 'c1', 'peer': 'local-bob', 'name': 'Bob', 'state': 'active', 'last': 0},
+        {'id': 'x1', 'peer': 'local-fremd', 'name': 'local-fremd', 'state': 'request', 'last': 0},
+      ]);
+      await _start(tester, door: door, server: server);
+      await _unlock(tester);
+      await _openSettings(tester);
+      await tester.ensureVisible(find.widgetWithText(PillButton, 'Verbinden'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Verbinden'));
+      await tester.pumpAndSettle();
+      expect(find.text('Verbunden'), findsOneWidget);
+      return (door, server);
+    }
+
+    List<Map<String, Object?>> profilesSent(FakeServer server) => [
+      for (final m in server.sent)
+        if (FakeDoor.unwire(m['body'] as String)['kind'] == 'profile') FakeDoor.unwire(m['body'] as String),
+    ];
+
+    testWidgets('the own profile goes to chats once per change, never to a request', (tester) async {
+      final (door, server) = await online(tester);
+      expect(profilesSent(server), hasLength(1));
+      expect(profilesSent(server).single['chat'], 'c1', reason: 'not to the stranger');
+      expect(door.shared!['name'], 'Julian');
+      expect(door.shared!['badges'], isEmpty, reason: 'the core adds the badges from the vault');
+      final first = door.shared!['rev'] as int;
+
+      // Something else changes: nothing new goes out.
+      final strictSwitch = _switch('Strenger Modus');
+      await tester.ensureVisible(strictSwitch);
+      await tester.pumpAndSettle();
+      await tester.tap(strictSwitch);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      expect(profilesSent(server), hasLength(1));
+
+      // The name changes: a newer version goes to Bob.
+      final name = find.byWidgetPredicate((w) => w is TextField && w.controller?.text == 'Julian');
+      await tester.ensureVisible(name);
+      await tester.pumpAndSettle();
+      await tester.enterText(name, 'Jules');
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      expect(profilesSent(server), hasLength(2));
+      expect(profilesSent(server).last['name'], 'Jules');
+      expect(door.shared!['rev'] as int, greaterThan(first));
+      expect(door.profileSent['c1'], door.shared!['rev']);
+    });
+
+    testWidgets("a partner's picture, colour and badges show; your name for them stays the big one", (tester) async {
+      final (door, server) = await online(tester);
+      await tester.tap(find.text('Chats'));
+      await tester.pumpAndSettle();
+      for (final (user, name) in [('local-bob', 'Robert'), ('local-fremd', 'Trair Support')]) {
+        server.deliver(
+          FakeDoor.wire({
+            'kind': 'profile',
+            'user': user,
+            'profile': {
+              'rev': 9,
+              'name': name,
+              'glow': 0xFF5EE6B0,
+              'about': 'Ich mag Züge.',
+              'picture': dot,
+              'badges': [
+                {'kind': 'founder', 'community': 'Bobs Runde'},
+              ],
+              'name_warning': false,
+            },
+          }),
+        );
+        await tester.pumpAndSettle();
+      }
+      expect(door.peerProfiles, hasLength(2));
+      // Only Bob's picture: nothing from a stranger before accepting.
+      expect(find.byWidgetPredicate((w) => w is Avatar && w.picture != null), findsOneWidget);
+      expect(find.text('Robert'), findsNothing, reason: 'Bob stays Bob in the list');
+      expect(find.text('Trair Support'), findsNothing);
+
+      await tester.tap(find.text('Bob').first);
+      await tester.pumpAndSettle();
+      expect(find.text('nennt sich „Robert“ · local-bob'), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp('Abzeichen: ')), findsWidgets);
+      await tester.tap(find.text('nennt sich „Robert“ · local-bob'));
+      await tester.pumpAndSettle();
+      expect(find.text('Ich mag Züge.'), findsOneWidget);
+      expect(find.text('nennt sich „Robert“'), findsOneWidget);
+      expect(find.text('Trust'), findsNothing, reason: 'no made-up trust level for real people');
+      await tester.tap(find.byTooltip('Schließen').last);
+      await tester.pumpAndSettle();
+
+      // The request: no card, no chosen name.
+      await tester.tap(find.text('local-fremd').first);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('nennt sich'), findsNothing);
     });
   });
 }

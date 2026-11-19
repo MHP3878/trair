@@ -4,6 +4,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' show max;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -61,6 +62,46 @@ class RealChat {
   final int last;
 
   bool get isRequest => state == 'request';
+}
+
+/// What a chat partner sent about themselves, checked by the core.
+class PeerProfile {
+  const PeerProfile({
+    required this.user,
+    required this.rev,
+    required this.name,
+    this.glow,
+    this.about = '',
+    this.picture,
+    this.badges = const [],
+    this.nameWarning = false,
+  });
+
+  factory PeerProfile.fromJson(Map<String, Object?> j) => PeerProfile(
+    user: j['user'] as String,
+    rev: (j['rev'] as num).toInt(),
+    name: j['name'] as String,
+    glow: j['glow'] is num ? Color((j['glow'] as num).toInt()) : null,
+    about: j['about'] as String? ?? '',
+    picture: j['picture'] is String ? base64.decode(j['picture'] as String) : null,
+    badges: [
+      for (final b in (j['badges'] as List? ?? const []).whereType<Map<String, Object?>>()) ?ProfileBadge.fromJson(b),
+    ],
+    nameWarning: j['name_warning'] == true,
+  );
+
+  final String user;
+  final int rev;
+
+  /// The name they chose (yours for them stays the big one).
+  final String name;
+  final Color? glow;
+  final String about;
+  final Uint8List? picture;
+  final List<ProfileBadge> badges;
+
+  /// The chosen name looks official without a team badge.
+  final bool nameWarning;
 }
 
 /// An emergency PIN as the settings show it (never the PIN itself).
@@ -705,6 +746,7 @@ class AppState extends ChangeNotifier {
     if (chatsReady) await _chatsOnline(api);
     serverStatus = ServerStatus.connected;
     serverMessage = 'Verbunden mit ${uri.host}:${uri.port}';
+    if (chatsReady) unawaited(_shareProfile());
     if (!serverAuto) {
       serverAuto = true;
       _scheduleSave();
@@ -738,6 +780,8 @@ class AppState extends ChangeNotifier {
   void _forgetChats() {
     _receiveRun++;
     chatsReady = false;
+    peerProfiles = const {};
+    _profilesStale = true;
     contactCode = '';
     contacts = const [];
     realChats = const [];
@@ -760,7 +804,83 @@ class AppState extends ChangeNotifier {
     if (ch.ok) {
       realChats = [for (final j in (ch.raw['chats'] as List).cast<Map<String, Object?>>()) RealChat.fromJson(j)];
     }
+    if (_profilesStale) {
+      final p = await v.profiles();
+      if (!chatsReady) return;
+      if (p.ok) {
+        _profilesStale = false;
+        peerProfiles = {
+          for (final j in (p.raw['profiles'] as List).cast<Map<String, Object?>>())
+            j['user'] as String: PeerProfile.fromJson(j),
+        };
+      }
+    }
     notifyListeners();
+    // A new chat may still lack the own profile.
+    if (chatsOnline) unawaited(_shareProfile());
+  }
+
+  // ------------------------------------------------- profiles to contacts
+
+  /// Profiles of chat partners, by user.
+  Map<String, PeerProfile> peerProfiles = const {};
+  bool _profilesStale = true;
+
+  /// What the start of a chat shows from the partner's profile. Nothing
+  /// for a request: no picture from strangers before accepting.
+  PeerProfile? profileFor(RealChat chat) => chat.isRequest ? null : peerProfiles[chat.peer];
+
+  /// Version of the own shared profile and a check value of its content.
+  int _shareRev = 0;
+  String _shareHash = '';
+  bool _sharing = false;
+
+  Map<String, Object?> _shareable() => {
+    'name': userName.trim().isEmpty ? 'Trair' : userName.trim(),
+    'glow': glow.toARGB32(),
+    'about': about.trim(),
+    'picture': picture == null ? null : base64.encode(picture!),
+  };
+
+  /// FNV-1a: notices that the profile changed (not for security).
+  static String _check(String text) {
+    var h = 0x811c9dc5;
+    for (final c in utf8.encode(text)) {
+      h = ((h ^ c) * 0x01000193) & 0xFFFFFFFF;
+    }
+    return h.toRadixString(16);
+  }
+
+  /// Send the own profile to every chat that does not have this version
+  /// yet. Only once the server took it is a chat marked; the rest is
+  /// tried again next time. Who gets it follows "Profil sichtbar für".
+  Future<void> _shareProfile() async {
+    final api = _api;
+    if (_sharing || api == null || !chatsOnline || !unlocked) return;
+    _sharing = true;
+    try {
+      final mine = _shareable();
+      final check = _check(jsonEncode(mine));
+      if (check != _shareHash || _shareRev == 0) {
+        _shareHash = check;
+        _shareRev = max(DateTime.now().millisecondsSinceEpoch, _shareRev + 1);
+        _scheduleSave();
+      }
+      final out = await vault!.shareProfile({
+        'v': 1,
+        'rev': _shareRev,
+        ...mine,
+        'badges': const <Object?>[],
+      }, onlyContacts: profileVisibility == 'kontakte');
+      if (!out.ok) return;
+      for (final o in (out.raw['out'] as List).cast<Map<String, Object?>>()) {
+        if (!identical(api, _api)) return;
+        final sent = await api.sendMessage(o['to'], o['body'] as String);
+        if (sent.ok) await vault!.profileSent(o['chat'] as String, (o['rev'] as num).toInt());
+      }
+    } finally {
+      _sharing = false;
+    }
   }
 
   Future<void> loadMessages(String chat) async {
@@ -937,13 +1057,16 @@ class AppState extends ChangeNotifier {
             }
           case 'changed':
             touched.add(incoming['chat'] as String);
+          case 'profile':
+            _profilesStale = true;
+            touched.add('');
         }
       }
       if (ids.isNotEmpty) await api.ack(ids);
       if (touched.isNotEmpty) {
         await refreshChats();
         for (final chat in touched) {
-          if (realMessages.containsKey(chat)) await loadMessages(chat);
+          if (chat.isNotEmpty && realMessages.containsKey(chat)) await loadMessages(chat);
         }
       }
     }
@@ -1167,6 +1290,8 @@ class AppState extends ChangeNotifier {
     if (!unlocked) return;
     await vault?.saveProfile(_profileJson());
     _writeCard();
+    // Name, colour, picture or "about" may have changed.
+    unawaited(_shareProfile());
   }
 
   Map<String, Object?> _profileJson() => {
@@ -1184,10 +1309,14 @@ class AppState extends ChangeNotifier {
     'serverAuto': serverAuto,
     'startCard': showOnStart,
     'picture': ?(picture == null ? null : base64.encode(picture!)),
+    'shareRev': _shareRev,
+    'shareHash': _shareHash,
   };
 
   void _applyProfile(Map<String, Object?> p) {
     userName = p['name'] as String? ?? '';
+    _shareRev = (p['shareRev'] as num?)?.toInt() ?? 0;
+    _shareHash = p['shareHash'] as String? ?? '';
     final glowValue = p['glow'];
     glow = glowValue is int ? Color(glowValue) : TrairColors.accentLight;
     final strength = p['glowStrength'];

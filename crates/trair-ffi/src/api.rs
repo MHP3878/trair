@@ -235,6 +235,15 @@ enum Request {
     Receive {
         body: String,
     },
+    ShareProfile {
+        profile: Value,
+        only_contacts: bool,
+    },
+    ProfileSent {
+        chat: String,
+        rev: u64,
+    },
+    Profiles {},
     #[serde(rename = "accept_request")]
     AcceptChat {
         chat: String,
@@ -404,6 +413,10 @@ fn run(state: &mut State, req: Request) -> Value {
             }
             _ => fail("no_session"),
         },
+        Request::ShareProfile {
+            profile,
+            only_contacts,
+        } => share_profile(state, profile, only_contacts),
         other => chat_op(state, other),
     }
 }
@@ -440,6 +453,8 @@ fn chat_op(state: &mut State, req: Request) -> Value {
         } => chats::commit_answer(m, &chat, accepted, taken.as_deref()),
         Request::SendMessage { chat, text } => chats::send_message(m, &chat, &text),
         Request::Receive { body } => chats::receive(m, &body),
+        Request::ProfileSent { chat, rev } => chats::profile_sent(m, &chat, rev),
+        Request::Profiles {} => chats::profiles(m),
         Request::AcceptChat { chat, name } => chats::accept_request(m, &chat, &name),
         Request::DeclineChat { chat } => chats::decline_request(m, &chat),
         Request::KeyPackages { n, last_resort } => chats::key_packages(m, n, last_resort),
@@ -767,6 +782,29 @@ fn store_pins(
         return fail("io");
     }
     notfall::list(vault, state.chats.as_ref())
+}
+
+/// The app's profile plus this account's badges from the vault (only
+/// those valid now; the receiver checks them again).
+fn share_profile(state: &mut State, mut profile: Value, only_contacts: bool) -> Value {
+    let Some(vault) = state.vault.as_ref() else {
+        return fail("locked");
+    };
+    let Some(m) = state.chats.as_mut() else {
+        return fail("chats_unavailable");
+    };
+    if !profile.is_object() {
+        return fail("bad_request");
+    }
+    let now = unix_now();
+    let own: Vec<Value> = vault
+        .badges()
+        .iter()
+        .filter(|b| badges::verify(b, vault.account().public_key(), now, badges::TEAM_KEYS).is_ok())
+        .filter_map(|b| serde_json::to_value(b).ok())
+        .collect();
+    profile["badges"] = Value::Array(own);
+    chats::share_profile(m, &profile, only_contacts)
 }
 
 fn save_profile(state: &mut State, profile: Value) -> Value {

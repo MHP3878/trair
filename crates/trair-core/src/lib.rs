@@ -19,6 +19,7 @@ pub mod mls;
 pub mod notfall;
 pub mod pairing;
 pub mod policy;
+pub mod profiles;
 pub mod proofs;
 mod store;
 pub mod teamkey;
