@@ -680,7 +680,8 @@ class FieldLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(left: 18, bottom: 8),
+      // Flush with headings and cards, so every label lines up the same.
+      padding: const EdgeInsets.only(left: 4, bottom: 8),
       child: Text(text, style: TrairText.label),
     );
   }

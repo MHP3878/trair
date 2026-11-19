@@ -538,6 +538,45 @@ class _ChatsScreenState extends State<ChatsScreen> {
     );
   }
 
+  /// A real message, shaped like the demo ones: tail corner and time.
+  Widget _realBubble(RealMessage m) {
+    final t = DateTime.fromMillisecondsSinceEpoch(m.at * 1000);
+    final time = '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+    const big = Radius.circular(22);
+    const small = Radius.circular(8);
+    return Align(
+      alignment: m.outgoing ? Alignment.centerRight : Alignment.centerLeft,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 540),
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Column(
+            crossAxisAlignment: m.outgoing ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  color: m.outgoing ? TrairColors.accent : TrairColors.bubbleOther,
+                  borderRadius: m.outgoing
+                      ? const BorderRadius.only(topLeft: big, topRight: big, bottomLeft: big, bottomRight: small)
+                      : const BorderRadius.only(topLeft: big, topRight: big, bottomRight: big, bottomLeft: small),
+                ),
+                child: Text(m.text, style: m.outgoing ? TrairText.body.copyWith(color: Colors.white) : TrairText.body),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+                child: Text(
+                  m.missing > 0 ? '$time · ${m.missing} davor fehlen' : time,
+                  style: TextStyle(fontSize: 11, color: m.missing > 0 ? TrairColors.amber : TrairColors.placeholder),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _realConversation(AppState state, RealChat chat) {
     final messages = state.realMessages[chat.id] ?? const <RealMessage>[];
     final canWrite = chat.state == 'active' && state.chatsOnline;
@@ -570,8 +609,6 @@ class _ChatsScreenState extends State<ChatsScreen> {
                 SecurityCapsule(
                   text: chat.isRequest ? 'Anfrage · unbekannter Schlüssel' : 'Echt Ende-zu-Ende verschlüsselt',
                   tone: chat.isRequest ? CapsuleTone.warn : CapsuleTone.safe,
-                  open: false,
-                  onTap: () {},
                 ),
               ],
             ),
@@ -615,25 +652,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(28, 8, 28, 16),
               children: [
-                for (final m in messages)
-                  Align(
-                    alignment: m.outgoing ? Alignment.centerRight : Alignment.centerLeft,
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 540),
-                      child: Container(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: m.outgoing ? TrairColors.accent : TrairColors.bubbleOther,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          m.missing > 0 ? '${m.text}\n(${m.missing} Nachricht(en) davor fehlen)' : m.text,
-                          style: m.outgoing ? TrairText.body.copyWith(color: Colors.white) : TrairText.body,
-                        ),
-                      ),
-                    ),
-                  ),
+                for (final m in messages) _realBubble(m),
               ],
             ),
           ),
