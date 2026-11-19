@@ -29,6 +29,26 @@ pub struct Cleaned {
     pub sessions: usize,
     /// Accounts nobody used for too long, with all their data.
     pub accounts: usize,
+    /// Chats nobody changed for as long.
+    pub groups: usize,
+}
+
+/// Answer to a change of a chat.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommitOutcome {
+    /// Taken; the chat is now at `epoch`.
+    Taken {
+        /// The new epoch.
+        epoch: u64,
+    },
+    /// Another change was first. The chat is at `epoch`; `taken` is the
+    /// hash of the change that got there.
+    Refused {
+        /// The server's epoch for the chat.
+        epoch: u64,
+        /// SHA-256 (hex) of the change taken last.
+        taken: String,
+    },
 }
 
 /// The database.
@@ -72,7 +92,8 @@ impl Db {
                  id INTEGER PRIMARY KEY,
                  user TEXT NOT NULL,
                  device TEXT NOT NULL,
-                 data BLOB NOT NULL
+                 data BLOB NOT NULL,
+                 last_resort INTEGER NOT NULL DEFAULT 0
              );
              CREATE TABLE IF NOT EXISTS messages (
                  id INTEGER PRIMARY KEY,
@@ -81,10 +102,29 @@ impl Db {
                  body BLOB NOT NULL,
                  at INTEGER NOT NULL
              );
+             -- Chats, only to order changes: random id, next epoch, hash of
+             -- the last change taken. Not who is in them.
+             CREATE TABLE IF NOT EXISTS groups (
+                 id TEXT PRIMARY KEY,
+                 next_epoch INTEGER NOT NULL,
+                 last_hash TEXT NOT NULL,
+                 updated INTEGER NOT NULL
+             );
              CREATE INDEX IF NOT EXISTS messages_to ON messages (user, device, id);
              CREATE INDEX IF NOT EXISTS keypackages_of ON keypackages (user, device);
              CREATE INDEX IF NOT EXISTS sessions_of ON sessions (user, device);",
         )?;
+        // Databases from M3 lack the last-resort column.
+        let has_column: bool = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('keypackages') WHERE name = 'last_resort'",
+            [],
+            |r| r.get::<_, i64>(0).map(|n| n > 0),
+        )?;
+        if !has_column {
+            conn.execute_batch(
+                "ALTER TABLE keypackages ADD COLUMN last_resort INTEGER NOT NULL DEFAULT 0;",
+            )?;
+        }
         Ok(Db { conn })
     }
 
@@ -186,12 +226,8 @@ impl Db {
         packages: &[Vec<u8>],
         max: usize,
     ) -> DbResult<usize> {
-        let have: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM keypackages WHERE user = ?1 AND device = ?2",
-            params![user, device],
-            |r| r.get(0),
-        )?;
-        let room = max.saturating_sub(have as usize);
+        let have = self.keypackage_count(user, device)?;
+        let room = max.saturating_sub(have);
         for p in packages.iter().take(room) {
             self.conn.execute(
                 "INSERT INTO keypackages (user, device, data) VALUES (?1, ?2, ?3)",
@@ -201,19 +237,48 @@ impl Db {
         Ok(room.min(packages.len()))
     }
 
-    /// Take one key package of a device; it is deleted.
+    /// One-time key packages waiting for a device.
+    pub fn keypackage_count(&self, user: &str, device: &str) -> DbResult<usize> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM keypackages WHERE user = ?1 AND device = ?2 AND last_resort = 0",
+            params![user, device],
+            |r| r.get(0),
+        )?;
+        Ok(n as usize)
+    }
+
+    /// Replace the last-resort key package of a device. It is handed out
+    /// only when no one-time package is left, and never deleted by that.
+    pub fn set_last_resort(&self, user: &str, device: &str, package: &[u8]) -> DbResult<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
+            "DELETE FROM keypackages WHERE user = ?1 AND device = ?2 AND last_resort = 1",
+            params![user, device],
+        )?;
+        tx.execute(
+            "INSERT INTO keypackages (user, device, data, last_resort) VALUES (?1, ?2, ?3, 1)",
+            params![user, device, package],
+        )?;
+        tx.commit()
+    }
+
+    /// Take one key package of a device: a one-time package (deleted), or
+    /// if none is left the last-resort package (kept).
     pub fn claim_keypackage(&self, user: &str, device: &str) -> DbResult<Option<Vec<u8>>> {
-        let row: Option<(i64, Vec<u8>)> = self
+        let row: Option<(i64, Vec<u8>, i64)> = self
             .conn
             .query_row(
-                "SELECT id, data FROM keypackages WHERE user = ?1 AND device = ?2 ORDER BY id LIMIT 1",
+                "SELECT id, data, last_resort FROM keypackages WHERE user = ?1 AND device = ?2
+                 ORDER BY last_resort, id LIMIT 1",
                 params![user, device],
-                |r| Ok((r.get(0)?, r.get(1)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .optional()?;
-        if let Some((id, data)) = row {
-            self.conn
-                .execute("DELETE FROM keypackages WHERE id = ?1", params![id])?;
+        if let Some((id, data, last_resort)) = row {
+            if last_resort == 0 {
+                self.conn
+                    .execute("DELETE FROM keypackages WHERE id = ?1", params![id])?;
+            }
             return Ok(Some(data));
         }
         Ok(None)
@@ -254,6 +319,49 @@ impl Db {
         rows.collect()
     }
 
+    /// Take a change of a chat if it is the first for its epoch: store
+    /// the new epoch and queue the commit and welcome, all or nothing.
+    /// Otherwise nothing is queued and the answer names what was taken.
+    pub fn commit(
+        &self,
+        group: &str,
+        epoch: u64,
+        hash: &str,
+        deliveries: &[(&str, &str, &[u8])],
+        now: u64,
+    ) -> DbResult<CommitOutcome> {
+        let tx = self.conn.unchecked_transaction()?;
+        let known: Option<(i64, String)> = tx
+            .query_row(
+                "SELECT next_epoch, last_hash FROM groups WHERE id = ?1",
+                params![group],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        if let Some((next, taken)) = known
+            && next as u64 != epoch
+        {
+            return Ok(CommitOutcome::Refused {
+                epoch: next as u64,
+                taken,
+            });
+        }
+        tx.execute(
+            "INSERT INTO groups (id, next_epoch, last_hash, updated) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT (id) DO UPDATE SET next_epoch = excluded.next_epoch,
+                 last_hash = excluded.last_hash, updated = excluded.updated",
+            params![group, (epoch + 1) as i64, hash, now as i64],
+        )?;
+        for (user, device, body) in deliveries {
+            tx.execute(
+                "INSERT INTO messages (user, device, body, at) VALUES (?1, ?2, ?3, ?4)",
+                params![user, device, body, now as i64],
+            )?;
+        }
+        tx.commit()?;
+        Ok(CommitOutcome::Taken { epoch: epoch + 1 })
+    }
+
     /// Delete fetched messages; only the device's own.
     pub fn ack(&self, user: &str, device: &str, ids: &[i64]) -> DbResult<usize> {
         let mut n = 0;
@@ -289,6 +397,7 @@ impl Db {
                 params![now as i64],
             )?,
             accounts: 0,
+            groups: 0,
         };
         let idle: Vec<String> = {
             let mut stmt = self
@@ -302,7 +411,65 @@ impl Db {
             self.delete_account(user)?;
         }
         cleaned.accounts = idle.len();
+        // Chats nobody changed for as long are forgotten too.
+        cleaned.groups = self.conn.execute(
+            "DELETE FROM groups WHERE updated <= ?1",
+            params![now.saturating_sub(idle_limit) as i64],
+        )?;
         Ok(cleaned)
+    }
+
+    /// Every table and column as `table.column`. For tests that prove
+    /// what the server does not store.
+    pub fn tables(&self) -> DbResult<Vec<String>> {
+        let names: Vec<String> = {
+            let mut stmt = self
+                .conn
+                .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")?;
+            let rows = stmt.query_map([], |r| r.get(0))?;
+            rows.collect::<DbResult<_>>()?
+        };
+        let mut out = Vec::new();
+        for t in names {
+            let mut stmt = self
+                .conn
+                .prepare("SELECT name FROM pragma_table_info(?1)")?;
+            let cols = stmt.query_map(params![t], |r| r.get::<_, String>(0))?;
+            for c in cols {
+                out.push(format!("{t}.{}", c?));
+            }
+        }
+        Ok(out)
+    }
+
+    /// Every stored value of every table, one after the other. For tests
+    /// that prove no plaintext reached the server.
+    pub fn dump(&self) -> DbResult<Vec<u8>> {
+        let names: Vec<String> = {
+            let mut stmt = self
+                .conn
+                .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")?;
+            let rows = stmt.query_map([], |r| r.get(0))?;
+            rows.collect::<DbResult<_>>()?
+        };
+        let mut out = Vec::new();
+        for t in names {
+            let mut stmt = self.conn.prepare(&format!("SELECT * FROM \"{t}\""))?;
+            let n = stmt.column_count();
+            let mut rows = stmt.query([])?;
+            while let Some(row) = rows.next()? {
+                for i in 0..n {
+                    match row.get_ref(i)? {
+                        rusqlite::types::ValueRef::Text(b) | rusqlite::types::ValueRef::Blob(b) => {
+                            out.extend_from_slice(b)
+                        }
+                        _ => {}
+                    }
+                    out.push(0);
+                }
+            }
+        }
+        Ok(out)
     }
 
     /// Column names of the message table. For the test that proves no

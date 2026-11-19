@@ -21,7 +21,10 @@ use tower::ServiceExt;
 use trair_core::pairing::{Code, PairingGuest, PairingHost};
 use trair_core::proofs::{sign_account_deletion, sign_login};
 use trair_core::vault::{KdfParams, Vault};
-use trair_core::{Account, Device, DeviceIdentity, Event, KeyPackageOffer, SignedDeviceList};
+use trair_core::{
+    Account, Device, DeviceIdentity, Event, Incoming, KeyPackageOffer, Messenger, PendingCommit,
+    SignedDeviceList,
+};
 use trair_server::{
     Db, IDLE_LIMIT, MAX_KEYPACKAGE, MAX_MESSAGE, MESSAGE_LIFETIME, PAIRING_LIFETIME,
     REGISTRATIONS_PER_HOUR, SESSION_LIFETIME, Server, router,
@@ -924,4 +927,398 @@ async fn s09_too_many_registrations_from_one_address_are_slowed_down() {
         )
         .await;
     assert_eq!(status, StatusCode::OK);
+}
+
+// ------------------------------------------------- M4: chats and changes
+
+/// A folder for a chat database that is removed when the test ends.
+struct TempDir(std::path::PathBuf);
+
+impl TempDir {
+    fn new() -> Self {
+        static N: AtomicU64 = AtomicU64::new(0);
+        let n = N.fetch_add(1, Ordering::SeqCst);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let p = std::env::temp_dir().join(format!("trair-srv-{}-{n}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&p).unwrap();
+        TempDir(p)
+    }
+
+    /// A key that differs per folder (tests only; the app takes 32 random
+    /// bytes from the vault).
+    fn key(&self) -> [u8; 32] {
+        use sha2::Digest;
+        sha2::Sha256::digest(self.0.to_string_lossy().as_bytes()).into()
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// A Trair device with its chat database, as the app will use it.
+struct ChatClient {
+    c: Client,
+    m: Messenger,
+    _dir: TempDir,
+}
+
+impl ChatClient {
+    async fn register(w: &World, user: &str) -> ChatClient {
+        let c = Client::register(w, user).await;
+        let dir = TempDir::new();
+        let m = Messenger::open(
+            &dir.0.join(trair_core::chats::CHATS_FILE),
+            &dir.key(),
+            &c.account,
+            &c.device,
+            &c.list.list,
+            w.now(),
+        )
+        .unwrap();
+        ChatClient { c, m, _dir: dir }
+    }
+
+    /// One-time key packages and a last-resort package to the server.
+    async fn upload(&mut self, w: &World, n: usize) -> Value {
+        let packages: Vec<String> = self
+            .m
+            .key_packages(n)
+            .unwrap()
+            .iter()
+            .map(|p| B64.encode(p))
+            .collect();
+        let last = B64.encode(self.m.last_resort_key_package().unwrap());
+        let (status, body) = w
+            .call(
+                "POST",
+                "/v1/keypackages",
+                Some(&self.c.token),
+                Some(json!({"packages": packages, "last_resort": last})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        body
+    }
+
+    async fn claim(&self, w: &World, user: &str) -> Vec<KeyPackageOffer> {
+        let (status, body) = w
+            .call(
+                "POST",
+                "/v1/keypackages/claim",
+                Some(&self.c.token),
+                Some(json!({"user": user})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        body["packages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| KeyPackageOffer {
+                claimed_device: format!("{user}:{}", p["device"].as_str().unwrap()),
+                bytes: B64.decode(p["package"].as_str().unwrap()).unwrap(),
+            })
+            .collect()
+    }
+
+    /// Send a change and apply the server's answer, as the app does.
+    async fn push(&mut self, w: &World, p: &PendingCommit) -> (StatusCode, bool) {
+        let (status, body) = w
+            .call(
+                "POST",
+                "/v1/commits",
+                Some(&self.c.token),
+                Some(commit_body(p)),
+            )
+            .await;
+        let applied = self
+            .m
+            .commit_answer(
+                &p.chat,
+                status == StatusCode::OK,
+                body["taken"].as_str(),
+                w.now(),
+            )
+            .unwrap();
+        (status, applied)
+    }
+
+    async fn say(&mut self, w: &World, chat: &str, text: &str) {
+        let to = targets(&self.m.recipients(chat).unwrap());
+        let (bytes, _) = self.m.send(chat, text, w.now()).unwrap();
+        let (status, body) = w
+            .call(
+                "POST",
+                "/v1/messages",
+                Some(&self.c.token),
+                Some(json!({"to": to, "body": B64.encode(bytes)})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+
+    /// Fetch, process and acknowledge everything waiting.
+    async fn read(&mut self, w: &World) -> Vec<Incoming> {
+        let mut out = Vec::new();
+        let mut ids = Vec::new();
+        for (id, bytes) in inbox(w, &self.c.token).await {
+            out.push(self.m.receive(&bytes, w.now()).unwrap());
+            ids.push(id);
+        }
+        let (status, _) = w
+            .call(
+                "POST",
+                "/v1/messages/ack",
+                Some(&self.c.token),
+                Some(json!({"ids": ids})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        out
+    }
+}
+
+/// `user:device` ids as the server wants them.
+fn targets(ids: &[String]) -> Vec<Value> {
+    ids.iter()
+        .map(|id| {
+            let (user, device) = id.split_once(':').unwrap();
+            json!({"user": user, "device": device})
+        })
+        .collect()
+}
+
+fn commit_body(p: &PendingCommit) -> Value {
+    json!({
+        "group": p.chat,
+        "epoch": p.epoch,
+        "commit": B64.encode(&p.commit),
+        "to": targets(&p.to),
+        "welcome": p.welcome.as_ref().map(|w| B64.encode(w)),
+        "welcome_to": targets(&p.welcome_to),
+    })
+}
+
+#[tokio::test]
+async fn s10_the_server_takes_one_change_per_chat_and_epoch() {
+    let w = World::new();
+    let alice = Client::register(&w, "local-alice").await;
+    let bob = Client::register(&w, "local-bob").await;
+    // A chat id in the core's format: 32 lowercase hex characters.
+    let group = "5a".repeat(16);
+    let group = group.as_str();
+    let bob_dev = json!([{"user": bob.user(), "device": bob.device.id}]);
+    let body =
+        |epoch: u64, commit: &[u8], to: &Value, welcome: Option<&[u8]>, welcome_to: &Value| {
+            json!({"group": group, "epoch": epoch, "commit": B64.encode(commit), "to": to,
+               "welcome": welcome.map(|w| B64.encode(w)), "welcome_to": welcome_to})
+        };
+    let post = |b: Value| w.call("POST", "/v1/commits", Some(&alice.token), Some(b));
+
+    // The first change of a new chat: the welcome goes to Bob.
+    let (status, answer) = post(body(
+        0,
+        b"change-0",
+        &json!([]),
+        Some(b"welcome-0"),
+        &bob_dev,
+    ))
+    .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    assert_eq!(answer["epoch"], 1);
+    assert_eq!(inbox(&w, &bob.token).await.last().unwrap().1, b"welcome-0");
+
+    // A second change for epoch 0: refused, with what was taken.
+    let (status, answer) = post(body(0, b"other-0", &bob_dev, None, &json!([]))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(answer["error"], "wrong_epoch");
+    assert_eq!(answer["epoch"], 1);
+    assert_eq!(
+        answer["taken"],
+        hex::encode(<sha2::Sha256 as sha2::Digest>::digest(b"change-0"))
+    );
+    assert_eq!(inbox(&w, &bob.token).await.len(), 1, "nothing was queued");
+
+    // A change for a device that does not exist: nothing at all happens.
+    let ghost = json!([{"user": bob.user(), "device": "ghost"}]);
+    let (status, _) = post(body(1, b"change-1", &ghost, None, &json!([]))).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, answer) = post(body(1, b"change-1", &bob_dev, None, &json!([]))).await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    assert_eq!(answer["epoch"], 2);
+    assert_eq!(inbox(&w, &bob.token).await.last().unwrap().1, b"change-1");
+
+    // Strange requests.
+    for bad in [
+        json!({"group": "G", "epoch": 2, "commit": B64.encode(b"x"), "to": []}),
+        json!({"group": group.to_uppercase(), "epoch": 2, "commit": B64.encode(b"x"), "to": []}),
+        body(2, b"x", &json!([]), Some(b"w"), &json!([])),
+        body(2, b"x", &json!([]), None, &bob_dev),
+        json!({"group": group, "epoch": u64::MAX, "commit": B64.encode(b"x"), "to": []}),
+        json!({"group": group, "epoch": 2, "commit": "", "to": []}),
+        json!({"group": group, "epoch": 2, "commit": B64.encode(b"x"), "to": [], "sender": "alice"}),
+    ] {
+        let (status, _) = post(bad.clone()).await;
+        assert!(status.is_client_error(), "{bad} gave {status}");
+    }
+    let (status, _) = w
+        .call(
+            "POST",
+            "/v1/commits",
+            None,
+            Some(body(2, b"x", &json!([]), None, &json!([]))),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // The server never stores who is in a chat, and forgets idle chats.
+    let tables = w.server.db_tables();
+    assert!(tables.iter().all(|t| !t.contains("member")), "{tables:?}");
+    w.later(IDLE_LIMIT + 1);
+    assert!(w.server.cleanup().unwrap().groups >= 1);
+}
+
+#[tokio::test]
+async fn s11_two_people_chat_through_the_server_with_the_real_database() {
+    let w = World::new();
+    let mut alice = ChatClient::register(&w, "local-alice").await;
+    let mut bob = ChatClient::register(&w, "local-bob").await;
+    let up = bob.upload(&w, 3).await;
+    assert_eq!(up["count"], 3);
+    let (_, count) = w
+        .call("GET", "/v1/keypackages", Some(&bob.c.token), None)
+        .await;
+    assert_eq!(count["count"], 3);
+
+    // Codes exchanged; Alice starts the chat.
+    let a_code = alice.m.contact_code();
+    let b_code = bob.m.contact_code();
+    alice.m.add_contact(&b_code, "Bob", w.now()).unwrap();
+    bob.m.add_contact(&a_code, "Alice", w.now()).unwrap();
+    let offers = alice.claim(&w, bob.c.user()).await;
+    let (chat, p) = alice.m.start_chat(bob.c.user(), &offers, w.now()).unwrap();
+    assert_eq!(alice.push(&w, &p).await, (StatusCode::OK, true));
+    let got = bob.read(&w).await;
+    assert!(matches!(&got[..], [Incoming::Chat { chat: c, .. }] if c.id == chat.id));
+
+    alice.say(&w, &chat.id, "Hallo über den Server").await;
+    bob.say(&w, &chat.id, "angekommen").await;
+    assert!(
+        matches!(&bob.read(&w).await[..], [Incoming::Message(m)] if m.text == "Hallo über den Server")
+    );
+    assert!(matches!(&alice.read(&w).await[..], [Incoming::Message(m)] if m.text == "angekommen"));
+
+    // Both change keys at once: the server takes Alice's, Bob's is
+    // thrown away and he tries again after reading hers.
+    let pa = alice.m.update_keys(&chat.id).unwrap();
+    let pb = bob.m.update_keys(&chat.id).unwrap();
+    assert_eq!(alice.push(&w, &pa).await, (StatusCode::OK, true));
+    assert_eq!(bob.push(&w, &pb).await, (StatusCode::CONFLICT, false));
+    bob.read(&w).await;
+    let pb = bob.m.update_keys(&chat.id).unwrap();
+    assert_eq!(bob.push(&w, &pb).await, (StatusCode::OK, true));
+    alice.read(&w).await;
+    assert_eq!(
+        alice.m.epoch(&chat.id).unwrap(),
+        bob.m.epoch(&chat.id).unwrap()
+    );
+
+    // Alice sends a change, the server takes it, Trair dies before the
+    // answer. Sent again later, the server's hash shows it was hers.
+    let pa = alice.m.update_keys(&chat.id).unwrap();
+    let (status, _) = w
+        .call(
+            "POST",
+            "/v1/commits",
+            Some(&alice.c.token),
+            Some(commit_body(&pa)),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let again = alice.m.pending_commits().unwrap();
+    assert_eq!(again, std::slice::from_ref(&pa));
+    assert_eq!(
+        alice.push(&w, &again[0]).await,
+        (StatusCode::CONFLICT, true)
+    );
+    bob.read(&w).await;
+    alice.say(&w, &chat.id, "noch synchron?").await;
+    assert!(
+        matches!(&bob.read(&w).await[..], [Incoming::Message(m)] if m.text == "noch synchron?")
+    );
+
+    // The server only ever saw ciphertext.
+    let db = w.server.db_dump();
+    for needle in [
+        "Hallo über den Server",
+        "angekommen",
+        "noch synchron?",
+        "Alice",
+        "Bob",
+    ] {
+        assert!(
+            !db.windows(needle.len()).any(|x| x == needle.as_bytes()),
+            "{needle} on the server"
+        );
+    }
+}
+
+#[tokio::test]
+async fn s12_the_last_resort_package_is_handed_out_but_kept() {
+    let w = World::new();
+    let mut bob = ChatClient::register(&w, "local-bob").await;
+    let alice = ChatClient::register(&w, "local-alice").await;
+    bob.upload(&w, 1).await;
+    let first = alice.claim(&w, bob.c.user()).await;
+    let second = alice.claim(&w, bob.c.user()).await;
+    let third = alice.claim(&w, bob.c.user()).await;
+    assert_eq!((first.len(), second.len(), third.len()), (1, 1, 1));
+    assert_ne!(first[0].bytes, second[0].bytes, "one-time package first");
+    assert_eq!(
+        second[0].bytes, third[0].bytes,
+        "then the last-resort one, again and again"
+    );
+    let (_, count) = w
+        .call("GET", "/v1/keypackages", Some(&bob.c.token), None)
+        .await;
+    assert_eq!(count["count"], 0, "time to upload more");
+}
+
+#[test]
+fn s13_a_database_from_m3_gets_the_new_column() {
+    let dir = TempDir::new();
+    let path = dir.0.join("old.db");
+    {
+        let c = rusqlite::Connection::open(&path).unwrap();
+        c.execute_batch(
+            "CREATE TABLE keypackages (id INTEGER PRIMARY KEY, user TEXT NOT NULL,
+                 device TEXT NOT NULL, data BLOB NOT NULL);
+             INSERT INTO keypackages (user, device, data) VALUES ('local-bob', 'pc', x'01');",
+        )
+        .unwrap();
+    }
+    let db = Db::open(&path).unwrap();
+    assert!(
+        db.tables()
+            .unwrap()
+            .contains(&"keypackages.last_resort".to_string())
+    );
+    assert_eq!(
+        db.keypackage_count("local-bob", "pc").unwrap(),
+        1,
+        "old packages stay usable"
+    );
+    assert_eq!(
+        db.claim_keypackage("local-bob", "pc").unwrap(),
+        Some(vec![1])
+    );
+    // Opening again does not try to add it twice.
+    drop(db);
+    Db::open(&path).unwrap();
 }

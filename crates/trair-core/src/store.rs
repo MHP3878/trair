@@ -53,6 +53,17 @@ CREATE TABLE IF NOT EXISTS messages (
     missing INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS messages_by_chat ON messages (chat, id);
+-- Changes (commits) waiting for the server's answer, one per chat. Kept
+-- so a change is never lost or applied twice across a restart.
+CREATE TABLE IF NOT EXISTS outbox (
+    chat TEXT PRIMARY KEY,
+    epoch INTEGER NOT NULL,
+    commit_bytes BLOB NOT NULL,
+    recipients TEXT NOT NULL,
+    welcome BLOB,
+    welcome_to TEXT NOT NULL,
+    removed TEXT NOT NULL
+) WITHOUT ROWID;
 -- Hashes of processed incoming messages, so a message delivered twice
 -- (for example after a crash before the server was told) is noticed.
 CREATE TABLE IF NOT EXISTS seen (

@@ -10,4 +10,5 @@
 
 pub mod abi;
 pub mod api;
+mod chats;
 mod platform;

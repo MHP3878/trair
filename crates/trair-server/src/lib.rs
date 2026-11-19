@@ -39,7 +39,7 @@ use trair_core::SignedDeviceList;
 use trair_core::account::validate_name;
 use trair_core::proofs::{CHALLENGE_LEN, verify_account_deletion, verify_login};
 
-pub use db::{Cleaned, Db};
+pub use db::{Cleaned, CommitOutcome, Db};
 
 /// How long a session token works (12 hours).
 pub const SESSION_LIFETIME: u64 = 12 * 3600;
@@ -156,6 +156,16 @@ impl Server {
             .map_err(|e| e.to_string())
     }
 
+    /// Every table and column (to prove what is not stored).
+    pub fn db_tables(&self) -> Vec<String> {
+        self.db().tables().unwrap_or_default()
+    }
+
+    /// Everything stored, for tests that look for plaintext.
+    pub fn db_dump(&self) -> Vec<u8> {
+        self.db().dump().unwrap_or_default()
+    }
+
     /// Column names of the stored messages (to prove there is no sender).
     pub fn message_columns(&self) -> Vec<String> {
         self.db().message_columns().unwrap_or_default()
@@ -194,10 +204,14 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/v1/login/challenge", post(challenge))
         .route("/v1/login", post(login))
         .route("/v1/devices", put(update_devices))
-        .route("/v1/keypackages", post(upload_keypackages))
+        .route(
+            "/v1/keypackages",
+            post(upload_keypackages).get(keypackage_count),
+        )
         .route("/v1/keypackages/claim", post(claim_keypackages))
         .route("/v1/messages", post(send).get(fetch))
         .route("/v1/messages/ack", post(ack))
+        .route("/v1/commits", post(commit))
         .route("/v1/pairing", post(open_pairing))
         .route(
             "/v1/pairing/{channel}/host",
@@ -525,6 +539,9 @@ async fn update_devices(
 #[serde(deny_unknown_fields)]
 struct Upload {
     packages: Vec<String>,
+    /// Replaces the device's last-resort package.
+    #[serde(default)]
+    last_resort: Option<String>,
 }
 
 async fn upload_keypackages(
@@ -540,11 +557,33 @@ async fn upload_keypackages(
         .iter()
         .map(|p| decode(p, MAX_KEYPACKAGE))
         .collect::<Result<Vec<_>, _>>()?;
-    let stored = s
-        .db()
+    let last_resort = r
+        .last_resort
+        .as_deref()
+        .map(|p| decode(p, MAX_KEYPACKAGE))
+        .transpose()?;
+    let db = s.db();
+    let stored = db
         .add_keypackages(&me.user, &me.device, &packages, MAX_KEYPACKAGES)
         .map_err(internal)?;
-    Ok(Json(json!({"ok": true, "stored": stored})))
+    if let Some(p) = &last_resort {
+        db.set_last_resort(&me.user, &me.device, p)
+            .map_err(internal)?;
+    }
+    let count = db
+        .keypackage_count(&me.user, &me.device)
+        .map_err(internal)?;
+    Ok(Json(json!({"ok": true, "stored": stored, "count": count})))
+}
+
+/// How many one-time key packages of this device are left (the app
+/// uploads more when they run low).
+async fn keypackage_count(State(s): State<Arc<Server>>, me: Session) -> ApiResult {
+    let count = s
+        .db()
+        .keypackage_count(&me.user, &me.device)
+        .map_err(internal)?;
+    Ok(Json(json!({"ok": true, "count": count})))
 }
 
 #[derive(Deserialize)]
@@ -612,6 +651,92 @@ async fn send(State(s): State<Arc<Server>>, _me: Session, Json(r): Json<SendMess
         s.waiter(&t.user, &t.device).notify_waiters();
     }
     Ok(Json(json!({"ok": true})))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CommitRequest {
+    group: String,
+    epoch: u64,
+    commit: String,
+    to: Vec<To>,
+    welcome: Option<String>,
+    #[serde(default)]
+    welcome_to: Vec<To>,
+}
+
+/// A chat id as the Trair core makes them: 16 random bytes, hex.
+fn is_group_id(id: &str) -> bool {
+    id.len() == 32
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// A change of a chat (MLS commit). The server takes only the first one
+/// per chat and epoch, so all devices stay on the same state. It knows
+/// the chat only by its random id, not who is in it. A refused change
+/// gets the epoch and the hash of the change that was taken; a device
+/// that resends its own change after a crash recognises it that way.
+async fn commit(
+    State(s): State<Arc<Server>>,
+    _me: Session,
+    Json(r): Json<CommitRequest>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    if !is_group_id(&r.group) {
+        return Err(bad("group"));
+    }
+    if r.epoch > i64::MAX as u64 - 1 {
+        return Err(bad("epoch"));
+    }
+    if r.to.len() + r.welcome_to.len() > MAX_RECIPIENTS {
+        return Err(bad("recipients"));
+    }
+    let commit = decode(&r.commit, MAX_MESSAGE)?;
+    let welcome = match (&r.welcome, r.welcome_to.is_empty()) {
+        (Some(w), false) => Some(decode(w, MAX_MESSAGE)?),
+        (None, true) => None,
+        _ => return Err(bad("welcome")),
+    };
+    // Every device must exist, all or nothing.
+    for t in r.to.iter().chain(&r.welcome_to) {
+        let (_, list, _) = load_account(&s, &t.user)
+            .map_err(|_| ApiError(StatusCode::NOT_FOUND, "unknown_recipient"))?;
+        if !list.list.contains(&t.device) {
+            return Err(ApiError(StatusCode::NOT_FOUND, "unknown_recipient"));
+        }
+        if s.db().queue_len(&t.user, &t.device).map_err(internal)? >= MAX_QUEUE {
+            return Err(ApiError(StatusCode::INSUFFICIENT_STORAGE, "queue_full"));
+        }
+    }
+    let mut deliveries: Vec<(&str, &str, &[u8])> =
+        r.to.iter()
+            .map(|t| (t.user.as_str(), t.device.as_str(), commit.as_slice()))
+            .collect();
+    if let Some(w) = &welcome {
+        deliveries.extend(
+            r.welcome_to
+                .iter()
+                .map(|t| (t.user.as_str(), t.device.as_str(), w.as_slice())),
+        );
+    }
+    let hash = hex::encode(Sha256::digest(&commit));
+    let outcome = s
+        .db()
+        .commit(&r.group, r.epoch, &hash, &deliveries, s.now())
+        .map_err(internal)?;
+    match outcome {
+        CommitOutcome::Taken { epoch } => {
+            for (user, device, _) in &deliveries {
+                s.waiter(user, device).notify_waiters();
+            }
+            Ok((StatusCode::OK, Json(json!({"ok": true, "epoch": epoch}))))
+        }
+        CommitOutcome::Refused { epoch, taken } => Ok((
+            StatusCode::CONFLICT,
+            Json(json!({"ok": false, "error": "wrong_epoch", "epoch": epoch, "taken": taken})),
+        )),
+    }
 }
 
 /// Waiting messages of this device. With `?wait=N` the answer waits up
