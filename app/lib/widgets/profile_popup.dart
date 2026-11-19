@@ -247,25 +247,25 @@ class ProfilePopup extends StatelessWidget {
                       style: v.about.trim().isEmpty ? TrairText.muted : TrairText.body.copyWith(fontSize: 14),
                     ),
                     if (v.showTrust) ...[
-                    const SizedBox(height: 14),
-                    const Text('Trust', style: TrairText.label),
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        for (var i = 1; i <= 3; i++)
-                          Container(
-                            width: 22,
-                            height: 6,
-                            margin: const EdgeInsets.only(right: 4),
-                            decoration: BoxDecoration(
-                              color: i <= v.trust ? TrairColors.mint : const Color(0x1FFFFFFF),
-                              borderRadius: BorderRadius.circular(999),
+                      const SizedBox(height: 14),
+                      const Text('Trust', style: TrairText.label),
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          for (var i = 1; i <= 3; i++)
+                            Container(
+                              width: 22,
+                              height: 6,
+                              margin: const EdgeInsets.only(right: 4),
+                              decoration: BoxDecoration(
+                                color: i <= v.trust ? TrairColors.mint : const Color(0x1FFFFFFF),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
                             ),
-                          ),
-                        const SizedBox(width: 6),
-                        Text('Stufe ${v.trust} · ${_trustNames[v.trust.clamp(0, 3)]}', style: TrairText.small),
-                      ],
-                    ),
+                          const SizedBox(width: 6),
+                          Text('Stufe ${v.trust} · ${_trustNames[v.trust.clamp(0, 3)]}', style: TrairText.small),
+                        ],
+                      ),
                     ],
                     if (v.badges.isNotEmpty && v.demoBadges) ...[
                       const SizedBox(height: 12),

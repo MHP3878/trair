@@ -1091,8 +1091,7 @@ void main() {
 
   group('Profile an Kontakte', () {
     /// A valid 1 × 1 PNG.
-    const dot =
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const dot = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
     /// Julian with a chat with his contact Bob and a request from a
     /// stranger, connected to the server.
