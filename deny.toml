@@ -56,6 +56,10 @@ allow = ["AGPL-3.0-or-later"]
 crate = "trair-server"
 allow = ["AGPL-3.0-or-later"]
 
+[[licenses.exceptions]]
+crate = "trair-team"
+allow = ["AGPL-3.0-or-later"]
+
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"

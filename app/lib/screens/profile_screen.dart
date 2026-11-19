@@ -32,6 +32,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Color _pwMessageColor = TrairColors.mintText;
   bool _deleteBusy = false;
   String _deleteError = '';
+  final _badgeInput = TextEditingController();
+  bool _badgeBusy = false;
+  String _badgeMessage = '';
+  bool _badgeOk = false;
   final _deviceName = TextEditingController();
   final _withdrawPw = TextEditingController();
   String? _renaming;
@@ -69,7 +73,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _name.dispose();
       _about.dispose();
     }
-    for (final c in [_oldPw, _newPw1, _newPw2, _deletePw, _deviceName, _withdrawPw]) {
+    for (final c in [_oldPw, _newPw1, _newPw2, _deletePw, _deviceName, _withdrawPw, _badgeInput]) {
       c.dispose();
     }
     super.dispose();
@@ -208,9 +212,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   strength: state.glowStrength,
                   size: 44,
                 ),
-                if (state.backend.ownBadges().isNotEmpty) ...[
+                if (state.ownBadges.isNotEmpty) ...[
                   const SizedBox(height: 10),
-                  BadgeRow(badges: state.backend.ownBadges(), size: 24, spacing: 7),
+                  BadgeRow(badges: state.ownBadges, size: 24, spacing: 7),
                 ],
               ],
             ),
@@ -566,6 +570,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _deviceError = '';
   });
 
+  Future<void> _addBadge(AppState state) async {
+    if (_badgeBusy || _badgeInput.text.trim().isEmpty) return;
+    setState(() => _badgeBusy = true);
+    final answer = await state.addBadge(_badgeInput.text);
+    if (!mounted) return;
+    setState(() {
+      _badgeBusy = false;
+      _badgeOk = answer.ok;
+      _badgeMessage = answer.ok
+          ? 'Abzeichen geprüft und gespeichert.'
+          : switch (answer.error) {
+              'bad_request' => 'Das ist keine Abzeichen-Zeile. Kopiere die ganze Zeile, die mit { beginnt.',
+              'refused' => 'Abgelehnt: nicht für dein Konto, abgelaufen oder nicht echt unterschrieben.',
+              _ => vaultErrorText(answer),
+            };
+      if (answer.ok) _badgeInput.clear();
+    });
+  }
+
   Future<void> _renameDevice(AppState state, TrairDevice d) async {
     if (_deviceBusy || _deviceName.text.trim().isEmpty) return;
     setState(() {
@@ -879,6 +902,64 @@ class _ProfileScreenState extends State<ProfileScreen> {
             'automatisch und entfernt es aus allen Gruppen und Communities.',
             style: TrairText.muted,
           ),
+          const SizedBox(height: 16),
+          const Text('Öffentlicher Kontoschlüssel', style: TrairText.label),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+            decoration: BoxDecoration(color: TrairColors.field, borderRadius: BorderRadius.circular(16)),
+            child: Row(
+              children: [
+                Expanded(
+                  child: SelectableText(
+                    state.accountKey,
+                    style: TrairText.mono.copyWith(fontSize: 11.5, letterSpacing: 0.3, color: TrairColors.textSoft),
+                  ),
+                ),
+                RoundIconButton(
+                  icon: TrairIcons.copy,
+                  tooltip: 'Kontoschlüssel kopieren',
+                  filled: false,
+                  onPressed: () => copySensitive(state.accountKey),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Nicht geheim. Das Team-Werkzeug braucht ihn, um dir ein Abzeichen zu unterschreiben.',
+            style: TrairText.muted,
+          ),
+          const SizedBox(height: 16),
+          const FieldLabel('Abzeichen hinzufügen'),
+          Row(
+            children: [
+              Expanded(
+                child: PillField(
+                  controller: _badgeInput,
+                  hint: 'Zeile aus dem Team-Werkzeug einfügen',
+                  height: 46,
+                  semanticLabel: 'Abzeichen einfügen',
+                  onChanged: (_) => setState(() => _badgeMessage = ''),
+                  onSubmitted: (_) => _addBadge(state),
+                ),
+              ),
+              const SizedBox(width: 10),
+              PillButton(
+                label: _badgeBusy ? 'Prüfe …' : 'Hinzufügen',
+                height: 46,
+                onPressed: _badgeBusy || _badgeInput.text.trim().isEmpty ? null : () => _addBadge(state),
+              ),
+            ],
+          ),
+          if (_badgeMessage.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                _badgeMessage,
+                style: TextStyle(fontSize: 13, color: _badgeOk ? TrairColors.mint : TrairColors.amber),
+              ),
+            ),
           const SizedBox(height: 14),
           Align(
             alignment: Alignment.centerLeft,

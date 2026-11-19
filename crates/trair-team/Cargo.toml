@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[package]
+name = "trair-team"
+description = "Trair team tool: makes the team key on the owner's computer and signs team badges"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "trair-team"
+path = "src/main.rs"
+
+[dependencies]
+trair-core = { path = "../trair-core" }
+hex = "0.4.3"
+rpassword = "=7.5.5"
+serde_json = "1.0.154"
+zeroize = "=1.9.2"
+
+[dev-dependencies]
+getrandom = "=0.4.3"

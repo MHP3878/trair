@@ -46,6 +46,11 @@ void main() {
       expect((await vault.withdrawDevice(me.id, 'ein sehr langes passwort')).error, 'refused');
       expect(String.fromCharCodes(file.readAsBytesSync()).contains('Julians Laptop'), isFalse);
 
+      // The public account key, and no badges yet.
+      expect(created.accountKey, matches(RegExp(r'^[0-9a-f]{64}$')));
+      expect(created.badges, isEmpty);
+      expect((await vault.addBadge({'claim': 'kaputt'})).error, 'bad_request');
+
       // Badges: the core lets nothing through that it cannot check.
       final checked = await vault.verifyBadges('00' * 32, 'Tr4ir Support', [
         {'claim': 'kaputt'},

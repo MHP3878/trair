@@ -6,10 +6,10 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:trair_app/backend/backend.dart';
 import 'package:trair_app/backend/demo_backend.dart';
 import 'package:trair_app/core/vault.dart';
 import 'package:trair_app/main.dart';
-import 'package:trair_app/backend/backend.dart';
 import 'package:trair_app/widgets/badges.dart';
 import 'package:trair_app/widgets/common.dart';
 import 'package:trair_app/widgets/profile_popup.dart';
@@ -490,7 +490,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(inPopup(find.text('Ich baue Trair.')), findsOneWidget);
       expect(inPopup(find.text('Sichtbar für: Nur Kontakte')), findsOneWidget);
-      expect(inPopup(find.byType(TrairBadge)), findsNWidgets(2));
+      expect(inPopup(find.byType(TrairBadge)), findsOneWidget, reason: 'only the demo founder badge, no team badge');
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
 
@@ -498,6 +498,55 @@ void main() {
       await _unlock(tester);
       await _openSettings(tester);
       expect(find.text('Ich baue Trair.'), findsOneWidget, reason: 'restored from the vault');
+    });
+  });
+
+  group('Konto und Team-Abzeichen', () {
+    testWidgets('the account key is shown and a pasted badge is checked and kept', (tester) async {
+      final door = await _start(tester);
+      await _unlock(tester);
+      await _openSettings(tester);
+      final key = find.byWidgetPredicate((w) => w is SelectableText && w.data == FakeDoor.accountKey);
+      await tester.ensureVisible(key);
+      await tester.pumpAndSettle();
+      expect(key, findsOneWidget);
+
+      // No team badge before: the demo only makes up community badges.
+      List<BadgeKind> ownKinds() => [
+        for (final b in tester.widget<BadgeRow>(find.byType(BadgeRow).first).badges) b.kind,
+      ];
+      expect(ownKinds(), [BadgeKind.founder]);
+
+      final field = _field('Zeile aus dem Team-Werkzeug einfügen');
+      await tester.ensureVisible(field);
+      await tester.enterText(field, 'kein abzeichen');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Hinzufügen'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('keine Abzeichen-Zeile'), findsOneWidget);
+
+      final foreign = '{"claim": {"kind": "team", "holder": "${'cd' * 32}"}, "signature": ""}';
+      await tester.enterText(field, foreign);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Hinzufügen'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Abgelehnt'), findsOneWidget);
+      expect(door.badges, isEmpty);
+
+      final mine = '{"claim": {"kind": "team", "holder": "${FakeDoor.accountKey}"}, "signature": ""}';
+      await tester.enterText(field, mine);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Hinzufügen'));
+      await tester.pumpAndSettle();
+      expect(find.text('Abzeichen geprüft und gespeichert.'), findsOneWidget);
+      expect(ownKinds(), [BadgeKind.team, BadgeKind.founder]);
+      expect(door.ops, contains('add_badge'));
+
+      // Kept in the vault: back after locking.
+      await _ctrl(tester, LogicalKeyboardKey.keyL);
+      await _unlock(tester);
+      await _openSettings(tester);
+      expect(ownKinds(), [BadgeKind.team, BadgeKind.founder]);
     });
   });
 }

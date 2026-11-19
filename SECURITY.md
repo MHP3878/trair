@@ -118,13 +118,17 @@ Code: `crates/trair-core/src/badges.rs`; tests: `tests/abzeichen.rs`.
   badges the core has checked; everything else is dropped.
 - Team badges must be signed by a public team key built into the app.
   There is none yet: the project owner creates the team key on their own
-  computer, and only its public half is ever added to the code.
+  computer with `trair-team` (below), and only its public half is ever
+  added to the code.
 - A community's id is derived from its founder's key, so nobody else can
   claim to have founded it. Admins are signed by the founder; moderators
   by the founder or by an admin who attaches their own admin badge (one
   step only). Badges are shown everywhere; the tooltip always names the
   community they come from.
-- Badges expire after at most 14 days (the server will renew them, M3).
+- Community badges expire after at most 14 days (the server will renew
+  them, M3); team badges after at most 366 days.
+- Own badges are kept in the vault and checked again on every unlock;
+  expired or foreign ones are never shown.
 - Names that look official ("Trair Support", also with look-alike letters
   such as `Tr4ir` or Cyrillic `а`) get a warning unless a team badge backs
   them. Community names that look official are marked as well.
@@ -137,6 +141,28 @@ Known limits of badges:
 - Look-alike detection covers common tricks, not every Unicode character.
 - Profile pictures are not supported yet: images from strangers need a
   separate review of the image decoder first.
+
+## The team key and `trair-team`
+
+Code: `crates/trair-core/src/teamkey.rs`, `crates/trair-team`; tests:
+`crates/trair-core/tests/teamschluessel.rs`, `crates/trair-team/tests`.
+
+- `trair-team neu` makes the team key on the owner's computer. It is
+  stored encrypted with a passphrase of at least 16 characters (Argon2id
+  with 1 GiB and 3 passes, XChaCha20-Poly1305; header authenticated).
+  Files with cheaper settings are refused when opened.
+- The tool never overwrites a file and refuses folders inside a Git
+  repository or synced to a cloud (OneDrive, Dropbox, Google Drive,
+  iCloud). The default is `%LOCALAPPDATA%\Trair\Team`. `*.trairkey` is
+  in `.gitignore`.
+- The passphrase is read without echo and never printed. Backup: a copy
+  of the file on a USB stick, the passphrase on paper.
+- If the key is lost, a new one is made and the app is updated; old team
+  badges stop working. If it is stolen together with the passphrase,
+  its public key is removed from the app.
+
+Known limit: while the tool runs, malware on the same computer could
+read the key. The tool is needed about once a year.
 
 ## Rules for this repository
 

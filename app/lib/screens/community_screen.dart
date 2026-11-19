@@ -358,7 +358,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
       name: state.userName.trim().isEmpty ? 'Du' : state.userName.trim(),
       color: state.glow,
       trust: p.trust,
-      badges: state.backend.ownBadges(),
+      badges: state.ownBadges,
       about: state.about,
       isSelf: true,
     );

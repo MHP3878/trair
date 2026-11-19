@@ -51,9 +51,9 @@ class ProfileView {
     glowStrength: state.glowStrength,
     about: state.about,
     trust: 2,
-    badges: state.backend.ownBadges(),
+    badges: state.ownBadges,
     isSelf: true,
-    demoBadges: state.backend.isDemo,
+    demoBadges: state.ownBadgesIncludeDemo,
     visibility: profileVisibilityChoices[state.profileVisibility],
   );
 
@@ -230,7 +230,7 @@ class ProfilePopup extends StatelessWidget {
                     if (v.badges.isNotEmpty && v.demoBadges) ...[
                       const SizedBox(height: 12),
                       const Text(
-                        'Abzeichen sind hier noch Demo. Echte kommen unterschrieben mit dem Server.',
+                        'Community-Abzeichen sind hier noch Demo. Echte kommen unterschrieben mit dem Server.',
                         style: TrairText.small,
                       ),
                     ],
