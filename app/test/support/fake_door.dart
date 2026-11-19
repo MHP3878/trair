@@ -106,7 +106,10 @@ class FakeDoor implements CoreDoor {
         // The fake accepts badges made for its own account key only.
         if (claim['holder'] != accountKey) return _fail('refused');
         badges.add({'kind': claim['kind'], 'community': null, 'community_warning': false, 'expires': 0});
-        return {'ok': true, 'badges': [for (final x in badges) Map.of(x)]};
+        return {
+          'ok': true,
+          'badges': [for (final x in badges) Map.of(x)],
+        };
       case 'withdraw_device':
         if (!unlocked) return _fail('locked');
         if (r['password'] != password) return _wrong();
