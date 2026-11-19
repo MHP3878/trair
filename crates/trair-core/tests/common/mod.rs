@@ -12,6 +12,8 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
+use sha2::Digest as _;
+
 use trair_core::{Account, CoreError, Device, Event, KeyPackageOffer, Outgoing};
 
 #[derive(Default)]
@@ -39,6 +41,7 @@ pub struct Net {
     swaps: HashMap<String, String>,
     boxes: HashMap<String, VecDeque<Vec<u8>>>,
     epochs: HashMap<String, u64>,
+    taken: HashMap<String, String>,
     drops: HashSet<(String, String)>,
     pub log: Vec<Vec<u8>>,
 }
@@ -51,6 +54,7 @@ impl Default for Net {
             swaps: HashMap::new(),
             boxes: HashMap::new(),
             epochs: HashMap::new(),
+            taken: HashMap::new(),
             drops: HashSet::new(),
             log: Vec::new(),
         }
@@ -151,24 +155,55 @@ impl Net {
         out: &Outgoing,
         recipients: &[String],
     ) -> Result<(), String> {
+        let welcome_to: Vec<String> = out.added.iter().map(|m| m.id.clone()).collect();
+        self.commit_raw(
+            from,
+            &out.group,
+            out.epoch,
+            &out.commit,
+            out.welcome.as_deref(),
+            &welcome_to,
+            recipients,
+        )
+    }
+
+    /// Like the real server's `POST /v1/commits`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn commit_raw(
+        &mut self,
+        from: &str,
+        group: &str,
+        epoch: u64,
+        commit: &[u8],
+        welcome: Option<&[u8]>,
+        welcome_to: &[String],
+        recipients: &[String],
+    ) -> Result<(), String> {
         if self.honest
-            && let Some(&e) = self.epochs.get(&out.group)
-            && e != out.epoch
+            && let Some(&e) = self.epochs.get(group)
+            && e != epoch
         {
-            return Err(format!("409 wrong epoch: server {e}, commit {}", out.epoch));
+            return Err(format!("409 wrong epoch: server {e}, commit {epoch}"));
         }
-        self.epochs.insert(out.group.clone(), out.epoch + 1);
-        self.log.push(out.commit.clone());
+        self.epochs.insert(group.to_string(), epoch + 1);
+        self.taken
+            .insert(group.to_string(), hex::encode(sha2::Sha256::digest(commit)));
+        self.log.push(commit.to_vec());
         for to in recipients {
-            self.deliver(from, to, &out.commit);
+            self.deliver(from, to, commit);
         }
-        if let Some(w) = &out.welcome {
-            self.log.push(w.clone());
-            for m in &out.added {
-                self.deliver(from, &m.id, w);
+        if let Some(w) = welcome {
+            self.log.push(w.to_vec());
+            for id in welcome_to {
+                self.deliver(from, id, w);
             }
         }
         Ok(())
+    }
+
+    /// Hash of the last commit the server took for a group.
+    pub fn taken(&self, group: &str) -> Option<String> {
+        self.taken.get(group).cloned()
     }
 
     pub fn send(&mut self, from: &str, recipients: &[String], bytes: &[u8]) {

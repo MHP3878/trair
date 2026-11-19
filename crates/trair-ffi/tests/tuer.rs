@@ -791,3 +791,248 @@ fn d14_newer_lists_from_the_server_are_taken_only_if_signed_and_fitting() {
     let _ = with_pc;
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Bob, outside the door: a real core with its own chat database.
+struct Bob {
+    m: trair_core::Messenger,
+    dir: PathBuf,
+    account: trair_core::Account,
+    list: trair_core::SignedDeviceList,
+}
+
+impl Bob {
+    fn new() -> Bob {
+        let dir = fresh_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        let account = trair_core::Account::generate("local-bob").unwrap();
+        let identity = trair_core::DeviceIdentity::generate().unwrap();
+        let list = trair_core::SignedDeviceList::first(&account, identity.entry()).unwrap();
+        let mut key = [0u8; 32];
+        getrandom::fill(&mut key).unwrap();
+        let m = trair_core::Messenger::open(
+            &dir.join("chats.db"),
+            &key,
+            &account,
+            &identity,
+            &list.list,
+            1_800_000_000,
+        )
+        .unwrap();
+        Bob {
+            m,
+            dir,
+            account,
+            list,
+        }
+    }
+
+    fn offer(&mut self) -> Value {
+        let kp = self.m.key_packages(1).unwrap().remove(0);
+        json!([{"device": self.m.device_id(), "package": b64(&kp)}])
+    }
+}
+
+impl Drop for Bob {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+#[test]
+fn d15_a_chat_through_the_door_survives_locking() {
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let dir = fresh_dir();
+    call(json!({"op": "init", "dir": dir}));
+    assert_eq!(error(&call(json!({"op": "contacts"}))), "locked");
+    let created = call(json!({"op": "create", "password": PW, "profile": {"strict": true}}));
+    assert_eq!(created["chats"], true, "{created}");
+    let mut bob = Bob::new();
+
+    // Codes both ways.
+    let code = call(json!({"op": "contact_code"}));
+    let my_code = code["code"].as_str().unwrap().to_string();
+    assert!(my_code.starts_with("trair1:local-"), "{my_code}");
+    assert_eq!(
+        error(&call(
+            json!({"op": "add_contact", "code": my_code, "name": "ich"})
+        )),
+        "rejected"
+    );
+    bob.m
+        .add_contact(&my_code, "Julian", 1_800_000_000)
+        .unwrap();
+    let added = call(json!({"op": "add_contact", "code": bob.m.contact_code(), "name": "Bob"}));
+    assert_eq!(added["contact"]["name"], "Bob", "{added}");
+
+    // Start the chat; the server would take the commit.
+    let started = call(json!({"op": "start_chat", "user": "local-bob", "offers": bob.offer()}));
+    assert_eq!(started["ok"], true, "{started}");
+    let chat = started["chat"]["id"].as_str().unwrap().to_string();
+    let commit = &started["commit"];
+    assert_eq!(commit["welcome_to"], json!([bob.m.device_id()]));
+    assert_eq!(
+        call(json!({"op": "pending_commits"}))["commits"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let answer = call(json!({"op": "commit_answer", "chat": chat, "accepted": true}));
+    assert_eq!(answer["applied"], true, "{answer}");
+    assert!(
+        call(json!({"op": "pending_commits"}))["commits"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let welcome = unb64(&commit["welcome"]);
+    assert!(matches!(
+        bob.m.receive(&welcome, 1_800_000_000).unwrap(),
+        trair_core::Incoming::Chat { .. }
+    ));
+
+    // Bob writes; the door reads. The door writes; Bob reads.
+    let (bytes, _) = bob.m.send(&chat, "Hallo Julian", 1_800_000_000).unwrap();
+    let got = call(json!({"op": "receive", "body": b64(&bytes)}));
+    assert_eq!(got["incoming"]["kind"], "message", "{got}");
+    assert_eq!(got["incoming"]["message"]["text"], "Hallo Julian");
+    assert_eq!(
+        call(json!({"op": "receive", "body": b64(&bytes)}))["incoming"]["kind"],
+        "duplicate"
+    );
+    let sent = call(json!({"op": "send_message", "chat": chat, "text": "Hallo Bob"}));
+    assert_eq!(sent["to"], json!([bob.m.device_id()]));
+    match bob.m.receive(&unb64(&sent["body"]), 1_800_000_000).unwrap() {
+        trair_core::Incoming::Message(m) => assert_eq!(m.text, "Hallo Bob"),
+        other => panic!("{other:?}"),
+    }
+    let chats = call(json!({"op": "chats"}));
+    assert_eq!(chats["chats"][0]["name"], "Bob");
+    assert_eq!(chats["chats"][0]["state"], "active");
+
+    // Locked: nothing. Unlocked: everything is still there.
+    call(json!({"op": "lock"}));
+    assert_eq!(
+        error(&call(json!({"op": "messages", "chat": chat}))),
+        "locked"
+    );
+    let unlocked = call(json!({"op": "unlock", "password": PW}));
+    assert_eq!(unlocked["chats"], true);
+    let msgs = call(json!({"op": "messages", "chat": chat}));
+    let texts: Vec<&str> = msgs["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["text"].as_str().unwrap())
+        .collect();
+    assert_eq!(texts, ["Hallo Julian", "Hallo Bob"]);
+    let (bytes, _) = bob
+        .m
+        .send(&chat, "nach dem Sperren", 1_800_000_000)
+        .unwrap();
+    let got = call(json!({"op": "receive", "body": b64(&bytes)}));
+    assert_eq!(
+        got["incoming"]["message"]["text"], "nach dem Sperren",
+        "{got}"
+    );
+
+    // The database file holds no plaintext; deleting the account removes it.
+    let file = std::fs::read(dir.join("chats.db")).unwrap();
+    for needle in ["Hallo", "Bob", "local-bob"] {
+        assert!(
+            !file.windows(needle.len()).any(|w| w == needle.as_bytes()),
+            "{needle}"
+        );
+    }
+    assert_eq!(
+        call(json!({"op": "delete_account", "password": PW}))["ok"],
+        true
+    );
+    assert!(!dir.join("chats.db").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn d16_the_chat_ops_refuse_what_does_not_fit() {
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let dir = fresh_dir();
+    call(json!({"op": "init", "dir": dir}));
+    call(json!({"op": "create", "password": PW, "profile": {}}));
+    let mut bob = Bob::new();
+    let stranger = bob.offer();
+    assert_eq!(
+        error(&call(json!({"op": "receive", "body": "kein base64!"}))),
+        "bad_request"
+    );
+    assert_eq!(
+        error(&call(json!({"op": "receive", "body": b64(b"zufall")}))),
+        "rejected"
+    );
+    assert_eq!(
+        error(&call(
+            json!({"op": "start_chat", "user": "local-bob", "offers": stranger})
+        )),
+        "rejected",
+        "Bob is no contact yet"
+    );
+    assert_eq!(
+        error(&call(
+            json!({"op": "key_packages", "n": 101, "last_resort": false})
+        )),
+        "bad_request"
+    );
+    let kps = call(json!({"op": "key_packages", "n": 2, "last_resort": true}));
+    assert_eq!(kps["packages"].as_array().unwrap().len(), 2);
+    assert!(kps["last_resort"].is_string());
+    assert_eq!(
+        error(&call(
+            json!({"op": "commit_answer", "chat": "x", "accepted": true})
+        )),
+        "rejected"
+    );
+    assert_eq!(
+        error(&call(
+            json!({"op": "add_contact", "code": "trair1:kaputt", "name": ""})
+        )),
+        "rejected"
+    );
+    assert_eq!(
+        error(&call(
+            json!({"op": "send_message", "chat": "nichts", "text": "x"})
+        )),
+        "unknown_chat"
+    );
+    assert_eq!(
+        error(&call(json!({"op": "contacts", "extra": 1}))),
+        "bad_request"
+    );
+
+    // A contact's device list: only with the pinned key and its signature.
+    call(json!({"op": "add_contact", "code": bob.m.contact_code(), "name": "Bob"}));
+    let other = trair_core::Account::generate("local-bob").unwrap();
+    let other_dev = trair_core::DeviceIdentity::generate().unwrap();
+    let foreign = trair_core::SignedDeviceList::first(&other, other_dev.entry()).unwrap();
+    let wrong_key = call(json!({"op": "apply_contact_list",
+        "account_key": hex::encode(other.public_key()), "device_list": foreign}));
+    assert_eq!(error(&wrong_key), "blocked");
+    // Bob's real list, after he withdrew a lost phone.
+    let phone = trair_core::DeviceIdentity::generate().unwrap();
+    let with_phone = bob.list.with_device(&bob.account, phone.entry()).unwrap();
+    let without = with_phone.without_device(&bob.account, &phone.id).unwrap();
+    let key = hex::encode(bob.account.public_key());
+    let taken =
+        call(json!({"op": "apply_contact_list", "account_key": key, "device_list": without}));
+    assert_eq!(
+        taken["withdrawn"],
+        json!([format!("local-bob:{}", phone.id)]),
+        "{taken}"
+    );
+    // A changed list does not pass the signature check.
+    let mut forged = serde_json::to_value(&without).unwrap();
+    forged["list"]["withdrawn"] = json!([]);
+    let refused =
+        call(json!({"op": "apply_contact_list", "account_key": key, "device_list": forged}));
+    assert_eq!(error(&refused), "refused");
+    call(json!({"op": "lock"}));
+    let _ = std::fs::remove_dir_all(&dir);
+}

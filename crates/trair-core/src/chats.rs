@@ -120,6 +120,37 @@ pub struct Message {
     pub missing: u64,
 }
 
+/// A change of a chat (devices added or removed, new keys) waiting for
+/// the server. It stays on disk until [`Messenger::commit_accepted`] or
+/// [`Messenger::commit_refused`], so after a restart it can be sent again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingCommit {
+    /// The chat.
+    pub chat: String,
+    /// Epoch the change was built on. The server takes one change per
+    /// chat and epoch.
+    pub epoch: u64,
+    /// The commit, for the devices in `to`.
+    pub commit: Vec<u8>,
+    /// Current devices of the chat besides this one (withdrawn ones are
+    /// left out: the server would refuse them).
+    pub to: Vec<String>,
+    /// The welcome, for the devices in `welcome_to`.
+    pub welcome: Option<Vec<u8>>,
+    /// New devices.
+    pub welcome_to: Vec<String>,
+    /// Devices that will be removed.
+    pub removed: Vec<String>,
+}
+
+impl PendingCommit {
+    /// SHA-256 of the commit, hex. The server names the commit it took
+    /// for an epoch this way; equal means it was this one.
+    pub fn hash(&self) -> String {
+        hex::encode(Sha256::digest(&self.commit))
+    }
+}
+
 /// What an incoming message did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Incoming {
@@ -442,7 +473,7 @@ impl Messenger {
         user: &str,
         offers: &[KeyPackageOffer],
         now: u64,
-    ) -> Result<(Chat, Outgoing)> {
+    ) -> Result<(Chat, PendingCommit)> {
         let Some(contact) = self.contact(user)? else {
             return Err(CoreError::Rejected(format!("{user} is not a contact")));
         };
@@ -467,6 +498,7 @@ impl Messenger {
                 return Err(e);
             }
         };
+        let pending = self.pending(out, Vec::new());
         let chat = Chat {
             id,
             peer: contact.user,
@@ -474,9 +506,80 @@ impl Messenger {
             created: now,
             last: now,
         };
-        let c = chat.clone();
-        self.save(move |tx| insert_chat(tx, &c))?;
-        Ok((chat, out))
+        let (c, p) = (chat.clone(), pending.clone());
+        self.save(move |tx| {
+            insert_chat(tx, &c)?;
+            put_outbox(tx, &p)
+        })?;
+        Ok((chat, pending))
+    }
+
+    fn pending(&self, out: Outgoing, to: Vec<String>) -> PendingCommit {
+        PendingCommit {
+            chat: out.group,
+            epoch: out.epoch,
+            commit: out.commit,
+            to,
+            welcome: out.welcome,
+            welcome_to: out.added.into_iter().map(|m| m.id).collect(),
+            removed: out.removed,
+        }
+    }
+
+    /// The devices that get a commit for this chat: everyone but this
+    /// device and withdrawn devices.
+    fn commit_recipients(&self, chat: &str) -> Result<Vec<String>> {
+        Ok(self
+            .device
+            .members(chat)?
+            .into_iter()
+            .filter(|m| m.trust != Trust::Own && m.trust != Trust::Withdrawn)
+            .map(|m| m.id)
+            .collect())
+    }
+
+    /// Only one change per chat at a time.
+    fn no_pending(&self, chat: &str) -> Result<()> {
+        if self.pending_commit(chat)?.is_some() {
+            return Err(CoreError::Rejected(
+                "a change of this chat is still waiting for the server".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// The change of a chat that waits for the server, if any.
+    pub fn pending_commit(&self, chat: &str) -> Result<Option<PendingCommit>> {
+        self.store
+            .conn()
+            .query_row(
+                "SELECT chat, epoch, commit_bytes, recipients, welcome, welcome_to, removed
+                 FROM outbox WHERE chat = ?1",
+                [chat],
+                row_pending,
+            )
+            .optional()
+            .map_err(sql)?
+            .transpose()
+    }
+
+    /// All changes that wait for the server (send them again after a
+    /// restart).
+    pub fn pending_commits(&self) -> Result<Vec<PendingCommit>> {
+        let mut stmt = self
+            .store
+            .conn()
+            .prepare(
+                "SELECT chat, epoch, commit_bytes, recipients, welcome, welcome_to, removed
+                 FROM outbox ORDER BY chat",
+            )
+            .map_err(sql)?;
+        let rows = stmt.query_map([], row_pending).map_err(sql)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r.map_err(sql)??);
+        }
+        Ok(out)
     }
 
     /// Key packages may only add devices of the chat partner or of this
@@ -496,23 +599,34 @@ impl Messenger {
 
     /// Add devices to a chat (a new own device, a new device of the
     /// contact, or a retry after a refused commit).
-    pub fn add_devices(&mut self, chat: &str, offers: &[KeyPackageOffer]) -> Result<Outgoing> {
+    pub fn add_devices(&mut self, chat: &str, offers: &[KeyPackageOffer]) -> Result<PendingCommit> {
         let c = self.chat(chat)?;
         if c.state == ChatState::Left {
             return Err(CoreError::Rejected("this device left the chat".into()));
         }
+        self.no_pending(chat)?;
         self.check_offers(&c.peer, offers)?;
+        let to = self.commit_recipients(chat)?;
         let out = self.device.add_members(chat, offers)?;
-        self.save(|_| Ok(()))?;
-        Ok(out)
+        self.store_pending(out, to)
+    }
+
+    fn store_pending(&mut self, out: Outgoing, to: Vec<String>) -> Result<PendingCommit> {
+        let p = self.pending(out, to);
+        let q = p.clone();
+        self.save(move |tx| put_outbox(tx, &q))?;
+        Ok(p)
     }
 
     /// Remove devices from a chat (for example a withdrawn one).
-    pub fn remove_devices(&mut self, chat: &str, ids: &[String]) -> Result<Outgoing> {
+    pub fn remove_devices(&mut self, chat: &str, ids: &[String]) -> Result<PendingCommit> {
         self.chat(chat)?;
+        self.no_pending(chat)?;
+        // Removed devices get the commit too, so they learn it (unless
+        // they were withdrawn: the server knows them no more).
+        let to = self.commit_recipients(chat)?;
         let out = self.device.remove_devices(chat, ids)?;
-        self.save(|_| Ok(()))?;
-        Ok(out)
+        self.store_pending(out, to)
     }
 
     /// Withdrawn devices still in a chat. Nothing can be sent until they
@@ -529,25 +643,61 @@ impl Messenger {
 
     /// New keys for this device in a chat (after joining through the
     /// last-resort key package).
-    pub fn update_keys(&mut self, chat: &str) -> Result<Outgoing> {
+    pub fn update_keys(&mut self, chat: &str) -> Result<PendingCommit> {
         self.chat(chat)?;
+        self.no_pending(chat)?;
+        let to = self.commit_recipients(chat)?;
         let out = self.device.self_update(chat)?;
-        self.save(|_| Ok(()))?;
-        Ok(out)
+        self.store_pending(out, to)
     }
 
     /// The server took the commit: apply it.
     pub fn commit_accepted(&mut self, chat: &str, now: u64) -> Result<()> {
+        if self.pending_commit(chat)?.is_none() {
+            return Err(CoreError::Rejected("no change is waiting".into()));
+        }
         self.device.confirm(chat)?;
         let id = chat.to_string();
-        self.save(move |tx| touch(tx, &id, now))
+        self.save(move |tx| {
+            del_outbox(tx, &id)?;
+            touch(tx, &id, now)
+        })
     }
 
     /// The server took another commit first: throw this one away. Read
     /// the waiting messages, then try the change again.
     pub fn commit_refused(&mut self, chat: &str) -> Result<()> {
-        self.device.discard(chat)?;
-        self.save(|_| Ok(()))
+        if self.pending_commit(chat)?.is_none() {
+            return Err(CoreError::Rejected("no change is waiting".into()));
+        }
+        // An incoming commit may already have replaced it.
+        if self.device.has_group(chat) {
+            self.device.discard(chat)?;
+        }
+        let id = chat.to_string();
+        self.save(move |tx| del_outbox(tx, &id))
+    }
+
+    /// The server's answer to a change: `taken` is the hash of the commit
+    /// it holds for this epoch (if it refused). Returns true if the change
+    /// is in effect, false if it has to be made again.
+    pub fn commit_answer(
+        &mut self,
+        chat: &str,
+        accepted: bool,
+        taken: Option<&str>,
+        now: u64,
+    ) -> Result<bool> {
+        let Some(p) = self.pending_commit(chat)? else {
+            return Err(CoreError::Rejected("no change is waiting".into()));
+        };
+        if accepted || taken == Some(p.hash().as_str()) {
+            self.commit_accepted(chat, now)?;
+            Ok(true)
+        } else {
+            self.commit_refused(chat)?;
+            Ok(false)
+        }
     }
 
     /// Everyone in a chat, with trust levels.
@@ -687,6 +837,7 @@ impl Messenger {
                     mark(tx)?;
                     if i_was_removed {
                         set_state(tx, &g, ChatState::Left)?;
+                        del_outbox(tx, &g)?;
                     }
                     touch(tx, &g, now)
                 })?;
@@ -942,6 +1093,69 @@ fn row_chat(r: &rusqlite::Row) -> rusqlite::Result<Result<Chat>> {
         created: to_u64(created),
         last: to_u64(last),
     }))
+}
+
+fn ids_json(ids: &[String]) -> Result<String> {
+    serde_json::to_string(ids).map_err(internal)
+}
+
+fn ids_from(text: &str) -> Result<Vec<String>> {
+    serde_json::from_str(text).map_err(|_| CoreError::Storage("unreadable device list".into()))
+}
+
+fn put_outbox(tx: &Transaction, p: &PendingCommit) -> Result<()> {
+    tx.execute(
+        "INSERT INTO outbox (chat, epoch, commit_bytes, recipients, welcome, welcome_to, removed)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            p.chat,
+            to_i64(p.epoch),
+            p.commit,
+            ids_json(&p.to)?,
+            p.welcome,
+            ids_json(&p.welcome_to)?,
+            ids_json(&p.removed)?
+        ],
+    )
+    .map_err(sql)?;
+    Ok(())
+}
+
+fn del_outbox(tx: &Transaction, chat: &str) -> Result<()> {
+    tx.execute("DELETE FROM outbox WHERE chat = ?1", [chat])
+        .map_err(sql)?;
+    Ok(())
+}
+
+fn row_pending(r: &rusqlite::Row) -> rusqlite::Result<Result<PendingCommit>> {
+    let (chat, epoch, commit, to, welcome, welcome_to, removed): (
+        String,
+        i64,
+        Vec<u8>,
+        String,
+        Option<Vec<u8>>,
+        String,
+        String,
+    ) = (
+        r.get(0)?,
+        r.get(1)?,
+        r.get(2)?,
+        r.get(3)?,
+        r.get(4)?,
+        r.get(5)?,
+        r.get(6)?,
+    );
+    Ok((|| {
+        Ok(PendingCommit {
+            chat,
+            epoch: to_u64(epoch),
+            commit,
+            to: ids_from(&to)?,
+            welcome,
+            welcome_to: ids_from(&welcome_to)?,
+            removed: ids_from(&removed)?,
+        })
+    })())
 }
 
 fn insert_contact(tx: &Transaction, c: &Contact) -> Result<()> {

@@ -25,7 +25,7 @@ pub mod vault;
 
 pub use account::{Account, DeviceCertificate, Fingerprint};
 pub use badges::{Badge, BadgeKind, Community, VerifiedBadge};
-pub use chats::{Chat, ChatState, Contact, Incoming, Message, Messenger};
+pub use chats::{Chat, ChatState, Contact, Incoming, Message, Messenger, PendingCommit};
 pub use contacts::ContactCode;
 pub use devices::{DeviceIdentity, SignedDeviceList};
 pub use error::{CoreError, Result};

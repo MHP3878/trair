@@ -15,7 +15,8 @@ use common::Net;
 use trair_core::chats::CHATS_FILE;
 use trair_core::devices::DeviceList;
 use trair_core::{
-    Account, ChatState, CoreError, DeviceIdentity, Incoming, Messenger, Outgoing, SignedDeviceList,
+    Account, ChatState, CoreError, DeviceIdentity, Incoming, Messenger, PendingCommit,
+    SignedDeviceList,
 };
 
 const NOW: u64 = 1_800_000_000;
@@ -147,19 +148,25 @@ fn publish(net: &mut Net, p: &mut Phone, n: usize) {
     net.register_packages(&id, kps, lr);
 }
 
-/// Hand a commit to the server; apply it if the server took it.
-fn commit(net: &mut Net, p: &mut Phone, out: &Outgoing, recipients: &[String]) -> bool {
+/// Hand a change to the server, as the app will: apply it if the server
+/// took it (or took exactly this one before), else throw it away.
+fn commit(net: &mut Net, p: &mut Phone, out: &PendingCommit) -> bool {
     let id = p.id();
-    match net.commit(&id, out, recipients) {
-        Ok(()) => {
-            p.m().commit_accepted(&out.group, NOW).unwrap();
-            true
-        }
-        Err(_) => {
-            p.m().commit_refused(&out.group).unwrap();
-            false
-        }
-    }
+    let ok = net
+        .commit_raw(
+            &id,
+            &out.chat,
+            out.epoch,
+            &out.commit,
+            out.welcome.as_deref(),
+            &out.welcome_to,
+            &out.to,
+        )
+        .is_ok();
+    let taken = net.taken(&out.chat);
+    p.m()
+        .commit_answer(&out.chat, ok, taken.as_deref(), NOW)
+        .unwrap()
 }
 
 fn poll(net: &mut Net, p: &mut Phone) -> Vec<Result<Incoming, CoreError>> {
@@ -204,7 +211,7 @@ fn chat_between(net: &mut Net, alice: &mut Phone, bob: &mut Phone) -> String {
     let mut offers = net.fetch(&bob_user);
     offers.extend(net.fetch(&alice_user));
     let (chat, out) = alice.m().start_chat(&bob_user, &offers, NOW).unwrap();
-    assert!(commit(net, alice, &out, &[]));
+    assert!(commit(net, alice, &out));
     chat.id
 }
 
@@ -318,7 +325,7 @@ fn a_stranger_is_a_request_until_accepted() {
         .m()
         .start_chat(alice.account.user(), &offers, NOW)
         .unwrap();
-    assert!(commit(&mut net, &mut mallory, &out, &[]));
+    assert!(commit(&mut net, &mut mallory, &out));
     send(&mut net, &mut mallory, &chat.id, "kauf das hier");
 
     let got = poll_ok(&mut net, &mut alice);
@@ -359,7 +366,7 @@ fn a_stranger_is_a_request_until_accepted() {
         .m()
         .start_chat(alice.account.user(), &offers, NOW)
         .unwrap();
-    assert!(commit(&mut net, &mut spam, &out, &[]));
+    assert!(commit(&mut net, &mut spam, &out));
     send(&mut net, &mut spam, &spam_chat.id, "Gewinnspiel");
     poll_ok(&mut net, &mut alice);
     alice.m().decline_request(&spam_chat.id).unwrap();
@@ -404,7 +411,7 @@ fn a_device_signed_by_another_key_is_never_added_or_followed() {
     fake_bob.m().add_contact(&a_code, "", NOW).unwrap();
     let offers = net.fetch("alice");
     let (_, out) = fake_bob.m().start_chat("alice", &offers, NOW).unwrap();
-    assert!(commit(&mut net, &mut fake_bob, &out, &[]));
+    assert!(commit(&mut net, &mut fake_bob, &out));
     let got = poll(&mut net, &mut alice);
     assert!(matches!(got[..], [Err(CoreError::Blocked(_))]), "{got:?}");
     assert!(alice.m().chats().unwrap().is_empty());
@@ -450,27 +457,24 @@ fn two_changes_at_once_one_wins_the_other_tries_again() {
         .into_iter()
         .filter(|o| o.claimed_device == bob2.id())
         .collect::<Vec<_>>();
-    let a_rec = alice.m().recipients(&chat).unwrap();
-    let b_rec = bob.m().recipients(&chat).unwrap();
     let a_out = alice.m().add_devices(&chat, &a_offer).unwrap();
     let b_out = bob.m().add_devices(&chat, &b_offer).unwrap();
     assert_eq!(a_out.epoch, b_out.epoch);
 
     // Alice is first; Bob's commit is refused and thrown away.
-    assert!(commit(&mut net, &mut alice, &a_out, &a_rec));
-    assert!(!commit(&mut net, &mut bob, &b_out, &b_rec));
+    assert!(commit(&mut net, &mut alice, &a_out));
+    assert!(!commit(&mut net, &mut bob, &b_out));
     // Bob reads Alice's change, then tries again on the new epoch.
     assert!(
         matches!(&poll_ok(&mut net, &mut bob)[..], [Incoming::Changed { added, .. }] if added.len() == 1)
     );
-    let b_rec = bob.m().recipients(&chat).unwrap();
     let b_offer = net
         .fetch("bob")
         .into_iter()
         .filter(|o| o.claimed_device == bob2.id())
         .collect::<Vec<_>>();
     let b_out = bob.m().add_devices(&chat, &b_offer).unwrap();
-    assert!(commit(&mut net, &mut bob, &b_out, &b_rec));
+    assert!(commit(&mut net, &mut bob, &b_out));
 
     poll_ok(&mut net, &mut alice2);
     poll_ok(&mut net, &mut alice);
@@ -537,9 +541,19 @@ fn a_withdrawn_device_is_removed_and_reads_nothing_new() {
         Err(CoreError::Withdrawn(_))
     ));
 
-    let rec = bob.m().recipients(&chat).unwrap();
-    let out = bob.m().remove_devices(&chat, &[gone]).unwrap();
-    assert!(commit(&mut net, &mut bob, &out, &rec));
+    let out = bob
+        .m()
+        .remove_devices(&chat, std::slice::from_ref(&gone))
+        .unwrap();
+    assert!(
+        !out.to.contains(&gone),
+        "the server no longer knows a withdrawn device"
+    );
+    assert_eq!(out.removed, std::slice::from_ref(&gone));
+    assert!(commit(&mut net, &mut bob, &out));
+    // The real server deletes a withdrawn device's mail; this test hands
+    // it the commit anyway, to see that it gives up the chat's keys.
+    net.inject(&laptop.id(), &out.commit);
     let got = poll_ok(&mut net, &mut laptop);
     assert!(matches!(&got[..], [Incoming::Changed { left: true, .. }]));
     assert_eq!(laptop.m().chat(&chat).unwrap().state, ChatState::Left);
@@ -602,7 +616,7 @@ fn a_restart_between_commit_and_answer_keeps_the_commit() {
     let (chat, out) = alice.m().start_chat("bob", &offers, NOW).unwrap();
     // Trair is closed before the server answered.
     alice.restart();
-    assert!(commit(&mut net, &mut alice, &out, &[]));
+    assert!(commit(&mut net, &mut alice, &out));
     poll_ok(&mut net, &mut bob);
     send(&mut net, &mut alice, &chat.id, "angekommen");
     assert!(
@@ -632,7 +646,7 @@ fn only_devices_of_the_two_accounts_get_into_a_chat() {
     );
     let offers = net.fetch("bob");
     let (chat, out) = alice.m().start_chat("bob", &offers, NOW).unwrap();
-    assert!(commit(&mut net, &mut alice, &out, &[]));
+    assert!(commit(&mut net, &mut alice, &out));
     let carol_offer = net.fetch("carol");
     let later = alice.m().add_devices(&chat.id, &carol_offer);
     assert!(
@@ -642,4 +656,91 @@ fn only_devices_of_the_two_accounts_get_into_a_chat() {
     // A chat needs at least one device of the other person.
     assert!(alice.m().start_chat("bob", &[], NOW).is_err());
     assert_eq!(alice.m().members(&chat.id).unwrap().len(), 2);
+}
+
+#[test]
+fn a_change_the_server_took_before_a_crash_is_recognised() {
+    let mut net = Net::default();
+    let mut alice = person("alice");
+    let mut bob = person("bob");
+    publish(&mut net, &mut bob, 2);
+    let chat = chat_between(&mut net, &mut alice, &mut bob);
+    poll_ok(&mut net, &mut bob);
+    let mut bob2 = second_device(&mut bob);
+    publish(&mut net, &mut bob2, 1);
+    let offer: Vec<_> = net
+        .fetch("bob")
+        .into_iter()
+        .filter(|o| o.claimed_device == bob2.id())
+        .collect();
+    let out = bob.m().add_devices(&chat, &offer).unwrap();
+    // Only one change at a time: refused before MLS is touched.
+    assert!(matches!(
+        bob.m().add_devices(&chat, &offer),
+        Err(CoreError::Rejected(_))
+    ));
+    assert!(matches!(
+        bob.m().update_keys(&chat),
+        Err(CoreError::Rejected(_))
+    ));
+    // The server takes it, but Trair dies before it hears the answer.
+    let bob_id = bob.id();
+    net.commit_raw(
+        &bob_id,
+        &out.chat,
+        out.epoch,
+        &out.commit,
+        out.welcome.as_deref(),
+        &out.welcome_to,
+        &out.to,
+    )
+    .unwrap();
+    bob.restart();
+    let pending = bob.m().pending_commits().unwrap();
+    assert_eq!(
+        pending,
+        std::slice::from_ref(&out),
+        "the change is still on disk"
+    );
+    // Sent again, the server refuses (epoch moved) but names this very
+    // commit: Bob applies it instead of throwing it away.
+    let again = net.commit_raw(
+        &bob_id,
+        &out.chat,
+        out.epoch,
+        &out.commit,
+        out.welcome.as_deref(),
+        &out.welcome_to,
+        &out.to,
+    );
+    assert!(again.is_err());
+    let taken = net.taken(&chat);
+    assert!(
+        bob.m()
+            .commit_answer(&chat, false, taken.as_deref(), NOW)
+            .unwrap()
+    );
+    assert!(bob.m().pending_commits().unwrap().is_empty());
+    poll_ok(&mut net, &mut alice);
+    poll_ok(&mut net, &mut bob2);
+    assert_eq!(
+        bob.m().epoch(&chat).unwrap(),
+        alice.m().epoch(&chat).unwrap()
+    );
+    send(&mut net, &mut alice, &chat, "an beide Geräte");
+    for p in [&mut bob, &mut bob2] {
+        assert!(
+            matches!(&poll_ok(&mut net, p)[..], [Incoming::Message(m)] if m.text == "an beide Geräte")
+        );
+    }
+    // A foreign hash does not count as accepted.
+    let out = alice.m().update_keys(&chat).unwrap();
+    assert!(
+        !alice
+            .m()
+            .commit_answer(&chat, false, Some(&"0".repeat(64)), NOW)
+            .unwrap()
+    );
+    assert_ne!(out.hash(), "0".repeat(64));
+    assert!(alice.m().pending_commits().unwrap().is_empty());
 }

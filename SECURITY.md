@@ -260,20 +260,54 @@ its own database file), `tests/tresor.rs` (t16, t17).
 - **Only the two accounts:** a one-to-one chat takes only devices of the
   two accounts; group chats are refused until M5.
 - **One change at a time:** every chat has a random id. A change (devices
-  added or removed) is a commit for one epoch; the server will take only
-  the first commit per chat and epoch (server side: M4, step 2). The
-  loser throws its commit away, reads the winner and tries again.
+  added or removed) is a commit for one epoch; the server takes only the
+  first commit per chat and epoch. The loser throws its commit away,
+  reads the winner and tries again. A change waiting for the server's
+  answer stays on disk (outbox); after a crash it is sent again, and the
+  server's hash of the commit it took tells whether it was this one.
 - **Withdrawn devices:** nothing is sent into a chat that still holds a
   withdrawn device; it has to be removed first. A device removed from a
   chat deletes its keys for it and keeps only the history.
 
-Known limits of this step:
+Known limits:
 
 - Accepting a request, confirming a contact or a name are not yet passed
   on to the account's other devices.
-- The app does not use this yet (M4, step 2). The server does not yet
-  order commits.
 - Message length is limited to 32 KiB of text; no files or pictures.
+
+## Chats through the server and the door (M4, step 2a)
+
+Code: `crates/trair-server/src/lib.rs` (`/v1/commits`, key packages),
+`crates/trair-ffi/src/chats.rs`; tests: `crates/trair-server/tests/
+server.rs` (s10 to s13, two real chat databases through the server),
+`crates/trair-ffi/tests/tuer.rs` (d15, d16).
+
+- **Order of changes:** `POST /v1/commits` takes a commit only if it is
+  the first for its chat and epoch, and then queues it for the chat's
+  devices and the welcome for new devices, all in one transaction. A
+  refused commit gets the server's epoch and the SHA-256 of the commit
+  it took. The server stores per chat only the random id, the next epoch,
+  that hash and the time of the last change, not who is in the chat;
+  chats unchanged for 6 months are forgotten.
+- **Key packages:** besides one-time packages each device keeps one
+  last-resort package on the server. It is handed out when the one-time
+  packages are gone and is not deleted, so a person can always be
+  reached; the core then renews its keys in that chat. The app asks how
+  many one-time packages are left and uploads more.
+- **The door:** the chat database opens with the vault and closes when
+  Trair locks; deleting the account deletes it. The app gets texts, names
+  and ciphertext to send, never keys. A contact's device list is taken
+  only if the account key fits the pinned fingerprint and signed it; its
+  withdrawn devices are refused from then on.
+
+Known limits:
+
+- A chat partner (not a stranger) can block further changes of a chat by
+  sending a commit that the others refuse: the server's epoch moves on,
+  theirs does not. Messages still flow; a new chat helps. A dishonest
+  server can block anything anyway.
+- The server sees which devices get which ciphertext and when, and which
+  account sent it (sealed sender: later).
 
 ## Rules for this repository
 

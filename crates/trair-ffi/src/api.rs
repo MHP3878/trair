@@ -30,6 +30,29 @@
 //! | `pair_guest_finish`| `bundle`, `password`  | like `create`                    |
 //! | `pair_cancel`     |                        |                                  |
 //! | `apply_device_list` | `device_list`        | `devices`, `changed`; error `withdrawn` |
+//! | `contact_code`    |                        | `code`                           |
+//! | `add_contact`     | `code`, `name`         | `contact`                        |
+//! | `contacts`        |                        | `contacts`                       |
+//! | `confirm_contact` | `user`                 |                                  |
+//! | `chats`           |                        | `chats`                          |
+//! | `messages`        | `chat`, `before`?, `limit`? | `messages` (oldest first)   |
+//! | `start_chat`      | `user`, `offers`       | `chat`, `commit`                 |
+//! | `add_devices`     | `chat`, `offers`       | `commit`                         |
+//! | `remove_devices`  | `chat`, `ids`          | `commit`                         |
+//! | `update_keys`     | `chat`                 | `commit`                         |
+//! | `withdrawn_members` | `chat`               | `ids`                            |
+//! | `pending_commits` |                        | `commits`                        |
+//! | `commit_answer`   | `chat`, `accepted`, `taken`? | `applied`                  |
+//! | `send_message`    | `chat`, `text`         | `body`, `to`, `message`          |
+//! | `receive`         | `body`                 | `incoming` (`kind`: chat, message, changed, duplicate, other) |
+//! | `accept_request`  | `chat`, `name`         | `contact`                        |
+//! | `decline_request` | `chat`                 |                                  |
+//! | `key_packages`    | `n`, `last_resort`     | `packages`, `last_resort`        |
+//! | `apply_contact_list` | `account_key`, `device_list` | `withdrawn`              |
+//!
+//! The chat ops (M4) need an unlocked vault; their details are in
+//! `chats.rs`. `create`, `unlock` and `pair_guest_finish` also answer
+//! `chats: true|false` (false: the chat database could not be opened).
 //!
 //! The server ops (M3, step 3) only compute; the app sends the results
 //! over the network. Pairing keys stay in here: the app only ever sees
@@ -66,7 +89,9 @@ use trair_core::proofs;
 use trair_core::vault::{Vault, VaultError};
 use zeroize::Zeroizing;
 
+use crate::chats::{self, Offer};
 use crate::platform;
+use trair_core::Messenger;
 
 /// Name of the vault file in the data folder.
 pub const VAULT_FILE: &str = "vault.trair";
@@ -151,6 +176,69 @@ enum Request {
     ApplyDeviceList {
         device_list: Value,
     },
+    ContactCode {},
+    AddContact {
+        code: String,
+        name: String,
+    },
+    Contacts {},
+    ConfirmContact {
+        user: String,
+    },
+    Chats {},
+    Messages {
+        chat: String,
+        before: Option<i64>,
+        limit: Option<u32>,
+    },
+    StartChat {
+        user: String,
+        offers: Vec<Offer>,
+    },
+    AddDevices {
+        chat: String,
+        offers: Vec<Offer>,
+    },
+    RemoveDevices {
+        chat: String,
+        ids: Vec<String>,
+    },
+    UpdateKeys {
+        chat: String,
+    },
+    WithdrawnMembers {
+        chat: String,
+    },
+    PendingCommits {},
+    CommitAnswer {
+        chat: String,
+        accepted: bool,
+        taken: Option<String>,
+    },
+    SendMessage {
+        chat: String,
+        text: String,
+    },
+    Receive {
+        body: String,
+    },
+    #[serde(rename = "accept_request")]
+    AcceptChat {
+        chat: String,
+        name: String,
+    },
+    #[serde(rename = "decline_request")]
+    DeclineChat {
+        chat: String,
+    },
+    KeyPackages {
+        n: usize,
+        last_resort: bool,
+    },
+    ApplyContactList {
+        account_key: String,
+        device_list: Value,
+    },
 }
 
 #[derive(Default)]
@@ -161,6 +249,8 @@ struct State {
     blocked_until: Option<Instant>,
     pair_host: Option<PairingHost>,
     pair_guest: Option<PairingGuest>,
+    /// The chat database, open while the vault is.
+    chats: Option<Messenger>,
 }
 
 static STATE: Mutex<State> = Mutex::new(State {
@@ -170,6 +260,7 @@ static STATE: Mutex<State> = Mutex::new(State {
     blocked_until: None,
     pair_host: None,
     pair_guest: None,
+    chats: None,
 });
 
 /// Handle one request. Never panics on bad input; a poisoned lock (a
@@ -185,6 +276,7 @@ pub fn handle(request: &[u8]) -> Vec<u8> {
                     Err(poisoned) => {
                         let mut guard = poisoned.into_inner();
                         guard.vault = None;
+                        guard.chats = None;
                         STATE.clear_poison();
                         guard
                     }
@@ -205,6 +297,7 @@ fn run(state: &mut State, req: Request) -> Value {
         Request::Unlock { password } => unlock(state, &password),
         Request::Lock {} => {
             state.vault = None;
+            state.chats = None;
             state.pair_host = None;
             json!({"ok": true})
         }
@@ -239,6 +332,71 @@ fn run(state: &mut State, req: Request) -> Value {
             state.pair_guest = None;
             json!({"ok": true})
         }
+        other => chat_op(state, other),
+    }
+}
+
+/// The chat ops: all need the open chat database.
+fn chat_op(state: &mut State, req: Request) -> Value {
+    if state.vault.is_none() {
+        return fail("locked");
+    }
+    let Some(m) = state.chats.as_mut() else {
+        return fail("chats_unavailable");
+    };
+    match req {
+        Request::ContactCode {} => chats::contact_code(m),
+        Request::AddContact { code, name } => chats::add_contact(m, &code, &name),
+        Request::Contacts {} => chats::contacts(m),
+        Request::ConfirmContact { user } => chats::confirm_contact(m, &user),
+        Request::Chats {} => chats::chats(m),
+        Request::Messages {
+            chat,
+            before,
+            limit,
+        } => chats::messages(m, &chat, before, limit),
+        Request::StartChat { user, offers } => chats::start_chat(m, &user, offers),
+        Request::AddDevices { chat, offers } => chats::add_devices(m, &chat, offers),
+        Request::RemoveDevices { chat, ids } => chats::remove_devices(m, &chat, &ids),
+        Request::UpdateKeys { chat } => chats::update_keys(m, &chat),
+        Request::WithdrawnMembers { chat } => chats::withdrawn_members(m, &chat),
+        Request::PendingCommits {} => chats::pending_commits(m),
+        Request::CommitAnswer {
+            chat,
+            accepted,
+            taken,
+        } => chats::commit_answer(m, &chat, accepted, taken.as_deref()),
+        Request::SendMessage { chat, text } => chats::send_message(m, &chat, &text),
+        Request::Receive { body } => chats::receive(m, &body),
+        Request::AcceptChat { chat, name } => chats::accept_request(m, &chat, &name),
+        Request::DeclineChat { chat } => chats::decline_request(m, &chat),
+        Request::KeyPackages { n, last_resort } => chats::key_packages(m, n, last_resort),
+        Request::ApplyContactList {
+            account_key,
+            device_list,
+        } => chats::apply_contact_list(m, &account_key, device_list),
+        _ => fail("bad_request"),
+    }
+}
+
+/// Open the chat database after the vault opened. The vault stays open
+/// even if this fails; the answer says `chats: false`.
+fn open_chats(state: &mut State, mut answer: Value) -> Value {
+    state.chats = None;
+    if let (Some(dir), Some(vault)) = (state.dir.as_ref(), state.vault.as_ref()) {
+        state.chats = chats::open(dir, vault).ok();
+    }
+    if answer["ok"] == true {
+        answer["chats"] = json!(state.chats.is_some());
+    }
+    answer
+}
+
+/// The account's own device list changed: the chats learn withdrawn
+/// devices from it.
+fn chats_follow_own_list(state: &mut State) {
+    if let (Some(vault), Some(m)) = (state.vault.as_ref(), state.chats.as_mut()) {
+        let _ = m.apply_device_list(&vault.device_list().list);
     }
 }
 
@@ -252,6 +410,7 @@ fn init(state: &mut State, dir: &str) -> Value {
     }
     if state.dir.as_ref() != Some(&dir) {
         state.vault = None;
+        state.chats = None;
         state.failures = 0;
         state.blocked_until = None;
     }
@@ -285,7 +444,7 @@ fn create(state: &mut State, password: &str, profile: Value) -> Value {
             let answer = unlocked_answer(&vault);
             state.vault = Some(vault);
             state.failures = 0;
-            answer
+            open_chats(state, answer)
         }
         Err(e) => vault_error(e),
     }
@@ -321,7 +480,7 @@ fn unlock(state: &mut State, password: &str) -> Value {
             state.vault = Some(vault);
             state.failures = 0;
             state.blocked_until = None;
-            answer
+            open_chats(state, answer)
         }
         Err(VaultError::WrongPassword) => {
             state.failures = state.failures.saturating_add(1);
@@ -340,10 +499,15 @@ fn save_profile(state: &mut State, profile: Value) -> Value {
     let Some(vault) = state.vault.as_mut() else {
         return fail("locked");
     };
+    let strict = chats::strict_of(&profile);
     if let Err(e) = vault.set_profile(profile) {
         return vault_error(e);
     }
-    seal_and_write(vault, &path)
+    let answer = seal_and_write(vault, &path);
+    if let Some(m) = state.chats.as_mut() {
+        let _ = m.set_strict(strict);
+    }
+    answer
 }
 
 fn change_password(state: &mut State, old: &str, new: &str) -> Value {
@@ -396,7 +560,9 @@ fn withdraw_device(state: &mut State, id: &str, password: &str) -> Value {
     if let Err(e) = vault.withdraw_device(id) {
         return vault_error(e);
     }
-    with_devices(seal_and_write(vault, &path), vault)
+    let answer = with_devices(seal_and_write(vault, &path), vault);
+    chats_follow_own_list(state);
+    answer
 }
 
 // ---------------------------------------------------------------- server (M3)
@@ -476,6 +642,7 @@ fn apply_device_list(state: &mut State, list: Value) -> Value {
         answer["changed"] = json!(true);
         answer["devices"] = devices(vault);
     }
+    chats_follow_own_list(state);
     answer
 }
 
@@ -591,7 +758,7 @@ fn pair_guest_finish(state: &mut State, bundle: &str, password: &str) -> Value {
             let answer = unlocked_answer(&vault);
             state.vault = Some(vault);
             state.failures = 0;
-            answer
+            open_chats(state, answer)
         }
         Err(e) => vault_error(e),
     }
@@ -658,8 +825,13 @@ fn delete_account(state: &mut State, password: &str) -> Value {
         return answer;
     }
     state.vault = None;
+    state.chats = None;
     if wipe_file(&path).is_err() {
         return fail("io");
+    }
+    // The chat database is useless without the vault's key; it goes too.
+    if let Some(dir) = state.dir.as_ref() {
+        chats::remove_files(dir);
     }
     json!({"ok": true})
 }
