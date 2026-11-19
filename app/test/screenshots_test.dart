@@ -65,11 +65,7 @@ Future<void> _start(WidgetTester tester, Size size, {FakeDoor? door, FakeServer?
   await tester.pumpWidget(
     RepaintBoundary(
       key: _shotKey,
-      child: TrairApp(
-        backend: DemoBackend(),
-        vault: TrairVault(d),
-        transport: server == null ? null : (_) => server,
-      ),
+      child: TrairApp(backend: DemoBackend(), vault: TrairVault(d), transport: server == null ? null : (_) => server),
     ),
   );
   await tester.pumpAndSettle();
