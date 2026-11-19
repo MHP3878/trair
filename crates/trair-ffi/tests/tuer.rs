@@ -16,6 +16,8 @@ use trair_ffi::api::{VAULT_FILE, handle, wait_after};
 
 static TURN: Mutex<()> = Mutex::new(());
 const PW: &str = "mein langes passwort";
+/// A wrong password for the emergency PIN tests.
+const NOT_PW: &str = "falsch-falsch"; // pragma: allowlist secret (Testpasswort)
 
 fn call(req: Value) -> Value {
     serde_json::from_slice(&handle(&serde_json::to_vec(&req).unwrap())).unwrap()
@@ -1101,4 +1103,206 @@ fn d18_qr_codes_come_from_the_core() {
     );
     #[cfg(not(windows))]
     assert_eq!(error(&call(json!({"op": "pick_image"}))), "unsupported");
+}
+
+fn files_left(dir: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n != trair_ffi::api::LOCK_FILE)
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn d19_a_pin_that_only_deletes_leaves_nothing() {
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let dir = fresh_dir();
+    call(json!({"op": "init", "dir": dir}));
+    call(json!({"op": "create", "password": PW, "profile": {"name": "Julian"}}));
+    // Every vault has the emergency files from the start, PIN or not.
+    assert!(files_left(&dir).contains(&"notfall.trair".to_string()));
+    assert!(files_left(&dir).contains(&"notfall-daten.trair".to_string()));
+    let pin = "loesch-pin-1";
+    let set = call(json!({"op": "notfall_add", "pin": pin, "password": PW, "after": "vanish"}));
+    assert_eq!(set["pins"].as_array().unwrap().len(), 1, "{set}");
+    assert_eq!(set["pins"][0]["after"], "vanish");
+    call(json!({"op": "lock"}));
+
+    let a = call(json!({"op": "unlock", "password": pin}));
+    assert_eq!(error(&a), "wrong_password", "looks like a typo");
+    assert_eq!(a["notfall"]["send"], false);
+    assert_eq!(a["notfall"]["after"], "vanish");
+    assert!(files_left(&dir).is_empty(), "left: {:?}", files_left(&dir));
+    assert_eq!(call(json!({"op": "status"}))["exists"], false);
+    assert_eq!(
+        error(&call(json!({"op": "unlock", "password": PW}))),
+        "no_vault"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn d20_a_pin_can_leave_an_account_that_only_says_wrong_password() {
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let dir = fresh_dir();
+    call(json!({"op": "init", "dir": dir}));
+    call(json!({"op": "create", "password": PW, "profile": {"name": "Julian"}}));
+    let pin = "falsch-pin-2";
+    call(json!({"op": "notfall_add", "pin": pin, "password": PW, "after": "wrong_password"}));
+    call(json!({"op": "lock"}));
+    let before = std::fs::read(dir.join(VAULT_FILE)).unwrap();
+    let a = call(json!({"op": "unlock", "password": pin}));
+    assert_eq!(error(&a), "wrong_password");
+    assert_eq!(a["notfall"]["after"], "wrong_password");
+    // A vault is still there (another one), but nothing opens it any more.
+    assert_eq!(call(json!({"op": "status"}))["exists"], true);
+    assert_ne!(std::fs::read(dir.join(VAULT_FILE)).unwrap(), before);
+    let real = call(json!({"op": "unlock", "password": PW}));
+    assert_eq!(error(&real), "wrong_password");
+    assert!(real.get("notfall").is_none());
+    let again = call(json!({"op": "unlock", "password": pin}));
+    assert!(
+        again.get("notfall").is_none(),
+        "the PIN went with the account"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn d21_a_pin_sends_its_message_then_everything_is_gone() {
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let dir = fresh_dir();
+    call(json!({"op": "init", "dir": dir}));
+    let created = call(
+        json!({"op": "create", "password": PW, "profile": {"server": "http://127.0.0.1:8471"}}),
+    );
+    let account_key = hex::decode(created["account_key"].as_str().unwrap()).unwrap();
+    let mut bob = Bob::new();
+    let my_code = call(json!({"op": "contact_code"}))["code"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    bob.m
+        .add_contact(&my_code, "Julian", 1_800_000_000)
+        .unwrap();
+    call(json!({"op": "add_contact", "code": bob.m.contact_code(), "name": "Bob"}));
+    let started = call(json!({"op": "start_chat", "user": "local-bob", "offers": bob.offer()}));
+    let chat = started["chat"]["id"].as_str().unwrap().to_string();
+    call(json!({"op": "commit_answer", "chat": chat, "accepted": true}));
+    bob.m
+        .receive(&unb64(&started["commit"]["welcome"]), 1_800_000_000)
+        .unwrap();
+
+    let short = call(
+        json!({"op": "notfall_add", "pin": "hilfe-3", "password": PW, "after": "vanish",
+        "chat": chat, "text": "Ich brauche Hilfe, ruf mich an."}),
+    );
+    assert_eq!(
+        error(&short),
+        "weak_sending_pin",
+        "a PIN that opens the keys is as long as a password"
+    );
+    let pin = "hilfe-pin-drei";
+    let set = call(
+        json!({"op": "notfall_add", "pin": pin, "password": PW, "after": "vanish",
+        "chat": chat, "text": "Ich brauche Hilfe, ruf mich an."}),
+    );
+    assert_eq!(set["pins"][0]["chat_name"], "Bob", "{set}");
+    call(json!({"op": "lock"}));
+
+    let a = call(json!({"op": "unlock", "password": pin}));
+    assert_eq!(error(&a), "wrong_password");
+    let n = &a["notfall"];
+    assert_eq!(n["send"], true, "{a}");
+    assert_eq!(n["server"], "http://127.0.0.1:8471");
+    assert_eq!(n["to"], json!([bob.m.device_id()]));
+    match bob.m.receive(&unb64(&n["body"]), 1_800_000_000).unwrap() {
+        trair_core::Incoming::Message(m) => assert_eq!(m.text, "Ich brauche Hilfe, ruf mich an."),
+        other => panic!("{other:?}"),
+    }
+    // Log in and delete on the server, with the account's own keys.
+    let user = n["user"].as_str().unwrap();
+    let del = call(json!({"op": "notfall_sign_deletion", "now": 1_800_000_000u64}));
+    let sig = hex::decode(del["signature"].as_str().unwrap()).unwrap();
+    assert!(
+        trair_core::proofs::verify_account_deletion(&account_key, user, 1_800_000_000, &sig)
+            .is_ok()
+    );
+    let login = call(json!({"op": "notfall_sign_login", "challenge": "ab".repeat(32)}));
+    assert!(login["signature"].is_string());
+    // Nothing else works in between.
+    assert_eq!(error(&call(json!({"op": "contacts"}))), "locked");
+
+    assert_eq!(call(json!({"op": "notfall_finish"}))["ok"], true);
+    assert!(files_left(&dir).is_empty(), "left: {:?}", files_left(&dir));
+    assert_eq!(error(&call(json!({"op": "notfall_finish"}))), "no_session");
+    assert_eq!(
+        error(&call(
+            json!({"op": "notfall_sign_login", "challenge": "ab"})
+        )),
+        "no_session"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn d22_setting_pins_needs_the_password_and_follows_the_rules() {
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let dir = fresh_dir();
+    call(json!({"op": "init", "dir": dir}));
+    call(json!({"op": "create", "password": PW, "profile": {}}));
+    let add = |pin: &str, pw: &str| {
+        call(json!({"op": "notfall_add", "pin": pin, "password": pw, "after": "vanish"}))
+    };
+    assert_eq!(
+        error(&add("pin-eins-1", "falsches passwort")),
+        "wrong_password"
+    );
+    assert_eq!(error(&add("kurz", PW)), "weak_pin");
+    assert_eq!(error(&add(PW, PW)), "pin_is_password");
+    assert_eq!(add("pin-eins-1", PW)["ok"], true);
+    assert_eq!(error(&add("pin-eins-1", PW)), "pin_taken");
+    assert_eq!(add("pin-zwei-2", PW)["ok"], true);
+    let bad_chat = call(
+        json!({"op": "notfall_add", "pin": "pin-fuenf-5-lang", "password": PW, "after": "vanish",
+        "chat": "nichts", "text": "x"}),
+    );
+    assert_eq!(error(&bad_chat), "unknown_chat");
+    let three = add("pin-drei-3", PW);
+    assert_eq!(three["pins"].as_array().unwrap().len(), 3);
+    assert_eq!(error(&add("pin-vier-4", PW)), "full");
+    // Removing one frees its slot; that PIN does nothing any more.
+    let id = three["pins"][0]["id"].as_str().unwrap().to_string();
+    assert_eq!(
+        error(&call(
+            json!({"op": "notfall_remove", "id": id, "password": NOT_PW})
+        )),
+        "wrong_password"
+    );
+    let left = call(json!({"op": "notfall_remove", "id": id, "password": PW}));
+    assert_eq!(left["pins"].as_array().unwrap().len(), 2);
+    call(json!({"op": "lock"}));
+    let a = call(json!({"op": "unlock", "password": "pin-eins-1"}));
+    assert!(
+        a.get("notfall").is_none(),
+        "removed PIN: just a wrong password"
+    );
+    assert_eq!(call(json!({"op": "unlock", "password": PW}))["ok"], true);
+    assert_eq!(
+        error(&call(json!({"op": "notfall_list", "password": NOT_PW}))),
+        "wrong_password"
+    );
+    let listed = call(json!({"op": "notfall_list", "password": PW}));
+    assert_eq!(listed["pins"].as_array().unwrap().len(), 2);
+    assert_eq!(listed["max"], 3);
+    // A new password that is one of the PINs is refused.
+    let same = call(json!({"op": "change_password", "old": PW, "new": "pin-zwei-2-lang"}));
+    assert_eq!(same["ok"], true, "{same}");
+    let clash =
+        call(json!({"op": "change_password", "old": "pin-zwei-2-lang", "new": "pin-drei-3"}));
+    assert_eq!(error(&clash), "pin_is_password");
+    call(json!({"op": "lock"}));
+    let _ = std::fs::remove_dir_all(&dir);
 }

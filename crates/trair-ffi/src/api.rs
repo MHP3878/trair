@@ -95,8 +95,10 @@ use trair_core::vault::{Vault, VaultError};
 use zeroize::Zeroizing;
 
 use crate::chats::{self, Offer};
+use crate::notfall;
 use crate::platform;
 use trair_core::Messenger;
+use trair_core::notfall::After;
 
 /// Name of the vault file in the data folder.
 pub const VAULT_FILE: &str = "vault.trair";
@@ -250,6 +252,27 @@ enum Request {
         account_key: String,
         device_list: Value,
     },
+    NotfallList {
+        password: Zeroizing<String>,
+    },
+    NotfallAdd {
+        pin: Zeroizing<String>,
+        password: Zeroizing<String>,
+        after: String,
+        chat: Option<String>,
+        text: Option<String>,
+    },
+    NotfallRemove {
+        id: String,
+        password: Zeroizing<String>,
+    },
+    NotfallSignLogin {
+        challenge: String,
+    },
+    NotfallSignDeletion {
+        now: u64,
+    },
+    NotfallFinish {},
 }
 
 #[derive(Default)]
@@ -265,6 +288,8 @@ struct State {
     /// Held while this process uses the data folder: a second Trair
     /// window cannot open the same account at the same time.
     folder_lock: Option<std::fs::File>,
+    /// An emergency PIN that sends is running.
+    notfall: Option<notfall::Session>,
 }
 
 static STATE: Mutex<State> = Mutex::new(State {
@@ -276,6 +301,7 @@ static STATE: Mutex<State> = Mutex::new(State {
     pair_guest: None,
     chats: None,
     folder_lock: None,
+    notfall: None,
 });
 
 /// Handle one request. Never panics on bad input; a poisoned lock (a
@@ -313,6 +339,7 @@ fn run(state: &mut State, req: Request) -> Value {
         Request::Lock {} => {
             state.vault = None;
             state.chats = None;
+            state.notfall = None;
             state.pair_host = None;
             json!({"ok": true})
         }
@@ -353,6 +380,30 @@ fn run(state: &mut State, req: Request) -> Value {
             state.pair_guest = None;
             json!({"ok": true})
         }
+        Request::NotfallList { password } => notfall_list(state, &password),
+        Request::NotfallAdd {
+            pin,
+            password,
+            after,
+            chat,
+            text,
+        } => notfall_add(state, &pin, &password, &after, chat, text),
+        Request::NotfallRemove { id, password } => notfall_remove(state, &id, &password),
+        Request::NotfallSignLogin { challenge } => match state.notfall.as_ref() {
+            Some(s) => s.sign_login(&challenge),
+            None => fail("no_session"),
+        },
+        Request::NotfallSignDeletion { now } => match state.notfall.as_ref() {
+            Some(s) => s.sign_deletion(now),
+            None => fail("no_session"),
+        },
+        Request::NotfallFinish {} => match (state.notfall.take(), state.dir.clone()) {
+            (Some(session), Some(dir)) => {
+                wipe_account(state, &dir, session.after());
+                json!({"ok": true})
+            }
+            _ => fail("no_session"),
+        },
         other => chat_op(state, other),
     }
 }
@@ -404,6 +455,10 @@ fn chat_op(state: &mut State, req: Request) -> Value {
 /// even if this fails; the answer says `chats: false`.
 fn open_chats(state: &mut State, mut answer: Value) -> Value {
     state.chats = None;
+    state.notfall = None;
+    if let (Some(dir), Some(vault)) = (state.dir.as_ref(), state.vault.as_ref()) {
+        let _ = notfall::refresh(dir, vault, read_vault, write_vault);
+    }
     if let (Some(dir), Some(vault)) = (state.dir.as_ref(), state.vault.as_ref()) {
         state.chats = chats::open(dir, vault).ok();
     }
@@ -438,6 +493,7 @@ fn init(state: &mut State, dir: &str) -> Value {
         };
         state.vault = None;
         state.chats = None;
+        state.notfall = None;
         state.pair_host = None;
         state.pair_guest = None;
         state.failures = 0;
@@ -560,10 +616,157 @@ fn unlock(state: &mut State, password: &str) -> Value {
             state.failures = state.failures.saturating_add(1);
             let wait = wait_after(state.failures);
             state.blocked_until = (!wait.is_zero()).then(|| Instant::now() + wait);
+            // Not the password: maybe an emergency PIN.
+            if let Some(dir) = state.dir.clone()
+                && let Some(opened) = notfall::try_pin(&dir, password, read_vault)
+            {
+                if let Some((session, info)) = notfall::prepare(&dir, &opened, read_vault) {
+                    state.notfall = Some(session);
+                    return notfall::answer(wait.as_secs(), info);
+                }
+                // Only delete (or sending is not possible): at once.
+                wipe_account(state, &dir, opened.action.after);
+                return notfall::answer(
+                    wait.as_secs(),
+                    notfall::info_without_send(opened.action.after),
+                );
+            }
             json!({"ok": false, "error": "wrong_password", "wait": wait.as_secs()})
         }
         Err(e) => vault_error(e),
     }
+}
+
+/// Delete the account on this device after an emergency PIN: vault, chat
+/// database and emergency files are overwritten and removed. With
+/// [`After::WrongPassword`] a new vault takes the old one's place that no
+/// password opens, so the account still shows and says "wrong password".
+fn wipe_account(state: &mut State, dir: &Path, after: After) {
+    state.vault = None;
+    state.chats = None;
+    state.notfall = None;
+    state.pair_host = None;
+    state.pair_guest = None;
+    let journal = format!("{}-journal", trair_core::chats::CHATS_FILE);
+    for name in [
+        VAULT_FILE,
+        trair_core::chats::CHATS_FILE,
+        journal.as_str(),
+        trair_core::notfall::FILE,
+        trair_core::notfall::DATA_FILE,
+    ] {
+        let p = dir.join(name);
+        if p.exists() && wipe_file(&p).is_err() {
+            let _ = std::fs::remove_file(&p);
+        }
+    }
+    if after == After::WrongPassword {
+        let mut r = [0u8; 24];
+        if getrandom::fill(&mut r).is_ok() {
+            let nobody_knows = Zeroizing::new(hex::encode(r));
+            if let Ok((decoy, file)) = Vault::create(&nobody_knows, json!({})) {
+                let _ = write_vault(&dir.join(VAULT_FILE), &file);
+                let _ = notfall::refresh(dir, &decoy, read_vault, write_vault);
+            }
+        }
+    }
+}
+
+/// The PINs are shown only after the password: someone at an open Trair
+/// cannot see whether any are set.
+fn notfall_list(state: &mut State, password: &str) -> Value {
+    let Some(path) = vault_path(state) else {
+        return fail("not_initialized");
+    };
+    if state.vault.is_none() {
+        return fail("locked");
+    }
+    if let Some(answer) = check_password(state, &path, password) {
+        return answer;
+    }
+    match state.vault.as_ref() {
+        Some(v) => notfall::list(v, state.chats.as_ref()),
+        None => fail("locked"),
+    }
+}
+
+fn notfall_add(
+    state: &mut State,
+    pin: &str,
+    password: &str,
+    after: &str,
+    chat: Option<String>,
+    text: Option<String>,
+) -> Value {
+    let (Some(path), Some(dir)) = (vault_path(state), state.dir.clone()) else {
+        return fail("not_initialized");
+    };
+    if state.vault.is_none() {
+        return fail("locked");
+    }
+    // Setting a PIN needs the password, like withdrawing a device.
+    if let Some(answer) = check_password(state, &path, password) {
+        return answer;
+    }
+    let Some(vault) = state.vault.as_mut() else {
+        return fail("locked");
+    };
+    match notfall::add(
+        &dir,
+        vault,
+        state.chats.as_ref(),
+        password,
+        pin,
+        after,
+        chat,
+        text,
+        read_vault,
+    ) {
+        Ok(slots) => store_pins(state, &path, &dir, slots),
+        Err(code) => fail(code),
+    }
+}
+
+fn notfall_remove(state: &mut State, id: &str, password: &str) -> Value {
+    let (Some(path), Some(dir)) = (vault_path(state), state.dir.clone()) else {
+        return fail("not_initialized");
+    };
+    if state.vault.is_none() {
+        return fail("locked");
+    }
+    if let Some(answer) = check_password(state, &path, password) {
+        return answer;
+    }
+    let Some(vault) = state.vault.as_mut() else {
+        return fail("locked");
+    };
+    match notfall::remove(&dir, vault, id, read_vault) {
+        Ok(slots) => store_pins(state, &path, &dir, slots),
+        Err(code) => fail(code),
+    }
+}
+
+/// The vault first (it lists the PINs), then the slots and the data file.
+fn store_pins(
+    state: &mut State,
+    path: &Path,
+    dir: &Path,
+    slots: trair_core::notfall::SlotFile,
+) -> Value {
+    let Some(vault) = state.vault.as_ref() else {
+        return fail("locked");
+    };
+    let answer = seal_and_write(vault, path);
+    if answer["ok"] != true {
+        return answer;
+    }
+    let Ok(bytes) = slots.to_bytes() else {
+        return fail("internal");
+    };
+    if write_vault(&dir.join(trair_core::notfall::FILE), &bytes).is_err() {
+        return fail("io");
+    }
+    notfall::list(vault, state.chats.as_ref())
 }
 
 fn save_profile(state: &mut State, profile: Value) -> Value {
@@ -598,6 +801,12 @@ fn change_password(state: &mut State, old: &str, new: &str) -> Value {
     let Some(vault) = state.vault.as_mut() else {
         return fail("locked");
     };
+    // A password that is also a PIN: the PIN would never fire again.
+    if let Some(dir) = state.dir.as_ref()
+        && notfall::try_pin(dir, new, read_vault).is_some()
+    {
+        return fail("pin_is_password");
+    }
     if let Err(e) = vault.change_password(new) {
         return vault_error(e);
     }
@@ -903,9 +1112,13 @@ fn delete_account(state: &mut State, password: &str) -> Value {
     if wipe_file(&path).is_err() {
         return fail("io");
     }
-    // The chat database is useless without the vault's key; it goes too.
+    // The chat database is useless without the vault's key; it goes too,
+    // and so do the emergency files.
     if let Some(dir) = state.dir.as_ref() {
         chats::remove_files(dir);
+        for name in [trair_core::notfall::FILE, trair_core::notfall::DATA_FILE] {
+            let _ = std::fs::remove_file(dir.join(name));
+        }
     }
     json!({"ok": true})
 }
@@ -994,7 +1207,14 @@ fn with_devices(mut answer: Value, vault: &Vault) -> Value {
 fn seal_and_write(vault: &Vault, path: &Path) -> Value {
     match vault.seal() {
         Ok(file) => match write_vault(path, &file) {
-            Ok(()) => json!({"ok": true}),
+            Ok(()) => {
+                // The emergency data follows the vault (keys, device list,
+                // server address).
+                if let Some(dir) = path.parent() {
+                    let _ = notfall::refresh(dir, vault, read_vault, write_vault);
+                }
+                json!({"ok": true})
+            }
             Err(()) => fail("io"),
         },
         Err(e) => vault_error(e),
