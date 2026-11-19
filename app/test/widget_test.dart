@@ -1418,7 +1418,9 @@ void main() {
 
     testWidgets('a member sees names and notes, has no admin buttons, and can leave', (tester) async {
       final (door, server) = await online(tester, setup: bobsBand);
-      server.deliver(FakeDoor.wire({'kind': 'group_message', 'chat': 'g9', 'user': 'local-bob', 'text': 'Probe um acht'}));
+      server.deliver(
+        FakeDoor.wire({'kind': 'group_message', 'chat': 'g9', 'user': 'local-bob', 'text': 'Probe um acht'}),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Band'));
       await tester.pumpAndSettle();

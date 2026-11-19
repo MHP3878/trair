@@ -19,6 +19,7 @@ import 'package:trair_app/core/vault.dart';
 import 'package:trair_app/main.dart';
 import 'package:trair_app/screens/chats_screen.dart';
 import 'package:trair_app/screens/lock_screen.dart';
+import 'package:trair_app/widgets/common.dart';
 
 import 'support/fake_door.dart';
 import 'support/fake_server.dart';
@@ -356,8 +357,22 @@ void main() {
     for (final (user, name) in const [('local-lena', 'Lena'), ('local-malik', 'Malik'), ('local-aylin', 'Aylin')]) {
       door.contacts.add({'user': user, 'name': name, 'fingerprint': 'ff' * 16, 'confirmed': false});
     }
-    door.peerProfiles.add({'user': 'local-lena', 'rev': 1, 'name': 'Lena M.', 'glow': 0xFF5EE6B0, 'about': '', 'badges': []});
-    door.peerProfiles.add({'user': 'local-malik', 'rev': 1, 'name': 'Malik', 'glow': 0xFFFFB547, 'about': '', 'badges': []});
+    door.peerProfiles.add({
+      'user': 'local-lena',
+      'rev': 1,
+      'name': 'Lena M.',
+      'glow': 0xFF5EE6B0,
+      'about': '',
+      'badges': [],
+    });
+    door.peerProfiles.add({
+      'user': 'local-malik',
+      'rev': 1,
+      'name': 'Malik',
+      'glow': 0xFFFFB547,
+      'about': '',
+      'badges': [],
+    });
     await _start(tester, const Size(1440, 900), door: door, server: server);
     await _unlock(tester);
     await tester.tap(find.text('Strenger Modus an'));

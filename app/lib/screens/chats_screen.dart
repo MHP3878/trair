@@ -451,10 +451,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                   width: 40,
                   height: 40,
                   alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: const Color(0x246E4FF6),
-                    borderRadius: BorderRadius.circular(13),
-                  ),
+                  decoration: BoxDecoration(color: const Color(0x246E4FF6), borderRadius: BorderRadius.circular(13)),
                   child: c.isJoin
                       ? const Icon(TrairIcons.clock, size: 18, color: TrairColors.accentLight)
                       : Text(
@@ -477,7 +474,11 @@ class _ChatsScreenState extends State<ChatsScreen> {
                             child: Text(
                               c.isJoin ? 'Gruppenbeitritt' : c.name,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: TrairColors.text),
+                              style: const TextStyle(
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.w600,
+                                color: TrairColors.text,
+                              ),
                             ),
                           ),
                           if (c.isGroup) ...[
@@ -663,9 +664,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
                   label: c.name,
                   height: 34,
                   kind: _groupPick.contains(c.user) ? PillKind.primary : PillKind.ghost,
-                  onPressed: () => setState(
-                    () => _groupPick.contains(c.user) ? _groupPick.remove(c.user) : _groupPick.add(c.user),
-                  ),
+                  onPressed: () =>
+                      setState(() => _groupPick.contains(c.user) ? _groupPick.remove(c.user) : _groupPick.add(c.user)),
                 ),
               ),
           ],
@@ -964,7 +964,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
   Widget _groupConversation(AppState state, RealChat chat) {
     final messages = state.realMessages[chat.id] ?? const <RealMessage>[];
     final info = state.groupInfos[chat.id];
-    final changed = info?.members.where((m) => m.keyChanged).map((m) => state.displayName(m.user)).toList() ?? const <String>[];
+    final changed =
+        info?.members.where((m) => m.keyChanged).map((m) => state.displayName(m.user)).toList() ?? const <String>[];
     final canWrite = chat.isGroup && chat.state == 'active' && state.chatsOnline;
     final admin = state.displayName(chat.peer);
     Future<void> send() async {
@@ -1322,7 +1323,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
                 child: Row(
                   children: [
                     const Expanded(
-                      child: Text('Dieses Gerät ist nicht mehr im Chat. Der Verlauf ist nur noch hier.', style: TrairText.muted),
+                      child: Text(
+                        'Dieses Gerät ist nicht mehr im Chat. Der Verlauf ist nur noch hier.',
+                        style: TrairText.muted,
+                      ),
                     ),
                     const SizedBox(width: 10),
                     PillButton(

@@ -26,7 +26,9 @@ String _two(int n) => n.toString().padLeft(2, '0');
 String whenText(int seconds) {
   final t = DateTime.fromMillisecondsSinceEpoch(seconds * 1000);
   final now = DateTime.now();
-  final day = t.day == now.day && t.month == now.month && t.year == now.year ? 'heute' : '${_two(t.day)}.${_two(t.month)}.';
+  final day = t.day == now.day && t.month == now.month && t.year == now.year
+      ? 'heute'
+      : '${_two(t.day)}.${_two(t.month)}.';
   return '$day um ${_two(t.hour)}:${_two(t.minute)}';
 }
 
@@ -98,7 +100,12 @@ Future<bool> confirmAction(BuildContext context, String title, String text, Stri
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  PillButton(label: 'Abbrechen', kind: PillKind.ghost, height: 38, onPressed: () => Navigator.pop(ctx, false)),
+                  PillButton(
+                    label: 'Abbrechen',
+                    kind: PillKind.ghost,
+                    height: 38,
+                    onPressed: () => Navigator.pop(ctx, false),
+                  ),
                   const SizedBox(width: 8),
                   PillButton(label: yes, kind: PillKind.danger, height: 38, onPressed: () => Navigator.pop(ctx, true)),
                 ],
@@ -168,7 +175,12 @@ class _GroupPanelState extends State<GroupPanel> {
     padding: const EdgeInsets.only(top: 18, bottom: 8),
     child: Text(
       text.toUpperCase(),
-      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 0.6, color: TrairColors.textMuted),
+      style: const TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.6,
+        color: TrairColors.textMuted,
+      ),
     ),
   );
 
@@ -313,7 +325,8 @@ class _GroupPanelState extends State<GroupPanel> {
                   label: c.name,
                   height: 32,
                   kind: _adding.contains(c.user) ? PillKind.primary : PillKind.ghost,
-                  onPressed: () => setState(() => _adding.contains(c.user) ? _adding.remove(c.user) : _adding.add(c.user)),
+                  onPressed: () =>
+                      setState(() => _adding.contains(c.user) ? _adding.remove(c.user) : _adding.add(c.user)),
                 ),
               ),
           ],
@@ -535,7 +548,12 @@ class _GroupPanelState extends State<GroupPanel> {
                   Row(
                     children: [
                       Expanded(
-                        child: PillField(controller: _name, hint: 'Gruppenname', height: 40, semanticLabel: 'Gruppenname'),
+                        child: PillField(
+                          controller: _name,
+                          hint: 'Gruppenname',
+                          height: 40,
+                          semanticLabel: 'Gruppenname',
+                        ),
                       ),
                       const SizedBox(width: 6),
                       RoundIconButton(
@@ -588,7 +606,9 @@ class _GroupPanelState extends State<GroupPanel> {
                   Padding(
                     padding: const EdgeInsets.only(top: 4),
                     child: Text(
-                      g.ends == g.myEnd ? 'Verschwindet ${whenText(g.myEnd!)}' : 'Für dich vorbei ${whenText(g.myEnd!)}',
+                      g.ends == g.myEnd
+                          ? 'Verschwindet ${whenText(g.myEnd!)}'
+                          : 'Für dich vorbei ${whenText(g.myEnd!)}',
                       style: const TextStyle(fontSize: 12, color: TrairColors.amber),
                     ),
                   ),

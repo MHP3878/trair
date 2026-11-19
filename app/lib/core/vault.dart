@@ -246,8 +246,7 @@ class TrairVault {
   Future<CoreAnswer> setAdmin(String chat, String user, bool admin) =>
       _call({'op': 'set_admin', 'chat': chat, 'user': user, 'admin': admin});
   Future<CoreAnswer> handOver(String chat, String user) => _call({'op': 'hand_over', 'chat': chat, 'user': user});
-  Future<CoreAnswer> renameGroup(String chat, String name) =>
-      _call({'op': 'rename_group', 'chat': chat, 'name': name});
+  Future<CoreAnswer> renameGroup(String chat, String name) => _call({'op': 'rename_group', 'chat': chat, 'name': name});
   Future<CoreAnswer> setGroupEnd(String chat, int? minutes) =>
       _call({'op': 'set_group_end', 'chat': chat, 'minutes': minutes});
   Future<CoreAnswer> closeGroup(String chat) => _call({'op': 'close_group', 'chat': chat});
@@ -267,8 +266,7 @@ class TrairVault {
       _call({'op': 'join_group', 'code': code, 'offers': offers});
   Future<CoreAnswer> joinMessage(String chat) => _call({'op': 'join_message', 'chat': chat});
   Future<CoreAnswer> joinRequests() => _call({'op': 'join_requests'});
-  Future<CoreAnswer> admit(String chat, List<Object?> offers) =>
-      _call({'op': 'admit', 'chat': chat, 'offers': offers});
+  Future<CoreAnswer> admit(String chat, List<Object?> offers) => _call({'op': 'admit', 'chat': chat, 'offers': offers});
   Future<CoreAnswer> closeJoin(String chat) => _call({'op': 'close_join', 'chat': chat});
   Future<CoreAnswer> denyJoin(String chat) => _call({'op': 'deny_join', 'chat': chat});
 

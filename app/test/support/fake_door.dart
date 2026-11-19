@@ -445,7 +445,10 @@ class FakeDoor implements CoreDoor {
       'chat': chat,
       'epoch': (g['epoch'] as int?) ?? 0,
       'commit': 'Y29tbWl0',
-      'to': [for (final u in _members(chat)) if (u != me) '$u:d-peer'],
+      'to': [
+        for (final u in _members(chat))
+          if (u != me) '$u:d-peer',
+      ],
       'welcome': welcomeTo.isEmpty ? null : 'd2VsY29tZQ==',
       'welcome_to': welcomeTo,
       'removed': removed,
@@ -581,16 +584,26 @@ class FakeDoor implements CoreDoor {
         final c = _chat(chatId);
         if (c == null || g == null) return _fail('rejected');
         if (_isAdmin(chatId) && _members(chatId).length > 1) return _fail('not_allowed');
-        final to = [for (final u in _members(chatId)) if (u != me) '$u:d-peer'];
+        final to = [
+          for (final u in _members(chatId))
+            if (u != me) '$u:d-peer',
+        ];
         if (c['state'] == 'request') {
           chats.remove(c);
           messages.remove(chatId);
         } else {
           c['state'] = 'left';
-          _note(chatId, {'event': 'left', 'users': [me]});
+          _note(chatId, {
+            'event': 'left',
+            'users': [me],
+          });
         }
         groups.remove(chatId);
-        return {'ok': true, 'body': wire({'kind': 'leave', 'chat': chatId}), 'to': to};
+        return {
+          'ok': true,
+          'body': wire({'kind': 'leave', 'chat': chatId}),
+          'to': to,
+        };
       case 'accept_group':
         final c = _chat(chatId);
         if (c == null || c['state'] != 'request') return _fail('rejected');
@@ -672,7 +685,11 @@ class FakeDoor implements CoreDoor {
         final user = req['user'] as String;
         if (_members(group).contains(user)) return _fail('rejected');
         _members(group).add(user);
-        _note(group, {'event': 'added', 'users': [user], 'by': me});
+        _note(group, {
+          'event': 'added',
+          'users': [user],
+          'by': me,
+        });
         _syncChat(group);
         return _groupCommit(group, welcomeTo: ['$user:d-peer']);
       case 'close_join':
@@ -680,7 +697,11 @@ class FakeDoor implements CoreDoor {
         return {'ok': true};
       case 'deny_join':
         joinRequests.remove(chatId);
-        return {'ok': true, 'body': wire({'kind': 'join_denied', 'chat': chatId}), 'to': ['x:d-peer']};
+        return {
+          'ok': true,
+          'body': wire({'kind': 'join_denied', 'chat': chatId}),
+          'to': ['x:d-peer'],
+        };
     }
     return null;
   }

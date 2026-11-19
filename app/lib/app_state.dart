@@ -141,7 +141,9 @@ class GroupInfo {
     me: j['me'] as String? ?? 'member',
     ends: (j['ends'] as num?)?.toInt(),
     myEnd: (j['my_end'] as num?)?.toInt(),
-    members: [for (final m in (j['members'] as List? ?? const []).cast<Map<String, Object?>>()) GroupMember.fromJson(m)],
+    members: [
+      for (final m in (j['members'] as List? ?? const []).cast<Map<String, Object?>>()) GroupMember.fromJson(m),
+    ],
   );
 
   final String name;
@@ -411,6 +413,7 @@ class AppState extends ChangeNotifier {
     final parts = contactCode.split(':');
     return parts.length > 1 ? parts[1] : '';
   }
+
   List<RealContact> contacts = const [];
   List<RealChat> realChats = const [];
   final Map<String, List<RealMessage>> realMessages = {};
@@ -1187,10 +1190,7 @@ class AppState extends ChangeNotifier {
     if (_needServer()) return null;
     final api = _api!;
     final own = await _ownUser();
-    final offers = [
-      for (final u in users) ...await api.claim(u),
-      if (own != null) ...await api.claim(own),
-    ];
+    final offers = [for (final u in users) ...await api.claim(u), if (own != null) ...await api.claim(own)];
     final made = await vault!.createGroup(name, minutes, offers);
     if (!made.ok) {
       chatMessage = _chatError(made);
@@ -1248,8 +1248,7 @@ class AppState extends ChangeNotifier {
   Future<bool> renameGroup(String chat, String name) => _groupChange(chat, () => vault!.renameGroup(chat, name));
 
   /// The group vanishes for everyone after [minutes]; null: it stays.
-  Future<bool> setGroupEnd(String chat, int? minutes) =>
-      _groupChange(chat, () => vault!.setGroupEnd(chat, minutes));
+  Future<bool> setGroupEnd(String chat, int? minutes) => _groupChange(chat, () => vault!.setGroupEnd(chat, minutes));
 
   /// Close the group for everyone (owner only).
   Future<bool> closeGroup(String chat) => _groupChange(chat, () => vault!.closeGroup(chat));
