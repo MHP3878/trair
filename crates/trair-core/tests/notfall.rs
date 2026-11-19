@@ -171,6 +171,8 @@ fn n03_emergency_data_carries_the_keys_but_not_the_rest() {
     )
     .unwrap();
     assert!(v.notfall_key().is_none());
+    let me = v.device().id.clone();
+    v.set_label(&me, "Laptop im Büro").unwrap();
     let key = v.ensure_notfall_key().unwrap();
     let sealed = notfall::seal_data(&key, &v.emergency_secrets().unwrap()).unwrap();
     assert!(
@@ -180,7 +182,7 @@ fn n03_emergency_data_carries_the_keys_but_not_the_rest() {
     let plain = notfall::open_data(&key, &sealed).unwrap();
     let text = String::from_utf8_lossy(&plain);
     assert!(
-        !text.contains("Julian") && !text.contains("picture"),
+        !text.contains("Julian") && !text.contains("picture") && !text.contains("Büro"),
         "only what sending needs"
     );
     let e = Vault::from_emergency_secrets(&plain).unwrap();
