@@ -1331,8 +1331,26 @@ fn d23_profiles_go_to_contacts_and_come_back_checked() {
     let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
     let dir = fresh_dir();
     call(json!({"op": "init", "dir": dir}));
-    call(json!({"op": "create", "password": PW, "profile": {}}));
+    let created = call(json!({"op": "create", "password": PW, "profile": {}}));
+    let my_key = hex::decode(created["account_key"].as_str().unwrap()).unwrap();
     let mut bob = Bob::new();
+    // Bob made Julian admin of his community: the badge travels along.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let bobs_community = Community::create("Bobs Runde", &bob.account).unwrap();
+    let admin = Badge::issue(
+        &bob.account,
+        BadgeKind::Admin,
+        &my_key,
+        Some(bobs_community.clone()),
+        now,
+        3600,
+        None,
+    )
+    .unwrap();
+    assert_eq!(call(json!({"op": "add_badge", "badge": admin}))["ok"], true);
     let my_code = call(json!({"op": "contact_code"}))["code"]
         .as_str()
         .unwrap()
@@ -1369,6 +1387,12 @@ fn d23_profiles_go_to_contacts_and_come_back_checked() {
     );
     let julian = bob.m.profiles().unwrap().remove(0);
     assert_eq!(julian.profile.name, "Julian");
+    assert_eq!(
+        julian.profile.badges.len(),
+        1,
+        "the vault's badge was added"
+    );
+    assert_eq!(julian.account_key, my_key);
     assert!(
         !String::from_utf8_lossy(julian.profile.picture.as_ref().unwrap()).contains("Standort")
     );
@@ -1380,11 +1404,7 @@ fn d23_profiles_go_to_contacts_and_come_back_checked() {
 
     // Bob's profile with one real badge (he founded a community) and one
     // he copied from someone else.
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    let community = Community::create("Bobs Runde", &bob.account).unwrap();
+    let community = bobs_community;
     let real = Badge::issue(
         &bob.account,
         BadgeKind::Founder,

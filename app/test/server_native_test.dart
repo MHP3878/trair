@@ -184,6 +184,13 @@ void main() {
       await until(() => julian.realMessages[chat]?.any((m) => m.text == 'Angekommen!') ?? false, 'Julian reads it');
       expect(julian.realMessages[chat]!.first.outgoing, isTrue);
 
+      // Each got the other's profile through the chat, checked by the core.
+      final bobUser2 = bob.contactCode.split(':')[1];
+      final julianUser2 = julian.contactCode.split(':')[1];
+      await until(() => bob.peerProfiles[julianUser2]?.name == 'Julian', "Bob gets Julian's profile");
+      await until(() => julian.peerProfiles[bobUser2]?.name == 'Bob', "Julian gets Bob's profile");
+      expect(bob.peerProfiles[julianUser2]!.glow, TrairColors.accentLight);
+
       // An emergency PIN: one message to Bob, then Julian's account is gone,
       // on this computer and on the server.
       final julianUser = julian.contactCode.split(':')[1];

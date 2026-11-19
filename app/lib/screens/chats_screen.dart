@@ -10,7 +10,9 @@ import '../app_state.dart';
 import '../core/clipboard.dart';
 import '../backend/backend.dart';
 import '../theme.dart';
+import '../widgets/badges.dart';
 import '../widgets/common.dart';
+import '../widgets/profile_popup.dart';
 import '../widgets/qr.dart';
 import '../widgets/trair_icons.dart';
 
@@ -337,8 +339,17 @@ class _ChatsScreenState extends State<ChatsScreen> {
     unawaited(state.loadMessages(id));
   }
 
+  /// A chat partner's name: yours for them, in the colour they chose.
+  TextStyle _peerName(PeerProfile? p, double size) => TextStyle(
+    fontSize: size,
+    fontWeight: FontWeight.w600,
+    color: p?.glow,
+    shadows: p?.glow == null ? null : glowShadows(p!.glow!, strength: 20),
+  );
+
   Widget _realRow(AppState state, RealChat c) {
     final active = c.id == _real && !_contactsOpen;
+    final p = state.profileFor(c);
     return Padding(
       padding: const EdgeInsets.only(bottom: 2),
       child: Material(
@@ -351,16 +362,27 @@ class _ChatsScreenState extends State<ChatsScreen> {
             padding: const EdgeInsets.fromLTRB(10, 10, 12, 10),
             child: Row(
               children: [
-                Avatar(initials: _initials(c.name), color: TrairColors.accentLight, size: 40),
+                Avatar(
+                  initials: _initials(c.name),
+                  color: p?.glow ?? TrairColors.accentLight,
+                  size: 40,
+                  picture: p?.picture,
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        c.name,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600),
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(c.name, overflow: TextOverflow.ellipsis, style: _peerName(p, 14.5)),
+                          ),
+                          if (p != null && p.badges.isNotEmpty) ...[
+                            const SizedBox(width: 6),
+                            BadgeRow(badges: p.badges, size: 14, spacing: 3),
+                          ],
+                        ],
                       ),
                       Text(
                         switch (c.state) {
@@ -583,6 +605,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
   Widget _realConversation(AppState state, RealChat chat) {
     final messages = state.realMessages[chat.id] ?? const <RealMessage>[];
+    final p = state.profileFor(chat);
+    final chosen = p == null || p.name.trim().toLowerCase() == chat.name.trim().toLowerCase() ? null : p.name;
     final canWrite = chat.state == 'active' && state.chatsOnline;
     Future<void> send() async {
       final text = _draft.text.trim();
@@ -599,17 +623,58 @@ class _ChatsScreenState extends State<ChatsScreen> {
             padding: const EdgeInsets.fromLTRB(20, 14, 16, 14),
             child: Row(
               children: [
-                Avatar(initials: _initials(chat.name), color: TrairColors.accentLight, size: 40),
-                const SizedBox(width: 14),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(chat.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-                      Text(chat.peer, style: TrairText.small),
-                    ],
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(16),
+                      // The card shows what they sent; nothing from strangers.
+                      onTap: p == null ? null : () => showProfileCard(context, ProfileView.peer(chat, p)),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Row(
+                          children: [
+                            Avatar(
+                              initials: _initials(chat.name),
+                              color: p?.glow ?? TrairColors.accentLight,
+                              size: 40,
+                              picture: p?.picture,
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Flexible(
+                                        child: Text(
+                                          chat.name,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: _peerName(p, 16),
+                                        ),
+                                      ),
+                                      if (p != null && p.badges.isNotEmpty) ...[
+                                        const SizedBox(width: 8),
+                                        BadgeRow(badges: p.badges, size: 16, spacing: 4),
+                                      ],
+                                    ],
+                                  ),
+                                  Text(
+                                    chosen == null ? chat.peer : 'nennt sich „$chosen“ · ${chat.peer}',
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TrairText.small,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
                 ),
+                const SizedBox(width: 12),
                 SecurityCapsule(
                   text: chat.isRequest ? 'Anfrage · unbekannter Schlüssel' : 'Echt Ende-zu-Ende verschlüsselt',
                   tone: chat.isRequest ? CapsuleTone.warn : CapsuleTone.safe,

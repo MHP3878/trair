@@ -102,6 +102,19 @@ class TrairVault {
   /// tool). The core checks it first.
   Future<CoreAnswer> addBadge(Object? badge) => _call({'op': 'add_badge', 'badge': badge});
 
+  // ------------------------------------------------- profiles to contacts
+
+  /// This account's profile, encrypted for every chat that lacks this
+  /// version. The core adds the vault's badges and checks everything.
+  Future<CoreAnswer> shareProfile(Map<String, Object?> profile, {required bool onlyContacts}) =>
+      _call({'op': 'share_profile', 'profile': profile, 'only_contacts': onlyContacts});
+
+  /// The server took the profile for [chat].
+  Future<CoreAnswer> profileSent(String chat, int rev) => _call({'op': 'profile_sent', 'chat': chat, 'rev': rev});
+
+  /// Profiles other accounts sent (badges checked by the core just now).
+  Future<CoreAnswer> profiles() => _call({'op': 'profiles'});
+
   // ---------------------------------------------------------- emergency PINs
 
   /// The emergency PINs. Only with the password: someone at an open

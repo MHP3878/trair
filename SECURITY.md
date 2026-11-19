@@ -351,6 +351,48 @@ Konten").
 - The core locks an account's folder for its process (`trair.lock`); a
   second Trair window cannot open the same account at the same time.
 
+## Profiles between contacts (M4, step 3)
+
+Code: `crates/trair-core/src/profiles.rs`, `share_profile`,
+`profile_sent` and `got_profile` in `crates/trair-core/src/chats.rs`,
+`profiles` in `crates/trair-ffi/src/chats.rs`; tests: `chats.rs` (three
+profile tests), `tuer.rs` (d23), `widget_test.dart` (group "Profile an
+Kontakte"), `server_native_test.dart` (two accounts get each other's
+profile through the real server).
+
+- **What travels:** the chosen name, glow colour, "about me", the profile
+  picture and the badges from the vault that are valid now. Inside the
+  normal MLS application message, so the server cannot tell a profile
+  from a chat message.
+- **Who gets it:** every active chat. With "Profil sichtbar für: Nur
+  Kontakte" only chats with contacts. A stranger's request gets nothing
+  until it is accepted. Each version once per chat; a chat is marked only
+  after the server took the message. A profile already sent cannot be
+  taken back by changing the setting later.
+- **What is kept:** only the chat partner's own profile (not one from
+  another member or from an own device), only if it passes the checks
+  and only if its version number is higher than the stored one. Stored in
+  the encrypted chat database.
+- **Checks:** name 1 to 64 characters without control characters, "about
+  me" up to 500, at most 16 badges of up to 2 KiB, no unknown fields. The
+  picture must be a PNG of at most 96 KiB and 128 × 128 pixels; it is
+  decoded with a 1 MiB memory limit and written anew as a plain RGBA PNG.
+  Hidden chunks (text, location, colour profiles) do not survive, and
+  the app's image decoder only ever sees a file the core wrote.
+- **Badges** are checked each time the profiles are listed (they
+  expire), against the account key the profile came with, which comes
+  from the sender's MLS certificate. A badge copied from someone else is
+  not shown.
+- **Names:** the name you gave a contact stays the big one; the name they
+  chose is shown smaller ("nennt sich …"), so nobody can pass as someone
+  else by renaming. A chosen name that looks official without a team
+  badge gets the warning.
+- **Requests:** a stranger's profile is stored, but the app shows no
+  picture, colour or chosen name until the request is accepted.
+- **Message count:** a profile is not counted in the "messages missing"
+  numbers, so a profile that never left the device does not look like a
+  lost message.
+
 ## Emergency PINs
 
 Code: `crates/trair-core/src/notfall.rs`, `crates/trair-ffi/src/

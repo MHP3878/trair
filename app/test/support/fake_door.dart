@@ -129,6 +129,17 @@ class FakeDoor implements CoreDoor {
   static String wire(Map<String, Object?> m) => base64.encode(utf8.encode(jsonEncode(m)));
   static Map<String, Object?> unwire(String b) => jsonDecode(utf8.decode(base64.decode(b))) as Map<String, Object?>;
 
+  // ----- profiles to contacts -----
+
+  /// Profiles of other accounts, as the core's `profiles` answers.
+  final List<Map<String, Object?>> peerProfiles = [];
+
+  /// The own profile as the app last shared it.
+  Map<String, Object?>? shared;
+
+  /// Version each chat already has.
+  final Map<String, int> profileSent = {};
+
   Map<String, Object?>? _chat(Object? id) => chats.where((c) => c['id'] == id).firstOrNull;
   bool _isContact(Object? user) => contacts.any((c) => c['user'] == user);
 
@@ -218,6 +229,16 @@ class FakeDoor implements CoreDoor {
         } on FormatException {
           return _fail('rejected');
         }
+        if (w['kind'] == 'profile') {
+          final user = w['user'] as String;
+          peerProfiles
+            ..removeWhere((p) => p['user'] == user)
+            ..add({...(w['profile'] as Map).cast<String, Object?>(), 'user': user});
+          return {
+            'ok': true,
+            'incoming': {'kind': 'profile', 'user': user},
+          };
+        }
         if (w['kind'] == 'chat') {
           final peer = w['peer'];
           chats.add({
@@ -239,6 +260,36 @@ class FakeDoor implements CoreDoor {
         return {
           'ok': true,
           'incoming': {'kind': 'message', 'message': m},
+        };
+      case 'share_profile':
+        final p = (r['profile'] as Map).cast<String, Object?>();
+        if ((p['name'] as String? ?? '').trim().isEmpty || (p['rev'] as num? ?? 0) <= 0) return _fail('rejected');
+        shared = p;
+        final rev = (p['rev'] as num).toInt();
+        return {
+          'ok': true,
+          'out': [
+            for (final c in chats)
+              if (c['state'] == 'active' &&
+                  (r['only_contacts'] != true || _isContact(c['peer'])) &&
+                  (profileSent[c['id']] ?? 0) < rev)
+                {
+                  'chat': c['id'],
+                  'rev': rev,
+                  'body': wire({'kind': 'profile', 'chat': c['id'], 'name': p['name']}),
+                  'to': ['${c['peer']}:d-peer'],
+                },
+          ],
+        };
+      case 'profile_sent':
+        final chat = r['chat'] as String;
+        final rev = (r['rev'] as num).toInt();
+        if (rev > (profileSent[chat] ?? 0)) profileSent[chat] = rev;
+        return {'ok': true};
+      case 'profiles':
+        return {
+          'ok': true,
+          'profiles': [for (final p in peerProfiles) Map.of(p)],
         };
       case 'accept_request':
         final chat = _chat(r['chat']);
@@ -444,7 +495,10 @@ class FakeDoor implements CoreDoor {
           'decline_request' ||
           'key_packages' ||
           'apply_contact_list' ||
-          'withdrawn_members':
+          'withdrawn_members' ||
+          'share_profile' ||
+          'profile_sent' ||
+          'profiles':
         return _chatOp(op, r);
       case 'notfall_list' ||
           'notfall_add' ||
