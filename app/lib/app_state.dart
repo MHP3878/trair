@@ -292,9 +292,7 @@ class AppState extends ChangeNotifier {
         ? await api.login(user, device, challenge.body['challenge'] as String, signed.raw['signature'] as String)
         : null;
     if (login == null || !login.ok) {
-      return _serverFailed(
-        'Der Server kennt dieses Gerät nicht. Wurde es von einem anderen Gerät entzogen?',
-      );
+      return _serverFailed('Der Server kennt dieses Gerät nicht. Wurde es von einem anderen Gerät entzogen?');
     }
     api.token = login.body['token'] as String;
     // Newer list on the server (another device paired or withdrew)?
@@ -356,10 +354,7 @@ class AppState extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    final progress = PairingProgress(
-      started.raw['code'] as String,
-      DateTime.now().add(const Duration(minutes: 10)),
-    );
+    final progress = PairingProgress(started.raw['code'] as String, DateTime.now().add(const Duration(minutes: 10)));
     pairing = progress;
     notifyListeners();
     final guest = await _poll(
@@ -430,13 +425,17 @@ class AppState extends ChangeNotifier {
     }
 
     final uri = parseServerUrl(url);
-    if (uri == null) return fail('bad_server', 'Bis TLS fertig ist, nur ein Server auf diesem PC: http://127.0.0.1:PORT');
+    if (uri == null)
+      return fail('bad_server', 'Bis TLS fertig ist, nur ein Server auf diesem PC: http://127.0.0.1:PORT');
     final api = ServerApi(_transport(uri));
     joinMessage = 'Verbinde …';
     notifyListeners();
     final started = await vault!.pairGuestStart(code);
     if (!started.ok) {
-      return fail(started.error, started.error == 'bad_code' ? 'Der Code passt nicht: Zahl und drei Wörter.' : vaultErrorText(started));
+      return fail(
+        started.error,
+        started.error == 'bad_code' ? 'Der Code passt nicht: Zahl und drei Wörter.' : vaultErrorText(started),
+      );
     }
     final channel = started.raw['channel'] as int;
     final hostHello = await api.getHostHello(channel, 25);
@@ -461,7 +460,10 @@ class AppState extends ChangeNotifier {
     notifyListeners();
     final answer = await vault!.pairGuestFinish(bundle.body['bundle'] as String, password);
     if (!answer.ok) {
-      return fail(answer.error, answer.error == 'pairing_failed' ? 'Die Antwort passte nicht zum Code.' : vaultErrorText(answer));
+      return fail(
+        answer.error,
+        answer.error == 'pairing_failed' ? 'Die Antwort passte nicht zum Code.' : vaultErrorText(answer),
+      );
     }
     joinMessage = '';
     serverUrl = url.trim();

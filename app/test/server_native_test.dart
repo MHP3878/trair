@@ -33,7 +33,12 @@ void main() {
 
       final port = 20000 + pid % 20000;
       final url = 'http://127.0.0.1:$port';
-      final server = await Process.start(serverBin!, ['--adresse', '127.0.0.1:$port', '--daten', '${tmp.path}/server.db']);
+      final server = await Process.start(serverBin!, [
+        '--adresse',
+        '127.0.0.1:$port',
+        '--daten',
+        '${tmp.path}/server.db',
+      ]);
       addTearDown(() async {
         server.kill();
         await server.exitCode;

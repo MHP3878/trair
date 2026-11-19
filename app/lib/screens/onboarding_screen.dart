@@ -80,24 +80,24 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       const Spacer(),
                       if (!_joining)
                         Semantics(
-                        label: 'Schritt $_step von 3',
-                        child: Row(
-                          children: [
-                            for (var i = 1; i <= 3; i++)
-                              AnimatedContainer(
-                                duration: const Duration(milliseconds: 350),
-                                curve: Curves.easeOutCubic,
-                                margin: const EdgeInsets.only(left: 6),
-                                width: i == _step ? 28 : 8,
-                                height: 8,
-                                decoration: BoxDecoration(
-                                  color: i <= _step ? const Color(0xFF8B70FF) : const Color(0x1FFFFFFF),
-                                  borderRadius: BorderRadius.circular(999),
+                          label: 'Schritt $_step von 3',
+                          child: Row(
+                            children: [
+                              for (var i = 1; i <= 3; i++)
+                                AnimatedContainer(
+                                  duration: const Duration(milliseconds: 350),
+                                  curve: Curves.easeOutCubic,
+                                  margin: const EdgeInsets.only(left: 6),
+                                  width: i == _step ? 28 : 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    color: i <= _step ? const Color(0xFF8B70FF) : const Color(0x1FFFFFFF),
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
                                 ),
-                              ),
-                          ],
+                            ],
+                          ),
                         ),
-                      ),
                     ],
                   ),
                   const SizedBox(height: 28),
@@ -208,10 +208,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ),
           ),
         const SizedBox(height: 8),
-        const Text(
-          'Jedes Gerät hat sein eigenes Passwort. Es verlässt dieses Gerät nie.',
-          style: TrairText.small,
-        ),
+        const Text('Jedes Gerät hat sein eigenes Passwort. Es verlässt dieses Gerät nie.', style: TrairText.small),
         if (state.joinMessage.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 14),

@@ -108,7 +108,13 @@ class FakeDoor implements CoreDoor {
         return {'ok': true, 'devices': _copy()};
       case 'server_identity':
         if (!unlocked) return _fail('locked');
-        return {'ok': true, 'user': 'local-julian', 'device': thisId, 'account_key': accountKey, 'device_list': _list()};
+        return {
+          'ok': true,
+          'user': 'local-julian',
+          'device': thisId,
+          'account_key': accountKey,
+          'device_list': _list(),
+        };
       case 'sign_login':
         if (!unlocked) return _fail('locked');
         return {'ok': true, 'signature': 'sig'};

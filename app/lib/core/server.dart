@@ -35,7 +35,13 @@ class HttpTransport implements ServerTransport {
   final Uri base;
 
   @override
-  Future<ServerReply> send(String method, String path, {String? token, Map<String, Object?>? body, int wait = 0}) async {
+  Future<ServerReply> send(
+    String method,
+    String path, {
+    String? token,
+    Map<String, Object?>? body,
+    int wait = 0,
+  }) async {
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
     try {
       final request = await client.openUrl(method, base.resolve(path));
@@ -54,8 +60,6 @@ class HttpTransport implements ServerTransport {
     } on IOException {
       return const ServerReply(0, {});
     } on TimeoutException {
-      return const ServerReply(0, {});
-    } on HttpException {
       return const ServerReply(0, {});
     } finally {
       client.close(force: true);

@@ -24,7 +24,13 @@ class FakeServer implements ServerTransport {
   Completer<void>? holdGuest;
 
   @override
-  Future<ServerReply> send(String method, String path, {String? token, Map<String, Object?>? body, int wait = 0}) async {
+  Future<ServerReply> send(
+    String method,
+    String path, {
+    String? token,
+    Map<String, Object?>? body,
+    int wait = 0,
+  }) async {
     calls.add('$method $path');
     if (!online) return const ServerReply(0, {});
     ServerReply ok([Map<String, Object?> extra = const {}]) => ServerReply(200, {'ok': true, ...extra});
