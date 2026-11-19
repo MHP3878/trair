@@ -23,6 +23,12 @@ fn secret(len: usize) -> String {
     b.iter().map(|x| (b'a' + x % 26) as char).collect()
 }
 
+fn random_key() -> [u8; 32] {
+    let mut k = [0u8; 32];
+    getrandom::fill(&mut k).unwrap();
+    k
+}
+
 fn action(after: After, message: Option<Message>) -> Action {
     Action {
         id: notfall::new_id().unwrap(),
@@ -36,7 +42,7 @@ fn n01_pins_open_their_slot_only_and_filler_looks_the_same() {
     let mut f = SlotFile::new(CHEAP).unwrap();
     let empty = f.to_bytes().unwrap();
     let (wipe, send) = (secret(8), secret(14));
-    let key = [7u8; 32];
+    let key = random_key();
     f.set(0, &wipe, action(After::Vanish, None), None, LIMITS)
         .unwrap();
     let msg = Message {
@@ -91,7 +97,7 @@ fn n02_a_cleared_slot_no_longer_answers_and_limits_hold() {
     f.clear(1).unwrap();
     assert!(f.open(&pin, LIMITS).unwrap().is_none());
     assert!(
-        f.set(1, "kurz", action(After::Vanish, None), None, LIMITS)
+        f.set(1, &secret(4), action(After::Vanish, None), None, LIMITS)
             .is_err(),
         "PIN too short"
     );
@@ -104,7 +110,7 @@ fn n02_a_cleared_slot_no_longer_answers_and_limits_hold() {
             1,
             &pin,
             action(After::Vanish, msg.clone()),
-            Some(&[1; 32]),
+            Some(&random_key()),
             LIMITS
         )
         .is_err(),
@@ -115,7 +121,7 @@ fn n02_a_cleared_slot_no_longer_answers_and_limits_hold() {
         1,
         &long_pin,
         action(After::Vanish, msg),
-        Some(&[1; 32]),
+        Some(&random_key()),
         LIMITS,
     )
     .unwrap();
@@ -134,7 +140,7 @@ fn n02_a_cleared_slot_no_longer_answers_and_limits_hold() {
             0,
             &long_pin,
             action(After::Vanish, Some(long)),
-            Some(&[1; 32]),
+            Some(&random_key()),
             LIMITS
         )
         .is_err()
@@ -176,7 +182,7 @@ fn n03_emergency_data_carries_the_keys_but_not_the_rest() {
     let key = v.ensure_notfall_key().unwrap();
     let sealed = notfall::seal_data(&key, &v.emergency_secrets().unwrap()).unwrap();
     assert!(
-        notfall::open_data(&[0; 32], &sealed).is_err(),
+        notfall::open_data(&random_key(), &sealed).is_err(),
         "another key opens nothing"
     );
     let plain = notfall::open_data(&key, &sealed).unwrap();

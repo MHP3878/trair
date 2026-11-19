@@ -205,7 +205,11 @@ void main() {
         'Bob gets the emergency message',
       );
       final left = Directory('${tmp.path}/julian').listSync().map((e) => e.uri.pathSegments.last).toList();
-      expect(left, everyElement(anyOf('trair.lock', 'karte.json', 'karte.png')), reason: 'nothing of the account: $left');
+      expect(
+        left,
+        everyElement(anyOf('trair.lock', 'karte.json', 'karte.png')),
+        reason: 'nothing of the account: $left',
+      );
       // Bob asks the server about Julian: unknown now.
       final me = await bobVault.serverIdentity();
       final asBob = ServerApi(HttpTransport(Uri.parse(url)));

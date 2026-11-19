@@ -116,14 +116,7 @@ class TrairVault {
     required String after,
     String? chat,
     String? text,
-  }) => _call({
-    'op': 'notfall_add',
-    'pin': pin,
-    'password': password,
-    'after': after,
-    'chat': ?chat,
-    'text': ?text,
-  });
+  }) => _call({'op': 'notfall_add', 'pin': pin, 'password': password, 'after': after, 'chat': ?chat, 'text': ?text});
 
   Future<CoreAnswer> notfallRemove(String id, String password) =>
       _call({'op': 'notfall_remove', 'id': id, 'password': password});

@@ -193,10 +193,10 @@ impl SlotFile {
     }
 
     fn salt(&self) -> VaultResult<[u8; SALT_LEN]> {
-        let mut s = [0u8; SALT_LEN];
-        hex::decode_to_slice(&self.salt, &mut s)
-            .map_err(|_| VaultError::Damaged("emergency file is not readable".into()))?;
-        Ok(s)
+        hex::decode(&self.salt)
+            .ok()
+            .and_then(|v| <[u8; SALT_LEN]>::try_from(v).ok())
+            .ok_or_else(|| VaultError::Damaged("emergency file is not readable".into()))
     }
 
     fn aad(&self, index: usize) -> Vec<u8> {
