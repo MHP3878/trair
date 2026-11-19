@@ -27,6 +27,12 @@ class FakeDoor implements CoreDoor {
   /// The account's devices, as the core reports them.
   final List<Map<String, Object?>> devices;
 
+  /// Own badges the fake core accepted.
+  final List<Map<String, Object?>> badges = [];
+
+  /// A made-up public account key (64 hex characters).
+  static final accountKey = 'ab' * 32;
+
   /// Null: there is no vault yet (first start).
   String? password;
   Map<String, Object?> profile;
@@ -92,6 +98,15 @@ class FakeDoor implements CoreDoor {
         if (!valid || device == null) return _fail('refused');
         device['label'] = label;
         return {'ok': true, 'devices': _copy()};
+      case 'add_badge':
+        if (!unlocked) return _fail('locked');
+        final b = r['badge'];
+        if (b is! Map<String, Object?> || b['claim'] is! Map<String, Object?>) return _fail('bad_request');
+        final claim = b['claim'] as Map<String, Object?>;
+        // The fake accepts badges made for its own account key only.
+        if (claim['holder'] != accountKey) return _fail('refused');
+        badges.add({'kind': claim['kind'], 'community': null, 'community_warning': false, 'expires': 0});
+        return {'ok': true, 'badges': [for (final x in badges) Map.of(x)]};
       case 'withdraw_device':
         if (!unlocked) return _fail('locked');
         if (r['password'] != password) return _wrong();
@@ -110,6 +125,8 @@ class FakeDoor implements CoreDoor {
     'device': thisId,
     'devices': _copy(),
     'upgraded': false,
+    'account_key': accountKey,
+    'badges': [for (final x in badges) Map.of(x)],
   };
 
   List<Map<String, Object?>> _copy() => [for (final d in devices) Map.of(d)];

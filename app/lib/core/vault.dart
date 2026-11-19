@@ -3,6 +3,7 @@
 
 import 'dart:io';
 
+import '../backend/backend.dart';
 import 'door.dart';
 
 /// Answer of the core, see crates/trair-ffi/src/api.rs.
@@ -33,6 +34,16 @@ class CoreAnswer {
 
   /// True once, when a vault from before devices existed was upgraded.
   bool get upgraded => raw['upgraded'] == true;
+
+  /// The public account key in hex (64 characters). Not secret.
+  String get accountKey => raw['account_key'] as String? ?? '';
+
+  /// The own badges the core checked (after unlock and add_badge).
+  List<ProfileBadge> get badges {
+    final list = raw['badges'];
+    if (list is! List<Object?>) return const [];
+    return list.whereType<Map<String, Object?>>().map(ProfileBadge.fromJson).nonNulls.toList();
+  }
 }
 
 /// One device of the account. The name is only stored on this device.
@@ -86,6 +97,10 @@ class TrairVault {
   /// Withdraw another device of the account for good. Needs the password.
   Future<CoreAnswer> withdrawDevice(String id, String password) =>
       _call({'op': 'withdraw_device', 'id': id, 'password': password});
+
+  /// Keep a signed badge for the own account (for example from the team
+  /// tool). The core checks it first.
+  Future<CoreAnswer> addBadge(Object? badge) => _call({'op': 'add_badge', 'badge': badge});
 
   /// Check the badges of a profile in the core. Only valid ones come back
   /// (`badges`), plus `refused` and `name_warning`. Works while locked.

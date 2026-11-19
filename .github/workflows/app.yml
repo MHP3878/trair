@@ -112,9 +112,9 @@ jobs:
           if (-not (Select-String -Path windows/CMakeLists.txt -Pattern 'BINARY_NAME "Trair"' -Quiet)) { throw "Dateiname nicht gesetzt" }
       # The core's Windows parts (DPAPI, screenshot block) are tested here,
       # on Windows, then the DLL is built and placed next to Trair.exe.
-      - name: Sicherheitskern testen (Windows)
+      - name: Sicherheitskern und Team-Werkzeug testen (Windows)
         working-directory: .
-        run: cargo test -p trair-ffi --locked
+        run: cargo test -p trair-ffi -p trair-team --locked
       - name: Sicherheitskern bauen
         working-directory: .
         run: cargo build -p trair-ffi --release --locked
@@ -135,5 +135,16 @@ jobs:
         with:
           name: Trair-Windows-Demo
           path: app/build/windows/x64/runner/Release/
+          retention-days: 30
+          if-no-files-found: error
+      # The team tool for the project owner: makes the team key on their own
+      # computer. The key itself never comes near CI.
+      - name: Team-Werkzeug bauen
+        working-directory: .
+        run: cargo build -p trair-team --release --locked
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Trair-Team-Werkzeug
+          path: target/release/trair-team.exe
           retention-days: 30
           if-no-files-found: error

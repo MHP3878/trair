@@ -5,8 +5,8 @@
 //! badge they should not have.
 
 use trair_core::badges::{
-    Badge, BadgeKind, Community, MAX_BADGES, MAX_LIFETIME, TEAM_KEYS, claims_authority,
-    name_needs_warning, verify, verify_all,
+    Badge, BadgeKind, Community, MAX_BADGES, MAX_LIFETIME, MAX_TEAM_LIFETIME, TEAM_KEYS,
+    claims_authority, name_needs_warning, verify, verify_all,
 };
 use trair_core::{Account, VerifiedBadge};
 
@@ -521,4 +521,51 @@ fn a11_strange_input_is_refused_not_crashed() {
     let text = serde_json::to_string(&admin_badge).unwrap();
     let back: Badge = serde_json::from_str(&text).unwrap();
     assert!(verify(&back, s.admin.public_key(), NOW, TEAM_KEYS).is_ok());
+}
+
+#[test]
+fn a12_team_badges_last_a_year_roles_only_two_weeks() {
+    let team = account("trair-team");
+    let julian = account("julian");
+    let team_key = hex_key(&team);
+    let pinned = [team_key.as_str()];
+    let year = Badge::issue(
+        &team,
+        BadgeKind::Team,
+        julian.public_key(),
+        None,
+        NOW,
+        365 * DAY,
+        None,
+    )
+    .unwrap();
+    assert!(verify(&year, julian.public_key(), NOW + 364 * DAY, &pinned).is_ok());
+    assert!(
+        verify(&year, julian.public_key(), NOW + 365 * DAY, &pinned).is_err(),
+        "runs out"
+    );
+    assert!(
+        Badge::issue(
+            &team,
+            BadgeKind::Team,
+            julian.public_key(),
+            None,
+            NOW,
+            MAX_TEAM_LIFETIME + 1,
+            None
+        )
+        .is_err()
+    );
+    // A founder cannot hand out a year-long admin badge.
+    let s = setup();
+    let long = Badge::issue(
+        &s.founder,
+        BadgeKind::Admin,
+        s.admin.public_key(),
+        Some(s.community.clone()),
+        NOW,
+        15 * DAY,
+        None,
+    );
+    assert!(long.is_err());
 }

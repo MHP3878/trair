@@ -19,7 +19,10 @@
 //! | `rename_device`   | `id`, `label`          | `devices`                        |
 //! | `withdraw_device` | `id`, `password`       | `devices`                        |
 //! | `verify_badges`   | `holder`, `name`, `badges` | `badges`, `refused`, `name_warning` |
+//! | `add_badge`       | `badge`                | `badges`                         |
 //!
+//! `account_key` is the public account key in hex (for the team tool);
+//! `badges` are the own badges that are valid now.
 //! `device` is this device's id; `devices` lists the account's devices as
 //! `{id, label, fingerprint, this}` (label may be null). `upgraded` is true
 //! once, when a vault from Paket 1 got its device key and was stored again.
@@ -98,6 +101,9 @@ enum Request {
         name: String,
         badges: Vec<Value>,
     },
+    AddBadge {
+        badge: Value,
+    },
 }
 
 #[derive(Default)]
@@ -164,6 +170,7 @@ fn run(state: &mut State, req: Request) -> Value {
             name,
             badges,
         } => verify_badges(&holder, &name, badges),
+        Request::AddBadge { badge } => add_badge(state, badge),
     }
 }
 
@@ -324,6 +331,36 @@ fn withdraw_device(state: &mut State, id: &str, password: &str) -> Value {
     with_devices(seal_and_write(vault, &path), vault)
 }
 
+fn add_badge(state: &mut State, badge: Value) -> Value {
+    let Some(path) = vault_path(state) else {
+        return fail("not_initialized");
+    };
+    let Some(vault) = state.vault.as_mut() else {
+        return fail("locked");
+    };
+    let Ok(badge) = serde_json::from_value::<Badge>(badge) else {
+        return fail("bad_request");
+    };
+    if let Err(e) = vault.add_badge(badge, unix_now(), badges::TEAM_KEYS) {
+        return vault_error(e);
+    }
+    let mut answer = seal_and_write(vault, &path);
+    if answer["ok"] == true {
+        answer["badges"] = own_badges(vault);
+    }
+    answer
+}
+
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+fn own_badges(vault: &Vault) -> Value {
+    json!(vault.verified_badges(unix_now(), badges::TEAM_KEYS))
+}
+
 fn verify_badges(holder: &str, name: &str, badges: Vec<Value>) -> Value {
     let Ok(holder) = hex::decode(holder) else {
         return fail("bad_request");
@@ -338,10 +375,7 @@ fn verify_badges(holder: &str, name: &str, badges: Vec<Value>) -> Value {
         .filter_map(|b| serde_json::from_value(b).ok())
         .collect();
     let unreadable = total - parsed.len();
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs());
-    let (shown, refused) = badges::verify_all(&parsed, &holder, now, badges::TEAM_KEYS);
+    let (shown, refused) = badges::verify_all(&parsed, &holder, unix_now(), badges::TEAM_KEYS);
     json!({
         "ok": true,
         "name_warning": badges::name_needs_warning(name, &shown),
@@ -414,6 +448,8 @@ fn unlocked_answer(vault: &Vault) -> Value {
         "profile": vault.profile(),
         "device": vault.device().id,
         "devices": devices(vault),
+        "account_key": hex::encode(vault.account().public_key()),
+        "badges": own_badges(vault),
     })
 }
 

@@ -17,11 +17,14 @@
 //!   their own admin badge (one step, never longer chains).
 //!
 //! Every badge names the holder's account key, so it cannot be copied to
-//! another profile, and it expires after at most [`MAX_LIFETIME`]. The
-//! server will renew badges in the background (M3).
+//! another profile, and it expires: community roles after at most
+//! [`MAX_LIFETIME`] (the server renews them in the background, M3), team
+//! badges after at most [`MAX_TEAM_LIFETIME`] (decision of 19.11.2026:
+//! the team key stays offline and signs once a year).
 //!
 //! Limits, said openly: a removed admin keeps the badge until it expires
-//! (at most 14 days). Community names are chosen by their founders;
+//! (at most 14 days); a team badge cannot be taken back before it expires
+//! except by removing the team key from the app. Community names are chosen by their founders;
 //! names that look official get a warning ([`claims_authority`]).
 
 use openmls_rust_crypto::OpenMlsRustCrypto;
@@ -39,8 +42,11 @@ use crate::error::{CoreError, Result, internal};
 /// is ever added here.
 pub const TEAM_KEYS: &[&str] = &[];
 
-/// Longest validity of a badge, in seconds (14 days).
+/// Longest validity of a founder, admin or moderator badge, in seconds
+/// (14 days).
 pub const MAX_LIFETIME: u64 = 14 * 24 * 3600;
+/// Longest validity of a team badge, in seconds (366 days).
+pub const MAX_TEAM_LIFETIME: u64 = 366 * 24 * 3600;
 /// Clocks may differ by this much (5 minutes).
 pub const CLOCK_SKEW: u64 = 5 * 60;
 /// Most badges one profile may carry; more are refused.
@@ -118,6 +124,14 @@ fn community_id(founder_hex: &str, nonce_hex: &str) -> String {
     format!("c-{}", hex::encode(&h.finalize()[..16]))
 }
 
+/// Longest validity for a kind of badge, in seconds.
+pub fn max_lifetime(kind: BadgeKind) -> u64 {
+    match kind {
+        BadgeKind::Team => MAX_TEAM_LIFETIME,
+        BadgeKind::Founder | BadgeKind::Admin | BadgeKind::Mod => MAX_LIFETIME,
+    }
+}
+
 /// Community names: 1 to 40 characters, no control characters, no
 /// spaces at either end.
 pub fn validate_community_name(name: &str) -> Result<()> {
@@ -173,7 +187,7 @@ pub struct Badge {
 
 impl Badge {
     /// Sign a badge for the account key `holder`, valid from `now` for
-    /// `lifetime` seconds (at most [`MAX_LIFETIME`]).
+    /// `lifetime` seconds (at most [`max_lifetime`] of its kind).
     pub fn issue(
         issuer: &Account,
         kind: BadgeKind,
@@ -183,7 +197,7 @@ impl Badge {
         lifetime: u64,
         via: Option<Badge>,
     ) -> Result<Badge> {
-        if lifetime == 0 || lifetime > MAX_LIFETIME {
+        if lifetime == 0 || lifetime > max_lifetime(kind) {
             return Err(rejected("badge lifetime"));
         }
         let claim = BadgeClaim {
@@ -245,7 +259,7 @@ fn verify_inner(
     if c.holder != holder {
         return Err(rejected("badge belongs to another account"));
     }
-    if c.expires <= c.issued || c.expires - c.issued > MAX_LIFETIME {
+    if c.expires <= c.issued || c.expires - c.issued > max_lifetime(c.kind) {
         return Err(rejected("badge lifetime"));
     }
     if c.issued > now.saturating_add(CLOCK_SKEW) || now >= c.expires {

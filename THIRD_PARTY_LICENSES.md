@@ -160,6 +160,8 @@ This file lists every third-party component and its license.
 | regex-automata | 0.4.19 | MIT OR Apache-2.0 | https://github.com/rust-lang/regex |
 | regex-syntax | 0.8.12 | MIT OR Apache-2.0 | https://github.com/rust-lang/regex |
 | rfc6979 | 0.4.0 | Apache-2.0 OR MIT | https://github.com/RustCrypto/signatures/tree/master/rfc6979 |
+| rpassword | 7.5.5 | Apache-2.0 | https://github.com/conradkleinespel/rpassword |
+| rtoolbox | 0.0.6 | Apache-2.0 | https://github.com/conradkleinespel/rtoolbox |
 | rustc-hash | 2.1.3 | Apache-2.0 OR MIT | https://github.com/rust-lang/rustc-hash |
 | rustc_version | 0.4.1 | MIT OR Apache-2.0 | https://github.com/djc/rustc-version-rs |
 | rustversion | 1.0.23 | MIT OR Apache-2.0 | https://github.com/dtolnay/rustversion |

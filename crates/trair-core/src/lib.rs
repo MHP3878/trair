@@ -16,6 +16,7 @@ pub mod keypackages;
 pub mod mls;
 pub mod pairing;
 pub mod policy;
+pub mod teamkey;
 pub mod vault;
 
 pub use account::{Account, DeviceCertificate, Fingerprint};

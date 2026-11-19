@@ -38,6 +38,7 @@ use thiserror::Error;
 use zeroize::Zeroizing;
 
 use crate::account::Account;
+use crate::badges::{self, Badge, VerifiedBadge};
 use crate::devices::{DeviceIdentity, SignedDeviceList, validate_label};
 
 /// First bytes of every vault file.
@@ -48,9 +49,9 @@ pub const MIN_PASSWORD_CHARS: usize = 12;
 pub const MAX_PROFILE_BYTES: usize = 64 * 1024;
 
 const KDF_ARGON2ID: u8 = 1;
-const SALT_LEN: usize = 16;
-const NONCE_LEN: usize = 24;
-const HEADER_LEN: usize = 8 + 1 + 12 + SALT_LEN + NONCE_LEN;
+pub(crate) const SALT_LEN: usize = 16;
+pub(crate) const NONCE_LEN: usize = 24;
+pub(crate) const HEADER_LEN: usize = 8 + 1 + 12 + SALT_LEN + NONCE_LEN;
 const TAG_LEN: usize = 16;
 /// Content version. 1 = Paket 1 (account only), 2 = with this device's
 /// key and the signed device list (M2). Version 1 is upgraded on opening.
@@ -131,7 +132,7 @@ impl Limits {
         },
     };
 
-    fn check(&self, k: KdfParams) -> VaultResult<()> {
+    pub(crate) fn check(&self, k: KdfParams) -> VaultResult<()> {
         let ok = (self.min.m_kib..=self.max.m_kib).contains(&k.m_kib)
             && (self.min.t..=self.max.t).contains(&k.t)
             && (self.min.p..=self.max.p).contains(&k.p);
@@ -158,6 +159,7 @@ struct ContentRef<'a> {
     list: &'a SignedDeviceList,
     labels: &'a BTreeMap<String, String>,
     profile: &'a Value,
+    badges: &'a [Badge],
 }
 
 #[derive(Deserialize)]
@@ -172,6 +174,9 @@ struct Content {
     #[serde(default)]
     labels: BTreeMap<String, String>,
     profile: Value,
+    // Missing before own badges were stored (19.11.2026).
+    #[serde(default)]
+    badges: Vec<Badge>,
 }
 
 /// What a new device receives when it is paired: everything to build its
@@ -197,6 +202,7 @@ pub struct Vault {
     list: SignedDeviceList,
     labels: BTreeMap<String, String>,
     profile: Value,
+    badges: Vec<Badge>,
     migrated: bool,
 }
 
@@ -265,6 +271,7 @@ impl Vault {
             list: joined.list,
             labels,
             profile: joined.profile,
+            badges: Vec::new(),
             migrated: false,
         };
         let file = vault.seal()?;
@@ -278,7 +285,7 @@ impl Vault {
 
     /// Like [`Vault::open`] with other limits. For tests.
     pub fn open_with_limits(file: &[u8], password: &str, limits: Limits) -> VaultResult<Vault> {
-        let header = Header::parse(file)?;
+        let header = Header::parse(file, MAGIC)?;
         limits.check(header.params)?;
         let key = derive(password, &header.salt, header.params)?;
         let cipher = XChaCha20Poly1305::new(key.as_slice().into());
@@ -326,6 +333,7 @@ impl Vault {
             list,
             labels,
             profile: content.profile,
+            badges: content.badges,
             migrated,
         })
     }
@@ -341,6 +349,7 @@ impl Vault {
             list: &self.list,
             labels: &self.labels,
             profile: &self.profile,
+            badges: &self.badges,
         };
         let plain = Zeroizing::new(serde_json::to_vec(&content).map_err(internal)?);
         let nonce = random::<NONCE_LEN>()?;
@@ -349,7 +358,7 @@ impl Vault {
             salt: self.salt,
             nonce,
         }
-        .to_bytes();
+        .to_bytes(MAGIC);
         let cipher = XChaCha20Poly1305::new(self.key.as_slice().into());
         let sealed = cipher
             .encrypt(
@@ -435,6 +444,49 @@ impl Vault {
         Ok(())
     }
 
+    /// The own badges, signed, as stored. See [`Vault::verified_badges`].
+    pub fn badges(&self) -> &[Badge] {
+        &self.badges
+    }
+
+    /// The own badges that are valid at unix time `now`.
+    pub fn verified_badges(&self, now: u64, team_keys: &[&str]) -> Vec<VerifiedBadge> {
+        badges::verify_all(&self.badges, self.account.public_key(), now, team_keys).0
+    }
+
+    /// Keep a badge for this account (for example a team badge from the
+    /// team tool). It must be valid now; it replaces an older badge of
+    /// the same kind and community. Call [`Vault::seal`] afterwards.
+    pub fn add_badge(
+        &mut self,
+        badge: Badge,
+        now: u64,
+        team_keys: &[&str],
+    ) -> VaultResult<VerifiedBadge> {
+        let verified = badges::verify(&badge, self.account.public_key(), now, team_keys)
+            .map_err(|e| VaultError::Refused(e.to_string()))?;
+        let same = |b: &Badge| {
+            b.claim.kind == badge.claim.kind
+                && b.claim.community.as_ref().map(|c| &c.id)
+                    == badge.claim.community.as_ref().map(|c| &c.id)
+        };
+        // Expired badges are dropped on the way.
+        self.badges.retain(|b| {
+            !same(b) && badges::verify(b, self.account.public_key(), now, team_keys).is_ok()
+        });
+        if self.badges.len() >= badges::MAX_BADGES {
+            return Err(VaultError::Refused("too many badges".into()));
+        }
+        self.badges.push(badge);
+        self.badges.sort_by_key(|b| {
+            (
+                b.claim.kind,
+                b.claim.community.as_ref().map(|c| c.id.clone()),
+            )
+        });
+        Ok(verified)
+    }
+
     /// Replace the profile. Call [`Vault::seal`] afterwards to store it.
     pub fn set_profile(&mut self, profile: Value) -> VaultResult<()> {
         check_profile(&profile)?;
@@ -463,19 +515,21 @@ impl Vault {
     }
 }
 
-struct Header {
-    params: KdfParams,
-    salt: [u8; SALT_LEN],
-    nonce: [u8; NONCE_LEN],
+/// The clear header in front of every sealed file: magic, Argon2id
+/// settings, salt and nonce. It is authenticated as associated data.
+pub(crate) struct Header {
+    pub(crate) params: KdfParams,
+    pub(crate) salt: [u8; SALT_LEN],
+    pub(crate) nonce: [u8; NONCE_LEN],
 }
 
 impl Header {
-    fn parse(file: &[u8]) -> VaultResult<Header> {
+    pub(crate) fn parse(file: &[u8], magic: &[u8; 8]) -> VaultResult<Header> {
         if file.len() < HEADER_LEN + TAG_LEN {
             return Err(VaultError::Damaged("file is too short".into()));
         }
-        if &file[..8] != MAGIC {
-            return Err(VaultError::Damaged("not a Trair vault".into()));
+        if &file[..8] != magic {
+            return Err(VaultError::Damaged("not a Trair file of this kind".into()));
         }
         if file[8] != KDF_ARGON2ID {
             return Err(VaultError::Damaged(format!(
@@ -500,9 +554,9 @@ impl Header {
         })
     }
 
-    fn to_bytes(&self) -> Vec<u8> {
+    pub(crate) fn to_bytes(&self, magic: &[u8; 8]) -> Vec<u8> {
         let mut h = Vec::with_capacity(HEADER_LEN);
-        h.extend_from_slice(MAGIC);
+        h.extend_from_slice(magic);
         h.push(KDF_ARGON2ID);
         h.extend_from_slice(&self.params.m_kib.to_le_bytes());
         h.extend_from_slice(&self.params.t.to_le_bytes());
@@ -546,7 +600,11 @@ fn check_profile(profile: &Value) -> VaultResult<()> {
     Ok(())
 }
 
-fn derive(password: &str, salt: &[u8], k: KdfParams) -> VaultResult<Zeroizing<[u8; 32]>> {
+pub(crate) fn derive(
+    password: &str,
+    salt: &[u8],
+    k: KdfParams,
+) -> VaultResult<Zeroizing<[u8; 32]>> {
     let params = Params::new(k.m_kib, k.t, k.p, Some(32))
         .map_err(|e| VaultError::Refused(format!("argon2id: {e}")))?;
     let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
@@ -557,12 +615,12 @@ fn derive(password: &str, salt: &[u8], k: KdfParams) -> VaultResult<Zeroizing<[u
     Ok(key)
 }
 
-fn random<const N: usize>() -> VaultResult<[u8; N]> {
+pub(crate) fn random<const N: usize>() -> VaultResult<[u8; N]> {
     let mut b = [0u8; N];
     getrandom::fill(&mut b).map_err(internal)?;
     Ok(b)
 }
 
-fn internal<E: std::fmt::Debug>(e: E) -> VaultError {
+pub(crate) fn internal<E: std::fmt::Debug>(e: E) -> VaultError {
     VaultError::Internal(format!("{e:?}"))
 }

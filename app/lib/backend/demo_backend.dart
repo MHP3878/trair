@@ -76,7 +76,8 @@ class DemoBackend implements TrairBackend {
   static const _hell = Color(0xFFE8E4F7);
 
   static const _beta = 'Trair Beta';
-  static const _ownBadges = [ProfileBadge(BadgeKind.team), ProfileBadge(BadgeKind.founder, community: _beta)];
+  // A team badge is never made up: it only comes signed with the team key.
+  static const _ownBadges = [ProfileBadge(BadgeKind.founder, community: _beta)];
 
   static const julian = Person(name: 'Julian', color: _violett, trust: 3, badges: _ownBadges, isSelf: true);
   static const lena = Person(

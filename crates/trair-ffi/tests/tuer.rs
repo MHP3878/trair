@@ -449,3 +449,76 @@ fn d10_only_real_badges_come_out_of_the_door() {
         assert_eq!(error(&r), "bad_request", "{holder:?}");
     }
 }
+
+#[test]
+fn d11_own_badges_are_checked_and_stored() {
+    use trair_core::Account;
+    use trair_core::badges::{Badge, BadgeKind, Community};
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let dir = fresh_dir();
+    call(json!({"op": "init", "dir": dir}));
+    let created = call(json!({"op": "create", "password": PW, "profile": {}}));
+    let key = created["account_key"].as_str().unwrap().to_string();
+    assert_eq!(key.len(), 64);
+    assert_eq!(created["badges"], json!([]));
+    let holder = hex::decode(&key).unwrap();
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let founder = Account::generate("gruenderin").unwrap();
+    let community = Community::create("Trair Beta", &founder).unwrap();
+    let admin = Badge::issue(
+        &founder,
+        BadgeKind::Admin,
+        &holder,
+        Some(community.clone()),
+        now,
+        3600,
+        None,
+    )
+    .unwrap();
+    let r = call(json!({"op": "add_badge", "badge": admin}));
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(r["badges"][0]["kind"], "admin");
+
+    // Someone else's badge, a team badge without a team key, garbage.
+    let other = Account::generate("fremd").unwrap();
+    let foreign = Badge::issue(
+        &founder,
+        BadgeKind::Admin,
+        other.public_key(),
+        Some(community),
+        now,
+        3600,
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        error(&call(json!({"op": "add_badge", "badge": foreign}))),
+        "refused"
+    );
+    let team = Account::generate("trair-team").unwrap();
+    let fake_team = Badge::issue(&team, BadgeKind::Team, &holder, None, now, 3600, None).unwrap();
+    assert_eq!(
+        error(&call(json!({"op": "add_badge", "badge": fake_team}))),
+        "refused"
+    );
+    assert_eq!(
+        error(&call(json!({"op": "add_badge", "badge": {"x": 1}}))),
+        "bad_request"
+    );
+
+    // Stored in the vault: still there after locking.
+    call(json!({"op": "lock"}));
+    let again = call(json!({"op": "unlock", "password": PW}));
+    assert_eq!(again["badges"].as_array().unwrap().len(), 1, "{again}");
+    assert_eq!(again["account_key"], key.as_str());
+    call(json!({"op": "lock"}));
+    assert_eq!(
+        error(&call(json!({"op": "add_badge", "badge": {"x": 1}}))),
+        "locked"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -9,6 +9,7 @@ __pycache__/
 .env
 .env.*
 *.key
+*.trairkey
 *.pem
 *.p12
 *.pfx

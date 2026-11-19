@@ -2,6 +2,7 @@
 // Copyright (C) 2026 The Trair contributors
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/widgets.dart';
 
@@ -50,6 +51,27 @@ class AppState extends ChangeNotifier {
 
   /// The account's devices, from the vault. Empty while locked.
   List<TrairDevice> devices = const [];
+
+  /// Public account key in hex, for the team tool. Not secret.
+  String accountKey = '';
+
+  /// Own badges from the vault, checked by the core.
+  List<ProfileBadge> realBadges = const [];
+
+  /// Own badges to show: the real ones, plus community badges the demo
+  /// still makes up. A team badge is only ever real.
+  List<ProfileBadge> get ownBadges {
+    final shown = [...realBadges];
+    for (final b in backend.ownBadges()) {
+      final known = shown.any((r) => r.kind == b.kind && r.community == b.community);
+      if (b.kind != BadgeKind.team && !known) shown.add(b);
+    }
+    shown.sort((a, b) => a.kind.index.compareTo(b.kind.index));
+    return shown;
+  }
+
+  /// True if some of [ownBadges] are only demo.
+  bool get ownBadgesIncludeDemo => ownBadges.length > realBadges.length;
 
   /// Privacy switches; all off by default (decision 10).
   final Map<String, bool> privacy = {'lese': false, 'tippt': false, 'online': false, 'vorschau': false};
@@ -100,6 +122,8 @@ class AppState extends ChangeNotifier {
     _applyProfile(answer.profile);
     fingerprint = answer.fingerprint;
     devices = answer.devices;
+    accountKey = answer.accountKey;
+    realBadges = answer.badges;
     go(TrairScreen.chats);
     noteActivity();
     unawaited(_applyScreenProtection());
@@ -114,6 +138,8 @@ class AppState extends ChangeNotifier {
     _applyProfile(const {});
     fingerprint = '';
     devices = const [];
+    accountKey = '';
+    realBadges = const [];
     go(TrairScreen.lock);
     // The lock screen is always protected, whatever the setting says.
     screenProtectionSupported = await vault?.protectWindow(true) ?? false;
@@ -137,6 +163,8 @@ class AppState extends ChangeNotifier {
       _applyProfile(const {});
       fingerprint = '';
       devices = const [];
+      accountKey = '';
+      realBadges = const [];
       go(TrairScreen.onboarding);
     }
     return answer;
@@ -148,6 +176,23 @@ class AppState extends ChangeNotifier {
 
   /// Withdraw another device for good. Needs the password again.
   Future<CoreAnswer> withdrawDevice(String id, String password) => _devices(vault!.withdrawDevice(id, password));
+
+  /// Keep a signed badge (pasted as JSON, for example from the team
+  /// tool). The core checks it; only valid badges are stored.
+  Future<CoreAnswer> addBadge(String json) async {
+    Object? badge;
+    try {
+      badge = jsonDecode(json.trim());
+    } on FormatException {
+      return CoreAnswer({'ok': false, 'error': 'bad_request'});
+    }
+    final answer = await vault!.addBadge(badge);
+    if (answer.ok) {
+      realBadges = answer.badges;
+      notifyListeners();
+    }
+    return answer;
+  }
 
   Future<CoreAnswer> _devices(Future<CoreAnswer> call) async {
     final answer = await call;
