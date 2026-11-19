@@ -2,7 +2,6 @@
 // Copyright (C) 2026 The Trair contributors
 
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';

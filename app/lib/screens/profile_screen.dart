@@ -355,7 +355,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ? 'Name, Farbe und Bild stehen vor dem Passwort in der Kontoliste, unverschlüsselt auf diesem PC.'
                 : 'Vor dem Passwort steht nur „Konto ${state.account?.number ?? 1}“, ohne Name und Bild.',
             divider: false,
-            trailing: PillSwitch(value: state.showOnStart, onChanged: state.setShowOnStart, label: 'Auf dem Startbildschirm zeigen'),
+            trailing: PillSwitch(
+              value: state.showOnStart,
+              onChanged: state.setShowOnStart,
+              label: 'Auf dem Startbildschirm zeigen',
+            ),
           ),
           const SizedBox(height: 6),
           Align(

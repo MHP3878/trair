@@ -47,7 +47,9 @@ class _QrBoxState extends State<QrBox> {
           boxShadow: const [BoxShadow(color: Color(0x40A18DFF), blurRadius: 24)],
         ),
         child: _rows.isEmpty
-            ? const Center(child: Text('QR', style: TextStyle(color: TrairColors.placeholder)))
+            ? const Center(
+                child: Text('QR', style: TextStyle(color: TrairColors.placeholder)),
+              )
             : CustomPaint(painter: _QrPainter(_rows)),
       ),
     );

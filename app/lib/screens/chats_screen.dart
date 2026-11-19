@@ -436,7 +436,11 @@ class _ChatsScreenState extends State<ChatsScreen> {
                             Expanded(
                               child: SelectableText(
                                 state.contactCode,
-                                style: const TextStyle(fontFamily: 'GeistMono', fontSize: 12.5, color: TrairColors.text),
+                                style: const TextStyle(
+                                  fontFamily: 'GeistMono',
+                                  fontSize: 12.5,
+                                  color: TrairColors.text,
+                                ),
                               ),
                             ),
                             RoundIconButton(
@@ -651,9 +655,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
           Expanded(
             child: ListView(
               padding: const EdgeInsets.fromLTRB(28, 8, 28, 16),
-              children: [
-                for (final m in messages) _realBubble(m),
-              ],
+              children: [for (final m in messages) _realBubble(m)],
             ),
           ),
           Padding(
