@@ -810,7 +810,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
                     icon: const Icon(TrairIcons.ellipsis, size: 18, color: TrairColors.textSoft),
                     onSelected: (m) => state.setChatEnd(chat.id, m == 0 ? null : m),
                     itemBuilder: (_) => [
-                      const PopupMenuItem(enabled: false, child: Text('Verschwindet für beide nach …', style: TrairText.small)),
+                      const PopupMenuItem(
+                        enabled: false,
+                        child: Text('Verschwindet für beide nach …', style: TrairText.small),
+                      ),
                       for (final e in const {60: '1 Stunde', 1440: '1 Tag', 10080: '7 Tagen'}.entries)
                         PopupMenuItem(value: e.key, child: Text(e.value)),
                       if (chat.ends != null) const PopupMenuItem(value: 0, child: Text('Nicht verschwinden lassen')),

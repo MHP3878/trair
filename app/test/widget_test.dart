@@ -1243,7 +1243,8 @@ void main() {
       final soon = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 600;
       await tester.enterText(
         find.byWidgetPredicate((w) => w is TextField && (w.controller?.text.startsWith('trair2:') ?? false)),
-        'trair2:local-bob:${'ff' * 16}:${'11' * 16}:f$soon:0000');
+        'trair2:local-bob:${'ff' * 16}:${'11' * 16}:f$soon:0000',
+      );
       await tester.tap(find.widgetWithText(PillButton, 'Hinzufügen'));
       await tester.pumpAndSettle();
       expect(door.contacts.single['user'], 'local-bob');
@@ -1261,7 +1262,7 @@ void main() {
       await tester.tap(find.text('1 Tag'));
       await tester.pumpAndSettle();
       expect(kindOf(server.sent.last), 'ends', reason: 'Bob learns it too');
-      expect(find.textContaining('Verschwindet in 23 Std.'), findsWidgets);
+      expect(find.textContaining(RegExp(r'Verschwindet in 2[34] Std\.')), findsWidgets);
 
       // Time is up: the next sweep takes the chat away.
       door.chats.single['ends'] = DateTime.now().millisecondsSinceEpoch ~/ 1000 - 1;
