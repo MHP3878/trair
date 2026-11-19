@@ -981,3 +981,208 @@ fn bad_profiles_are_refused_before_anything_is_kept() {
         .unwrap();
     assert_eq!(r.info().color_type, png::ColorType::Rgba);
 }
+
+// ------------------------------------------------- friendship keys, vanishing
+
+fn receive_at(net: &mut Net, p: &mut Phone, now: u64) -> Vec<Incoming> {
+    let id = p.id();
+    net.inbox(&id)
+        .iter()
+        .map(|b| p.m().receive(b, now).unwrap())
+        .collect()
+}
+
+/// `who` uses `key` from `owner` and starts a chat; returns the chat id.
+fn use_key(net: &mut Net, who: &mut Phone, owner: &Phone, key: &str) -> String {
+    who.m().add_contact(key, "", NOW).unwrap();
+    let mut offers = net.fetch(owner.account.user());
+    offers.extend(net.fetch(who.account.user()));
+    let (chat, out) = who
+        .m()
+        .start_chat(owner.account.user(), &offers, NOW)
+        .unwrap();
+    assert!(commit(net, who, &out));
+    let (bytes, to) = who
+        .m()
+        .invite_message(&chat.id, NOW)
+        .unwrap()
+        .expect("token to send");
+    let id = who.id();
+    net.send(&id, &to, &bytes);
+    chat.id
+}
+
+#[test]
+fn a_friendship_key_makes_one_contact_and_only_in_time() {
+    use trair_core::InviteKind;
+    let mut net = Net::default();
+    let (mut alice, mut bob, mut carol) = (person("alice"), person("bob"), person("carol"));
+    for p in [&mut alice, &mut bob, &mut carol] {
+        publish(&mut net, p, 3);
+    }
+    let key = alice
+        .m()
+        .create_invite(InviteKind::Friend, NOW + 3600, NOW)
+        .unwrap();
+    assert!(key.starts_with("trair2:"));
+    let chat = use_key(&mut net, &mut bob, &alice, &key);
+    let got = poll_ok(&mut net, &mut alice);
+    assert!(matches!(&got[0], Incoming::Chat { chat: c, .. } if c.state == ChatState::Request));
+    assert!(matches!(&got[1], Incoming::Chat { chat: c, .. } if c.state == ChatState::Active));
+    let contact = alice
+        .m()
+        .contact(bob.account.user())
+        .unwrap()
+        .expect("Bob is a contact now");
+    assert_eq!(contact.fingerprint, bob.account.fingerprint());
+    send(&mut net, &mut alice, &chat, "willkommen");
+    assert!(
+        matches!(&poll_ok(&mut net, &mut bob)[..], [Incoming::Message(m)] if m.text == "willkommen")
+    );
+
+    // The same key a second time (forwarded to Carol): only a request.
+    let chat2 = use_key(&mut net, &mut carol, &alice, &key);
+    poll_ok(&mut net, &mut alice);
+    assert_eq!(alice.m().chat(&chat2).unwrap().state, ChatState::Request);
+    assert!(alice.m().contact(carol.account.user()).unwrap().is_none());
+
+    // Too late on either side.
+    let short = alice
+        .m()
+        .create_invite(InviteKind::Friend, NOW + 60, NOW)
+        .unwrap();
+    let mut dave = person("dave");
+    publish(&mut net, &mut dave, 2);
+    assert!(matches!(
+        dave.m().add_contact(&short, "", NOW + 61),
+        Err(CoreError::Rejected(_))
+    ));
+    let chat3 = use_key(&mut net, &mut dave, &alice, &short);
+    receive_at(&mut net, &mut alice, NOW + 61);
+    assert_eq!(
+        alice.m().chat(&chat3).unwrap().state,
+        ChatState::Request,
+        "arrived after the end"
+    );
+
+    // A made-up token, and keys out of range.
+    let mut eve = person("eve");
+    publish(&mut net, &mut eve, 2);
+    let real = alice
+        .m()
+        .create_invite(InviteKind::Friend, NOW + 600, NOW)
+        .unwrap();
+    let parts: Vec<&str> = real.split(':').collect();
+    let mut forged = trair_core::InviteCode::parse(&real).unwrap();
+    forged.token = [7; 16];
+    assert_ne!(parts[3], hex::encode([7u8; 16]));
+    let chat4 = use_key(&mut net, &mut eve, &alice, &forged.text());
+    poll_ok(&mut net, &mut alice);
+    assert_eq!(alice.m().chat(&chat4).unwrap().state, ChatState::Request);
+    assert!(
+        alice
+            .m()
+            .create_invite(InviteKind::Friend, NOW, NOW)
+            .is_err()
+    );
+    assert!(
+        alice
+            .m()
+            .create_invite(InviteKind::Friend, NOW + 31 * 86_400, NOW)
+            .is_err()
+    );
+}
+
+#[test]
+fn a_vanishing_chat_is_gone_on_both_sides_at_the_end() {
+    use trair_core::InviteKind;
+    let mut net = Net::default();
+    let (mut alice, mut bob) = (person("alice"), person("bob"));
+    publish(&mut net, &mut alice, 2);
+    publish(&mut net, &mut bob, 2);
+    let key = alice
+        .m()
+        .create_invite(InviteKind::Vanishing, NOW + 600, NOW)
+        .unwrap();
+    let chat = use_key(&mut net, &mut bob, &alice, &key);
+    send(&mut net, &mut bob, &chat, "nur heute");
+    poll_ok(&mut net, &mut alice);
+    assert_eq!(alice.m().chat(&chat).unwrap().state, ChatState::Active);
+    assert_eq!(alice.m().chat_end(&chat).unwrap(), Some(NOW + 600));
+    assert_eq!(bob.m().chat_end(&chat).unwrap(), Some(NOW + 600));
+    assert_eq!(texts(&mut alice, &chat), ["nur heute"]);
+
+    for p in [&mut alice, &mut bob] {
+        assert!(p.m().sweep(NOW + 599).unwrap().is_empty());
+        assert_eq!(p.m().sweep(NOW + 600).unwrap(), std::slice::from_ref(&chat));
+        assert!(p.m().chat(&chat).is_err());
+        assert!(p.m().messages(&chat, None, 10).unwrap().is_empty());
+        assert!(
+            p.m().contacts().unwrap().is_empty(),
+            "the contact came with the chat and goes with it"
+        );
+        p.restart();
+        assert!(p.m().chats().unwrap().is_empty());
+    }
+    // Later messages for it find nothing.
+    send_raw_fails(&mut net, &mut bob, &mut alice, &chat);
+}
+
+/// Bob no longer has the chat: he cannot send into it any more.
+fn send_raw_fails(_net: &mut Net, bob: &mut Phone, _alice: &mut Phone, chat: &str) {
+    assert!(bob.m().send(chat, "noch da?", NOW).is_err());
+}
+
+#[test]
+fn either_side_can_let_a_chat_vanish_but_strangers_cannot() {
+    let mut net = Net::default();
+    let (mut alice, mut bob) = (person("alice"), person("bob"));
+    publish(&mut net, &mut alice, 3);
+    publish(&mut net, &mut bob, 2);
+    let chat = chat_between(&mut net, &mut alice, &mut bob);
+    poll_ok(&mut net, &mut bob);
+    let (bytes, to) = alice
+        .m()
+        .set_chat_end(&chat, Some(NOW + 3600), NOW)
+        .unwrap();
+    let id = alice.id();
+    net.send(&id, &to, &bytes);
+    let got = poll_ok(&mut net, &mut bob);
+    assert!(matches!(&got[..], [Incoming::Ends { ends: Some(e), .. }] if *e == NOW + 3600));
+    assert_eq!(bob.m().chat_end(&chat).unwrap(), Some(NOW + 3600));
+    let (bytes, to) = bob.m().set_chat_end(&chat, None, NOW).unwrap();
+    let id = bob.id();
+    net.send(&id, &to, &bytes);
+    assert!(matches!(
+        &poll_ok(&mut net, &mut alice)[..],
+        [Incoming::Ends { ends: None, .. }]
+    ));
+    assert_eq!(alice.m().chat_end(&chat).unwrap(), None);
+    assert!(
+        alice
+            .m()
+            .set_chat_end(&chat, Some(NOW + 31 * 86_400), NOW)
+            .is_err()
+    );
+    assert!(alice.m().set_chat_end(&chat, Some(NOW - 1), NOW).is_err());
+
+    // Someone who only sent a request cannot make Alice's chat vanish.
+    let mut mallory = person("mallory");
+    let a_code = alice.m().contact_code();
+    mallory.m().add_contact(&a_code, "Alice", NOW).unwrap();
+    let offers = net.fetch(alice.account.user());
+    let (req, out) = mallory
+        .m()
+        .start_chat(alice.account.user(), &offers, NOW)
+        .unwrap();
+    assert!(commit(&mut net, &mut mallory, &out));
+    let (bytes, to) = mallory
+        .m()
+        .set_chat_end(&req.id, Some(NOW + 60), NOW)
+        .unwrap();
+    let id = mallory.id();
+    net.send(&id, &to, &bytes);
+    let got = poll_ok(&mut net, &mut alice);
+    assert!(matches!(&got[1], Incoming::Other));
+    assert_eq!(alice.m().chat_end(&req.id).unwrap(), None);
+}

@@ -393,6 +393,36 @@ profile through the real server).
   numbers, so a profile that never left the device does not look like a
   lost message.
 
+## Friendship keys and vanishing chats
+
+Code: `InviteCode` in `crates/trair-core/src/contacts.rs`, `create_invite`,
+`invite_message`, `set_chat_end`, `sweep`, `got_control` and
+`redeem_token` in `crates/trair-core/src/chats.rs`; tests: `chats.rs`
+(three tests), `contacts.rs`, `tuer.rs` (d24), `widget_test.dart` (group
+"Freundschaftsschlüssel und verschwindende Chats").
+
+- **A friendship key** is a contact code with a random 128-bit token and
+  an end time (10 minutes to 30 days). The account that made it keeps only
+  the token's SHA-256 hash. Whoever uses the key adds the owner as a
+  contact, starts a chat and sends the token inside it (an MLS control
+  message, invisible to the server). The owner's core accepts it once,
+  before the end, and only from the chat partner: that account becomes a
+  contact with the key its devices show in the chat, and the chat opens
+  without a request. Used a second time (forwarded), too late or with a
+  made-up token, the chat stays a normal request.
+- **The key is not secret from whoever holds it**: like a contact code it
+  names the account. After the end it only works as a contact code
+  (a request).
+- **A vanishing chat** ends at a fixed time on both sides: a vanishing key
+  sets it for the chat it opens; in any active chat either partner (or
+  an own device) can set or clear it. Strangers with a request cannot.
+  At the end each core deletes the chat's keys, messages and settings,
+  and the contact that came with a vanishing key; this runs every 30
+  seconds and whenever the chat database opens.
+- **Limits:** deleting relies on the other side running Trair; nobody can
+  stop screenshots or photos of the screen. Messages still waiting on the
+  server expire there as usual. The end time is at most 30 days away.
+
 ## Emergency PINs
 
 Code: `crates/trair-core/src/notfall.rs`, `crates/trair-ffi/src/

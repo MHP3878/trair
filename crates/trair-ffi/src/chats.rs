@@ -210,7 +210,11 @@ pub(crate) fn chats(m: &Messenger) -> Value {
     match m.chats() {
         Ok(list) => json!({
             "ok": true,
-            "chats": list.iter().map(|c| chat_json(c, &name_of(m, &c.peer))).collect::<Vec<_>>(),
+            "chats": list.iter().map(|c| {
+                let mut j = chat_json(c, &name_of(m, &c.peer));
+                j["ends"] = json!(m.chat_end(&c.id).ok().flatten());
+                j
+            }).collect::<Vec<_>>(),
         }),
         Err(e) => core_error(e),
     }
@@ -344,9 +348,54 @@ pub(crate) fn receive(m: &mut Messenger, body: &str) -> Value {
             "left": left,
         }),
         Incoming::Profile { user } => json!({"kind": "profile", "user": user}),
+        Incoming::Ends { chat, ends } => json!({"kind": "ends", "chat": chat, "ends": ends}),
         Incoming::Other => json!({"kind": "other"}),
     };
     json!({"ok": true, "incoming": what})
+}
+
+/// A friendship key that works once, for `minutes`. `vanishing`: the chat
+/// it opens vanishes at the same time.
+pub(crate) fn create_invite(m: &mut Messenger, minutes: u64, vanishing: bool) -> Value {
+    let now = now();
+    let ends = now.saturating_add(minutes.saturating_mul(60));
+    let kind = if vanishing {
+        trair_core::InviteKind::Vanishing
+    } else {
+        trair_core::InviteKind::Friend
+    };
+    match m.create_invite(kind, ends, now) {
+        Ok(code) => json!({"ok": true, "code": code, "ends": ends, "vanishing": vanishing}),
+        Err(e) => core_error(e),
+    }
+}
+
+/// After starting a chat with someone whose friendship key was used: the
+/// token for them. `{"ok": true}` without `body` when there is none.
+pub(crate) fn invite_message(m: &mut Messenger, chat: &str) -> Value {
+    match m.invite_message(chat, now()) {
+        Ok(Some((bytes, to))) => json!({"ok": true, "body": b64(&bytes), "to": to}),
+        Ok(None) => json!({"ok": true}),
+        Err(e) => core_error(e),
+    }
+}
+
+/// Let a chat vanish after `minutes` (null: it stays).
+pub(crate) fn set_chat_end(m: &mut Messenger, chat: &str, minutes: Option<u64>) -> Value {
+    let now = now();
+    let ends = minutes.map(|min| now.saturating_add(min.saturating_mul(60)));
+    match m.set_chat_end(chat, ends, now) {
+        Ok((bytes, to)) => json!({"ok": true, "body": b64(&bytes), "to": to, "ends": ends}),
+        Err(e) => core_error(e),
+    }
+}
+
+/// Delete what ran out.
+pub(crate) fn sweep(m: &mut Messenger) -> Value {
+    match m.sweep(now()) {
+        Ok(deleted) => json!({"ok": true, "deleted": deleted}),
+        Err(e) => core_error(e),
+    }
 }
 
 /// This account's profile for every chat that does not have this version

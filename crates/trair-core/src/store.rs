@@ -89,6 +89,29 @@ CREATE TABLE IF NOT EXISTS profile_sent (
     chat TEXT PRIMARY KEY,
     rev INTEGER NOT NULL
 ) WITHOUT ROWID;
+-- Friendship keys this account made: only the token's hash; used once.
+CREATE TABLE IF NOT EXISTS invites (
+    hash BLOB PRIMARY KEY,
+    kind TEXT NOT NULL,
+    ends INTEGER NOT NULL,
+    used INTEGER NOT NULL
+) WITHOUT ROWID;
+-- Keys of others this account used: the token goes into the first chat.
+CREATE TABLE IF NOT EXISTS redeem (
+    user TEXT PRIMARY KEY,
+    token BLOB NOT NULL,
+    kind TEXT NOT NULL,
+    ends INTEGER NOT NULL
+) WITHOUT ROWID;
+-- Chats that vanish, and contacts that go with them.
+CREATE TABLE IF NOT EXISTS chat_ends (
+    chat TEXT PRIMARY KEY,
+    ends INTEGER NOT NULL
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS contact_ends (
+    user TEXT PRIMARY KEY,
+    ends INTEGER NOT NULL
+) WITHOUT ROWID;
 ";
 
 /// An open chat database.

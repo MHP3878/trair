@@ -1455,3 +1455,84 @@ fn d23_profiles_go_to_contacts_and_come_back_checked() {
     call(json!({"op": "lock"}));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn d24_a_friendship_key_through_the_door_and_a_chat_that_vanishes() {
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let dir = fresh_dir();
+    call(json!({"op": "init", "dir": dir}));
+    call(json!({"op": "create", "password": PW, "profile": {}}));
+    let me = call(json!({"op": "server_identity"}));
+    let my_device = format!(
+        "{}:{}",
+        me["user"].as_str().unwrap(),
+        me["device"].as_str().unwrap()
+    );
+    let key = call(json!({"op": "create_invite", "minutes": 60}));
+    assert_eq!(key["ok"], true, "{key}");
+    let code = key["code"].as_str().unwrap().to_string();
+    assert!(code.starts_with("trair2:"));
+    assert_eq!(
+        error(&call(json!({"op": "create_invite", "minutes": 0}))),
+        "rejected"
+    );
+    assert_eq!(
+        error(&call(
+            json!({"op": "create_invite", "minutes": 31 * 24 * 60})
+        )),
+        "rejected"
+    );
+
+    // Bob uses the key and starts a chat; the token follows.
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let mut bob = Bob::new();
+    bob.m.add_contact(&code, "Julian", t).unwrap();
+    let kp = call(json!({"op": "key_packages", "n": 1, "last_resort": false}));
+    let offers = vec![trair_core::KeyPackageOffer {
+        claimed_device: my_device,
+        bytes: unb64(&kp["packages"][0]),
+    }];
+    let (chat, out) = bob
+        .m
+        .start_chat(me["user"].as_str().unwrap(), &offers, t)
+        .unwrap();
+    bob.m.commit_answer(&chat.id, true, None, t).unwrap();
+    let welcome = call(json!({"op": "receive", "body": b64(out.welcome.as_ref().unwrap())}));
+    assert_eq!(welcome["incoming"]["chat"]["state"], "request", "{welcome}");
+    let (bytes, _) = bob.m.invite_message(&chat.id, t).unwrap().unwrap();
+    let opened = call(json!({"op": "receive", "body": b64(&bytes)}));
+    assert_eq!(opened["incoming"]["kind"], "chat", "{opened}");
+    assert_eq!(opened["incoming"]["chat"]["state"], "active");
+    assert_eq!(
+        call(json!({"op": "contacts"}))["contacts"][0]["user"],
+        "local-bob"
+    );
+
+    // Let it vanish in an hour, then not; Bob learns both.
+    let set = call(json!({"op": "set_chat_end", "chat": chat.id, "minutes": 60}));
+    assert!(set["ends"].as_u64().unwrap() > 1_700_000_000, "{set}");
+    let listed = call(json!({"op": "chats"}));
+    assert_eq!(listed["chats"][0]["ends"], set["ends"]);
+    match bob.m.receive(&unb64(&set["body"]), t).unwrap() {
+        trair_core::Incoming::Ends { ends, .. } => assert!(ends.is_some()),
+        other => panic!("{other:?}"),
+    }
+    let off = call(json!({"op": "set_chat_end", "chat": chat.id, "minutes": null}));
+    assert!(off["ends"].is_null());
+    assert!(call(json!({"op": "chats"}))["chats"][0]["ends"].is_null());
+    let (bytes, _) = bob.m.set_chat_end(&chat.id, Some(t + 600), t).unwrap();
+    let got = call(json!({"op": "receive", "body": b64(&bytes)}));
+    assert_eq!(got["incoming"]["kind"], "ends", "{got}");
+    assert_eq!(got["incoming"]["ends"], t + 600);
+    assert_eq!(call(json!({"op": "chats"}))["chats"][0]["ends"], t + 600);
+    assert_eq!(
+        call(json!({"op": "sweep"}))["deleted"],
+        json!([]),
+        "not yet"
+    );
+    call(json!({"op": "lock"}));
+    let _ = std::fs::remove_dir_all(&dir);
+}

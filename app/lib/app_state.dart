@@ -43,7 +43,14 @@ class RealContact {
 
 /// A real, end-to-end encrypted one-to-one chat (M4).
 class RealChat {
-  const RealChat({required this.id, required this.peer, required this.name, required this.state, this.last = 0});
+  const RealChat({
+    required this.id,
+    required this.peer,
+    required this.name,
+    required this.state,
+    this.last = 0,
+    this.ends,
+  });
 
   factory RealChat.fromJson(Map<String, Object?> j) => RealChat(
     id: j['id'] as String,
@@ -51,7 +58,11 @@ class RealChat {
     name: j['name'] as String? ?? j['peer'] as String,
     state: j['state'] as String? ?? 'active',
     last: (j['last'] as num?)?.toInt() ?? 0,
+    ends: (j['ends'] as num?)?.toInt(),
   );
+
+  /// Seconds since 1970 when the chat vanishes on both sides; null: never.
+  final int? ends;
 
   final String id;
   final String peer;
@@ -62,6 +73,17 @@ class RealChat {
   final int last;
 
   bool get isRequest => state == 'request';
+}
+
+/// A friendship key made on this device: works once, until [ends].
+class FriendKey {
+  const FriendKey(this.code, this.ends, {this.vanishing = false});
+
+  final String code;
+  final DateTime ends;
+
+  /// The chat it opens vanishes at [ends].
+  final bool vanishing;
 }
 
 /// What a chat partner sent about themselves, checked by the core.
@@ -555,6 +577,8 @@ class AppState extends ChangeNotifier {
   /// has no profile yet, so the address would otherwise be lost.
   void _unlocked(CoreAnswer answer, {String? server}) {
     chatsReady = answer.raw['chats'] == true;
+    _sweeper?.cancel();
+    if (chatsReady) _sweeper = Timer.periodic(const Duration(seconds: 30), (_) => unawaited(_sweep()));
     unawaited(refreshChats());
     _applyProfile(answer.profile);
     if (server != null) {
@@ -779,6 +803,8 @@ class AppState extends ChangeNotifier {
 
   void _forgetChats() {
     _receiveRun++;
+    _sweeper?.cancel();
+    friendKey = null;
     chatsReady = false;
     peerProfiles = const {};
     _profilesStale = true;
@@ -904,6 +930,15 @@ class AppState extends ChangeNotifier {
 
   /// Add a contact from their code. [name] is how they appear here.
   Future<bool> addContact(String code, String name) async {
+    final parts = code.trim().toLowerCase().split(':');
+    if (parts.length == 6 && parts[0] == 'trair2') {
+      final ends = int.tryParse(parts[4].substring(1)) ?? 0;
+      if (ends * 1000 <= DateTime.now().millisecondsSinceEpoch) {
+        chatMessage = 'Dieser Freundschaftsschlüssel ist abgelaufen.';
+        notifyListeners();
+        return false;
+      }
+    }
     final a = await vault!.addContact(code.trim(), name.trim());
     chatMessage = a.ok ? '' : _chatError(a);
     await refreshChats();
@@ -933,8 +968,74 @@ class AppState extends ChangeNotifier {
     } else {
       chatMessage = '';
     }
+    final id = (started.raw['chat'] as Map)['id'] as String;
+    // A friendship key was used: its token makes the chat open at once.
+    final invite = await vault!.inviteMessage(id);
+    if (invite.ok && invite.raw['body'] is String) {
+      await api.sendMessage(invite.raw['to'], invite.raw['body'] as String);
+    }
     await refreshChats();
-    return (started.raw['chat'] as Map)['id'] as String;
+    return id;
+  }
+
+  // -------------------------------------- friendship keys, vanishing chats
+
+  /// The last friendship key made here (shown until closed).
+  FriendKey? friendKey;
+
+  Future<void> createFriendKey(int minutes, {bool vanishing = false}) async {
+    final a = await vault!.createInvite(minutes, vanishing: vanishing);
+    if (a.ok) {
+      friendKey = FriendKey(
+        a.raw['code'] as String,
+        DateTime.fromMillisecondsSinceEpoch((a.raw['ends'] as num).toInt() * 1000),
+        vanishing: vanishing,
+      );
+      chatMessage = '';
+    } else {
+      chatMessage = _chatError(a);
+    }
+    notifyListeners();
+  }
+
+  void closeFriendKey() {
+    friendKey = null;
+    notifyListeners();
+  }
+
+  /// Let a chat vanish after [minutes] on both sides; null: it stays.
+  Future<void> setChatEnd(String chat, int? minutes) async {
+    final api = _api;
+    if (api == null) {
+      chatMessage = 'Erst mit dem Server verbinden.';
+      notifyListeners();
+      return;
+    }
+    final a = await vault!.setChatEnd(chat, minutes);
+    if (!a.ok) {
+      chatMessage = _chatError(a);
+      notifyListeners();
+      return;
+    }
+    final r = await api.sendMessage(a.raw['to'], a.raw['body'] as String);
+    chatMessage = r.ok ? '' : 'Hier eingestellt, aber nicht zugestellt (${r.error}).';
+    await refreshChats();
+  }
+
+  Timer? _sweeper;
+
+  /// Vanished chats go every half minute (and when the database opens).
+  Future<void> _sweep() async {
+    final v = vault;
+    if (v == null || !chatsReady) return;
+    final a = await v.sweep();
+    final gone = (a.raw['deleted'] as List? ?? const []).cast<String>();
+    if (gone.isEmpty) return;
+    for (final id in gone) {
+      realMessages.remove(id);
+    }
+    _profilesStale = true;
+    await refreshChats();
   }
 
   /// Send a text. It is stored first; then the ciphertext goes out.
@@ -1060,6 +1161,8 @@ class AppState extends ChangeNotifier {
           case 'profile':
             _profilesStale = true;
             touched.add('');
+          case 'ends':
+            touched.add(incoming['chat'] as String);
         }
       }
       if (ids.isNotEmpty) await api.ack(ids);
@@ -1354,6 +1457,7 @@ class AppState extends ChangeNotifier {
   void dispose() {
     _autoLock?.cancel();
     _saveSoon?.cancel();
+    _sweeper?.cancel();
     super.dispose();
   }
 }

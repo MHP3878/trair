@@ -244,6 +244,19 @@ enum Request {
         rev: u64,
     },
     Profiles {},
+    CreateInvite {
+        minutes: u64,
+        #[serde(default)]
+        vanishing: bool,
+    },
+    InviteMessage {
+        chat: String,
+    },
+    SetChatEnd {
+        chat: String,
+        minutes: Option<u64>,
+    },
+    Sweep {},
     #[serde(rename = "accept_request")]
     AcceptChat {
         chat: String,
@@ -455,6 +468,10 @@ fn chat_op(state: &mut State, req: Request) -> Value {
         Request::Receive { body } => chats::receive(m, &body),
         Request::ProfileSent { chat, rev } => chats::profile_sent(m, &chat, rev),
         Request::Profiles {} => chats::profiles(m),
+        Request::CreateInvite { minutes, vanishing } => chats::create_invite(m, minutes, vanishing),
+        Request::InviteMessage { chat } => chats::invite_message(m, &chat),
+        Request::SetChatEnd { chat, minutes } => chats::set_chat_end(m, &chat, minutes),
+        Request::Sweep {} => chats::sweep(m),
         Request::AcceptChat { chat, name } => chats::accept_request(m, &chat, &name),
         Request::DeclineChat { chat } => chats::decline_request(m, &chat),
         Request::KeyPackages { n, last_resort } => chats::key_packages(m, n, last_resort),
