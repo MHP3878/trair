@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 [package]
 name = "trair-server"
-description = "Trair server: accounts, delivery and communities (from milestone M3)"
+description = "Trair server: accounts, login by device key, delivery and pairing relay (milestone M3)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,5 +12,25 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "trair-server"
+path = "src/main.rs"
+
 [dependencies]
 trair-core = { path = "../trair-core" }
+axum = { version = "=0.8.9", default-features = false, features = ["http1", "json", "query", "tokio"] }
+base64 = "=0.22.1"
+getrandom = "=0.4.3"
+hex = "0.4.3"
+rusqlite = { version = "=0.43.0", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+tokio = { version = "=1.54.1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+
+[dev-dependencies]
+http-body-util = "=0.1.5"
+tower = { version = "=0.5.3", features = ["util"] }
