@@ -1319,7 +1319,7 @@ void main() {
 
     testWidgets('a group with a contact: made, roles shown, a key for guests', (tester) async {
       final (door, server) = await online(tester);
-      await tester.tap(find.byTooltip('Neuer Chat'));
+      await tester.tap(find.byTooltip('Neue Gruppe'));
       await tester.pumpAndSettle();
       await tester.ensureVisible(_field('Gruppenname'));
       await tester.enterText(_field('Gruppenname'), 'Abi 2026');

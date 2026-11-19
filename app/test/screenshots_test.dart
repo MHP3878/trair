@@ -383,7 +383,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Chats'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Neuer Chat'));
+    await tester.tap(find.byTooltip('Neue Gruppe'));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.widgetWithText(TextField, 'Gruppenname'));
     await tester.enterText(find.widgetWithText(TextField, 'Gruppenname'), 'Abi 2026');

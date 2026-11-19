@@ -45,6 +45,9 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
   /// The group column next to a group chat.
   bool _groupOpen = false;
+
+  /// The "Neue Gruppe" page instead of a chat.
+  bool _newGroupOpen = false;
   final _groupName = TextEditingController();
   final Set<String> _groupPick = {};
   int _groupMinutes = 0;
@@ -87,13 +90,16 @@ class _ChatsScreenState extends State<ChatsScreen> {
             children: [
               Container(width: 300, color: TrairColors.sidebar, child: _sidebar(state, chats)),
               Expanded(
-                child: _contactsOpen
+                child: _newGroupOpen
+                    ? _newGroupPanel(state)
+                    : _contactsOpen
                     ? _contactsPanel(state)
                     : (_realChat(state) != null
                           ? _realConversation(state, _realChat(state)!)
                           : _conversation(state, chat)),
               ),
               if (!_contactsOpen &&
+                  !_newGroupOpen &&
                   _groupOpen &&
                   _realChat(state) != null &&
                   _realChat(state)!.isGroup &&
@@ -130,13 +136,29 @@ class _ChatsScreenState extends State<ChatsScreen> {
           padding: const EdgeInsets.fromLTRB(14, 12, 10, 0),
           child: SidebarHeader(
             title: 'Direktnachrichten',
-            trailing: RoundIconButton(
-              icon: TrairIcons.squarePen,
-              tooltip: 'Neuer Chat',
-              onPressed: () => setState(() {
-                _contactsOpen = true;
-                _real = null;
-              }),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                RoundIconButton(
+                  icon: TrairIcons.users,
+                  tooltip: 'Neue Gruppe',
+                  onPressed: () => setState(() {
+                    _newGroupOpen = true;
+                    _contactsOpen = false;
+                    _real = null;
+                  }),
+                ),
+                const SizedBox(width: 6),
+                RoundIconButton(
+                  icon: TrairIcons.squarePen,
+                  tooltip: 'Neuer Chat',
+                  onPressed: () => setState(() {
+                    _contactsOpen = true;
+                    _newGroupOpen = false;
+                    _real = null;
+                  }),
+                ),
+              ],
             ),
           ),
         ),
@@ -257,6 +279,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
             _active = c.id;
             _real = null;
             _contactsOpen = false;
+            _newGroupOpen = false;
             _read.add(c.id);
             _safetyOpen = false;
             _draft.clear();
@@ -344,6 +367,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
     setState(() {
       _real = id;
       _contactsOpen = false;
+      _newGroupOpen = false;
       _draft.clear();
     });
     unawaited(state.loadMessages(id));
@@ -636,7 +660,6 @@ class _ChatsScreenState extends State<ChatsScreen> {
   List<Widget> _newGroup(AppState state) {
     final name = _groupName.text.trim();
     return [
-      const FieldLabel('Neue Gruppe'),
       const Text(
         'Du bist Besitzer. Name, Mitglieder und Rollen sind Ende-zu-Ende verschlüsselt; '
         'weitere Leute lädst du später mit einem Einladungsschlüssel ein.',
@@ -718,6 +741,41 @@ class _ChatsScreenState extends State<ChatsScreen> {
     ];
   }
 
+  Widget _newGroupPanel(AppState state) => GlassPanel(
+    child: ListView(
+      padding: const EdgeInsets.fromLTRB(28, 22, 28, 28),
+      children: [
+        Row(
+          children: [
+            const Expanded(child: Text('Neue Gruppe', style: TrairText.title)),
+            RoundIconButton(
+              icon: TrairIcons.x,
+              tooltip: 'Schließen',
+              filled: false,
+              onPressed: () => setState(() => _newGroupOpen = false),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        if (!state.chatsReady)
+          const Text('Die Chat-Datenbank ist nicht offen.', style: TrairText.muted)
+        else ...[
+          ..._newGroup(state),
+          if (!state.chatsOnline)
+            const Padding(
+              padding: EdgeInsets.only(top: 10),
+              child: Text('Gruppen erstellen geht, sobald der Server verbunden ist.', style: TrairText.small),
+            ),
+          if (state.chatMessage.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Text(state.chatMessage, style: const TextStyle(color: TrairColors.amber, fontSize: 13)),
+            ),
+        ],
+      ],
+    ),
+  );
+
   Widget _contactsPanel(AppState state) {
     final online = state.chatsOnline;
     return GlassPanel(
@@ -795,8 +853,6 @@ class _ChatsScreenState extends State<ChatsScreen> {
             ),
             const SizedBox(height: 22),
             ..._friendKey(state),
-            const SizedBox(height: 22),
-            ..._newGroup(state),
             const SizedBox(height: 22),
             const FieldLabel('Kontakt hinzufügen oder Gruppe beitreten'),
             PillField(controller: _code, hint: 'trair1:…', mono: true, height: 46, semanticLabel: 'Kontaktcode'),
