@@ -125,10 +125,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SizedBox(width: 288, child: _sidebar(state)),
+          Container(width: 280, color: TrairColors.sidebar, child: _sidebar(state)),
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(0, 10, 10, 10),
+              padding: EdgeInsets.zero,
               child: GlassPanel(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(24, 26, 24, 44),
@@ -167,23 +167,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _sidebar(AppState state) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 18, 14, 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const SidebarHeader(trailing: BackToChats()),
-          const SizedBox(height: 22),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 12, 10, 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
           const Padding(
-            padding: EdgeInsets.only(left: 12, bottom: 10),
-            child: Text(
-              'Einstellungen',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600, letterSpacing: -0.6),
-            ),
+            padding: EdgeInsets.only(left: 4),
+            child: SidebarHeader(title: 'Einstellungen', trailing: BackToChats()),
           ),
+          const SizedBox(height: 12),
           for (final entry in _navIcons.entries)
             InkWell(
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(8),
               onTap: () {
                 final ctx = _keys[entry.key]?.currentContext;
                 if (ctx != null) {
@@ -195,7 +195,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 }
               },
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
                 child: Row(
                   children: [
                     Icon(entry.value, size: 18, color: TrairColors.textMuted),
@@ -205,10 +205,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
             ),
-          const Spacer(),
-          const ProfileCard(),
-        ],
-      ),
+              ],
+            ),
+          ),
+        ),
+        const ProfileCard(),
+      ],
     );
   }
 

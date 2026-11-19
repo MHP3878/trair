@@ -117,7 +117,7 @@ void main() {
     await tester.tap(find.text('Malik').first);
     await _shot(tester, '07-chats-blockiert');
 
-    await tester.tap(find.text('Trair Beta'));
+    await tester.tap(find.byTooltip('Trair Beta'));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Leute einladen'));
     await _shot(tester, '08-community');
@@ -135,7 +135,7 @@ void main() {
   testWidgets('screenshots of profiles and badges', (tester) async {
     await _start(tester, const Size(1440, 900));
     await _unlock(tester);
-    await tester.tap(find.text('Trair Beta'));
+    await tester.tap(find.byTooltip('Trair Beta'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Lena').last);
     await _shot(tester, '13-profilkarte');

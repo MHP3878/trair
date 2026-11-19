@@ -76,16 +76,13 @@ class _ChatsScreenState extends State<ChatsScreen> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              SizedBox(width: 304, child: _sidebar(state, chats)),
+              Container(width: 300, color: TrairColors.sidebar, child: _sidebar(state, chats)),
               Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(0, 10, 10, 10),
-                  child: _contactsOpen
-                      ? _contactsPanel(state)
-                      : (_realChat(state) != null
-                            ? _realConversation(state, _realChat(state)!)
-                            : _conversation(state, chat)),
-                ),
+                child: _contactsOpen
+                    ? _contactsPanel(state)
+                    : (_realChat(state) != null
+                          ? _realConversation(state, _realChat(state)!)
+                          : _conversation(state, chat)),
               ),
             ],
           ),
@@ -104,13 +101,13 @@ class _ChatsScreenState extends State<ChatsScreen> {
       };
       return kindOk && (q.isEmpty || c.name.toLowerCase().contains(q));
     }).toList();
-    final community = state.backend.community();
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 18, 14, 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SidebarHeader(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 10, 0),
+          child: SidebarHeader(
+            title: 'Direktnachrichten',
             trailing: RoundIconButton(
               icon: TrairIcons.squarePen,
               tooltip: 'Neuer Chat',
@@ -120,12 +117,17 @@ class _ChatsScreenState extends State<ChatsScreen> {
               }),
             ),
           ),
-          const SizedBox(height: 18),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
           PillField(
             controller: _search,
             focusNode: _searchFocus,
             hint: 'Suchen',
-            height: 42,
+            height: 38,
             semanticLabel: 'Chats durchsuchen (nur auf diesem Gerät)',
             leading: const Icon(TrairIcons.search, size: 18, color: TrairColors.textMuted),
             onChanged: (_) => setState(() {}),
@@ -138,7 +140,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
               ),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           GlassPanel(
             lite: true,
             radius: 999,
@@ -175,9 +177,13 @@ class _ChatsScreenState extends State<ChatsScreen> {
               ],
             ),
           ),
-          const SizedBox(height: 14),
-          Expanded(
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Expanded(
             child: ListView(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
               children: [
                 if (state.chatsReady) ...[
                   _sectionLabel('Echt verschlüsselt'),
@@ -196,38 +202,12 @@ class _ChatsScreenState extends State<ChatsScreen> {
                     padding: EdgeInsets.all(12),
                     child: Text('Kein Chat gefunden.', style: TrairText.muted),
                   ),
-                const SizedBox(height: 14),
-                const Padding(
-                  padding: EdgeInsets.only(left: 12, bottom: 6),
-                  child: Text('Communities', style: TrairText.small),
-                ),
-                InkWell(
-                  borderRadius: BorderRadius.circular(18),
-                  onTap: () => state.go(TrairScreen.community),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(10, 8, 12, 8),
-                    child: Row(
-                      children: [
-                        Avatar(initials: community.initials, color: TrairColors.accentPale, size: 36, square: true),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            community.name,
-                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-                          ),
-                        ),
-                        Text('${community.memberCount} Mitglieder', style: TrairText.small),
-                      ],
-                    ),
-                  ),
-                ),
+                const SizedBox(height: 10),
               ],
             ),
           ),
-          const SizedBox(height: 10),
-          const ProfileCard(),
-        ],
-      ),
+        const ProfileCard(),
+      ],
     );
   }
 
@@ -248,9 +228,9 @@ class _ChatsScreenState extends State<ChatsScreen> {
       padding: const EdgeInsets.only(bottom: 2),
       child: Material(
         color: active ? TrairColors.cardActive : Colors.transparent,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(8),
         child: InkWell(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(8),
           onTap: () => setState(() {
             _active = c.id;
             _real = null;
@@ -260,10 +240,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
             _draft.clear();
           }),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(10, 10, 12, 10),
+            padding: const EdgeInsets.fromLTRB(8, 7, 10, 7),
             child: Row(
               children: [
-                Avatar(initials: c.initials, color: c.color, size: 44),
+                Avatar(initials: c.initials, color: c.color, size: 40),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -324,8 +304,16 @@ class _ChatsScreenState extends State<ChatsScreen> {
   // ------------------------------------------------------- real chats (M4)
 
   Widget _sectionLabel(String text) => Padding(
-    padding: const EdgeInsets.only(left: 12, bottom: 6, top: 2),
-    child: Text(text, style: TrairText.small),
+    padding: const EdgeInsets.only(left: 10, bottom: 6, top: 6),
+    child: Text(
+      text,
+      style: const TextStyle(
+        fontSize: 11.5,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.3,
+        color: TrairColors.textMuted,
+      ),
+    ),
   );
 
   RealChat? _realChat(AppState state) => _real == null ? null : state.realChats.where((c) => c.id == _real).firstOrNull;
@@ -354,12 +342,12 @@ class _ChatsScreenState extends State<ChatsScreen> {
       padding: const EdgeInsets.only(bottom: 2),
       child: Material(
         color: active ? TrairColors.cardActive : Colors.transparent,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(8),
         child: InkWell(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(8),
           onTap: () => _openReal(state, c.id),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(10, 10, 12, 10),
+            padding: const EdgeInsets.fromLTRB(8, 7, 10, 7),
             child: Row(
               children: [
                 Avatar(
@@ -619,8 +607,9 @@ class _ChatsScreenState extends State<ChatsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 14, 16, 14),
+          Container(
+            decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: TrairColors.borderSoft))),
+            padding: const EdgeInsets.fromLTRB(20, 11, 16, 11),
             child: Row(
               children: [
                 Expanded(
@@ -790,8 +779,9 @@ class _ChatsScreenState extends State<ChatsScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 14, 16, 14),
+              Container(
+                decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: TrairColors.borderSoft))),
+                padding: const EdgeInsets.fromLTRB(20, 11, 16, 11),
                 child: Row(
                   children: [
                     Expanded(

@@ -67,7 +67,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           child: SizedBox(
             width: 560,
             child: GlassPanel(
-              radius: 32,
+              radius: 16,
               padding: const EdgeInsets.all(36),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,

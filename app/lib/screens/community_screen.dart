@@ -40,36 +40,32 @@ class _CommunityScreenState extends State<CommunityScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SizedBox(width: 288, child: _sidebar(state, community)),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(0, 10, 10, 10),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(child: _channel(state, channel)),
-                  const SizedBox(width: 10),
-                  SizedBox(width: 260, child: _members(state, community)),
-                ],
-              ),
-            ),
-          ),
+          Container(width: 280, color: TrairColors.sidebar, child: _sidebar(state, community)),
+          Expanded(child: _channel(state, channel)),
+          SizedBox(width: 248, child: _members(state, community)),
         ],
       ),
     );
   }
 
   Widget _sidebar(AppState state, Community community) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 18, 14, 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const SidebarHeader(trailing: BackToChats()),
-          const SizedBox(height: 18),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 12, 10, 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+          const Padding(
+            padding: EdgeInsets.only(left: 4),
+            child: SidebarHeader(title: 'Community', trailing: BackToChats()),
+          ),
+          const SizedBox(height: 10),
           GlassPanel(
             lite: true,
-            radius: 22,
+            radius: 12,
             padding: const EdgeInsets.all(12),
             child: Row(
               children: [
@@ -102,7 +98,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
                         color: const Color(0x176E4FF6),
-                        borderRadius: BorderRadius.circular(22),
+                        borderRadius: BorderRadius.circular(12),
                         border: Border.all(color: const Color(0x38A18DFF)),
                       ),
                       child: Column(
@@ -146,10 +142,12 @@ class _CommunityScreenState extends State<CommunityScreen> {
               ],
             ),
           ),
-          const SizedBox(height: 10),
-          const ProfileCard(subtitle: 'Gründer · Trust 3'),
-        ],
-      ),
+              ],
+            ),
+          ),
+        ),
+        const ProfileCard(subtitle: 'Gründer · Trust 3'),
+      ],
     );
   }
 
@@ -219,8 +217,9 @@ class _CommunityScreenState extends State<CommunityScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(22, 16, 16, 12),
+              Container(
+                decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: TrairColors.borderSoft))),
+                padding: const EdgeInsets.fromLTRB(22, 12, 16, 10),
                 child: Row(
                   children: [
                     Expanded(
@@ -417,7 +416,8 @@ class _CommunityScreenState extends State<CommunityScreen> {
 
   Widget _members(AppState state, Community community) {
     return GlassPanel(
-      padding: const EdgeInsets.fromLTRB(12, 18, 12, 14),
+      color: TrairColors.sidebar,
+      padding: const EdgeInsets.fromLTRB(8, 14, 8, 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

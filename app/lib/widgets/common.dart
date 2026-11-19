@@ -2,7 +2,6 @@
 // Copyright (C) 2026 The Trair contributors
 
 import 'dart:typed_data';
-import 'dart:ui' show ImageFilter;
 
 import 'package:material_ui/material_ui.dart';
 
@@ -19,38 +18,22 @@ class Backdrop extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        const Positioned.fill(child: ColoredBox(color: TrairColors.background)),
-        Positioned(left: -160, top: -220, child: _blob(760, 560, const Color(0x4D5B47D6))),
-        Positioned(right: -160, bottom: -220, child: _blob(680, 520, const Color(0x402C4FB8))),
-        Align(alignment: const Alignment(0.15, -0.1), child: _blob(460, 360, const Color(0x403B2F8F))),
-        // Transparent Material above the background colour, so ink and
-        // hover effects of InkWells on the background stay visible.
-        Positioned.fill(
-          child: Material(type: MaterialType.transparency, child: child),
-        ),
-      ],
-    );
-  }
-
-  Widget _blob(double w, double h, Color c) {
-    return IgnorePointer(
-      child: Container(
-        width: w,
-        height: h,
-        decoration: BoxDecoration(gradient: RadialGradient(colors: [c, c.withAlpha(0)])),
-      ),
+    // Flat: one dark colour. A transparent Material on top keeps the ink
+    // and hover effects of InkWells visible.
+    return ColoredBox(
+      color: TrairColors.background,
+      child: Material(type: MaterialType.transparency, child: child),
     );
   }
 }
 
-/// A frosted glass surface.
+/// A flat surface. Without [lite]: the main area, edge to edge, no
+/// corners. With [lite]: a raised card, field or bar with a hairline.
 class GlassPanel extends StatelessWidget {
   const GlassPanel({
     super.key,
     required this.child,
-    this.radius = 28,
+    this.radius,
     this.padding = EdgeInsets.zero,
     this.lite = false,
     this.color,
@@ -58,7 +41,7 @@ class GlassPanel extends StatelessWidget {
   });
 
   final Widget child;
-  final double radius;
+  final double? radius;
   final EdgeInsetsGeometry padding;
   final bool lite;
   final Color? color;
@@ -66,22 +49,19 @@ class GlassPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final r = BorderRadius.circular(radius);
-    final blur = lite ? 18.0 : 26.0;
+    final r = BorderRadius.circular(radius ?? (lite ? 12 : 0));
+    final hairline = lite || borderColor != null;
     return ClipRRect(
       borderRadius: r,
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
-        child: Container(
-          padding: padding,
-          decoration: BoxDecoration(
-            color: color ?? (lite ? TrairColors.glassLite : TrairColors.glass),
-            borderRadius: r,
-            border: Border.all(color: borderColor ?? TrairColors.border),
-          ),
-          // Same reason as in Backdrop: ink must paint above the glass.
-          child: Material(type: MaterialType.transparency, child: child),
+      child: Container(
+        padding: padding,
+        decoration: BoxDecoration(
+          color: color ?? (lite ? TrairColors.glassLite : TrairColors.glass),
+          borderRadius: r,
+          border: hairline ? Border.all(color: borderColor ?? TrairColors.border) : null,
         ),
+        // Same reason as in Backdrop: ink must paint above the surface.
+        child: Material(type: MaterialType.transparency, child: child),
       ),
     );
   }
@@ -249,7 +229,10 @@ class PillButton extends StatelessWidget {
       opacity: enabled ? 1 : 0.38,
       child: Material(
         color: bg,
-        shape: StadiumBorder(side: BorderSide(color: border)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(height / 4.2),
+          side: BorderSide(color: border),
+        ),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onPressed,
@@ -351,7 +334,7 @@ class PillField extends StatelessWidget {
       padding: EdgeInsets.only(left: leading == null ? 20 : 14, right: trailing == null ? 20 : 5),
       decoration: BoxDecoration(
         color: TrairColors.field,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(height / 4.2),
         border: Border.all(color: TrairColors.border),
       ),
       child: Row(
@@ -493,20 +476,28 @@ class PillSwitch extends StatelessWidget {
 
 /// Logo, product name and an optional action on the right.
 class SidebarHeader extends StatelessWidget {
-  const SidebarHeader({super.key, this.trailing});
+  const SidebarHeader({super.key, this.title = 'Trair', this.trailing});
 
+  /// What this column shows (the logo sits in the rail on the left).
+  final String title;
   final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        const TrairLogo(size: 32),
-        const SizedBox(width: 10),
-        const Text('Trair', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, letterSpacing: -0.3)),
-        const Spacer(),
-        if (trailing != null) trailing!,
-      ],
+    return SizedBox(
+      height: 36,
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              title,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, letterSpacing: -0.2),
+            ),
+          ),
+          if (trailing != null) trailing!,
+        ],
+      ),
     );
   }
 }
@@ -549,10 +540,11 @@ class ProfileCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
     final initial = state.userName.isEmpty ? '?' : state.userName.characters.first.toUpperCase();
+    // Like Discord's user panel: a flat bar at the bottom of the column.
     return GlassPanel(
-      lite: true,
-      radius: 22,
-      padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
+      color: TrairColors.rail,
+      radius: 0,
+      padding: const EdgeInsets.fromLTRB(10, 9, 8, 9),
       child: Row(
         children: [
           Expanded(
@@ -777,7 +769,7 @@ class SoftCard extends StatelessWidget {
       padding: padding,
       decoration: BoxDecoration(
         color: TrairColors.card,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: borderColor ?? TrairColors.borderSoft),
       ),
       child: child,

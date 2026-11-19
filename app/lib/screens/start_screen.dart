@@ -31,7 +31,7 @@ class CoreMissingScreen extends StatelessWidget {
         child: SizedBox(
           width: 460,
           child: GlassPanel(
-            radius: 32,
+            radius: 16,
             padding: const EdgeInsets.all(32),
             child: Column(
               mainAxisSize: MainAxisSize.min,

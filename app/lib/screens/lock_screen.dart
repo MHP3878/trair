@@ -147,7 +147,7 @@ class _LockScreenState extends State<LockScreen> {
               SizedBox(
                 width: 400,
                 child: GlassPanel(
-                  radius: 32,
+                  radius: 16,
                   padding: const EdgeInsets.fromLTRB(32, 40, 32, 30),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
