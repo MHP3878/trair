@@ -30,6 +30,7 @@ abstract final class TrairIcons {
   static const plus = IconData(0xE13D, fontFamily: _font);
   static const qrCode = IconData(0xE1DF, fontFamily: _font);
   static const search = IconData(0xE151, fontFamily: _font);
+  static const server = IconData(0xE153, fontFamily: _font);
   static const shieldCheck = IconData(0xE1FF, fontFamily: _font);
   static const squarePen = IconData(0xE172, fontFamily: _font);
   static const triangleAlert = IconData(0xE193, fontFamily: _font);

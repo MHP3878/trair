@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 The Trair contributors
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:trair_app/app_state.dart';
 import 'package:trair_app/backend/backend.dart';
 import 'package:trair_app/backend/demo_backend.dart';
 import 'package:trair_app/core/vault.dart';
@@ -15,6 +17,7 @@ import 'package:trair_app/widgets/common.dart';
 import 'package:trair_app/widgets/profile_popup.dart';
 
 import 'support/fake_door.dart';
+import 'support/fake_server.dart';
 
 const pw = 'mein langes passwort';
 
@@ -39,12 +42,18 @@ Future<void> _loadFonts() async {
 }
 
 /// Start the app. Without [door]: a vault exists and Trair is locked.
-Future<FakeDoor> _start(WidgetTester tester, {FakeDoor? door, Size size = const Size(1440, 900)}) async {
+Future<FakeDoor> _start(
+  WidgetTester tester, {
+  FakeDoor? door,
+  FakeServer? server,
+  Size size = const Size(1440, 900),
+}) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   final d = door ?? FakeDoor(password: pw, profile: {'name': 'Julian'});
-  await tester.pumpWidget(TrairApp(backend: DemoBackend(), vault: TrairVault(d)));
+  final s = server ?? FakeServer();
+  await tester.pumpWidget(TrairApp(backend: DemoBackend(), vault: TrairVault(d), transport: (_) => s));
   await tester.pumpAndSettle();
   return d;
 }
@@ -374,8 +383,8 @@ void main() {
       expect(find.text('Dieser PC'), findsOneWidget);
       expect(find.text('1 Gerät'), findsOneWidget);
       // Pairing needs the server: the button is there but cannot be pressed.
-      final pairing = find.widgetWithText(PillButton, 'Gerät koppeln · kommt mit dem Server');
-      expect(tester.widget<PillButton>(pairing).onPressed, isNull);
+      final pairing = find.widgetWithText(PillButton, 'Gerät koppeln');
+      expect(tester.widget<PillButton>(pairing).onPressed, isNull, reason: 'only with the server');
 
       await tester.tap(find.byTooltip('Gerät umbenennen'));
       await tester.pumpAndSettle();
@@ -547,6 +556,129 @@ void main() {
       await _unlock(tester);
       await _openSettings(tester);
       expect(ownKinds(), [BadgeKind.team, BadgeKind.founder]);
+    });
+  });
+
+  group('Server und Koppeln', () {
+    Future<void> connect(WidgetTester tester) async {
+      await tester.ensureVisible(find.widgetWithText(PillButton, 'Verbinden'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Verbinden'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('connecting only to this computer, logging in with the device key', (tester) async {
+      final server = FakeServer();
+      final door = await _start(tester, server: server);
+      await _unlock(tester);
+      await _openSettings(tester);
+      final address = _field(defaultServerUrl);
+      await tester.ensureVisible(address);
+      await tester.enterText(address, 'http://example.com:8471');
+      await connect(tester);
+      expect(find.textContaining('nur ein Server auf diesem PC'), findsOneWidget);
+      expect(server.calls, isEmpty, reason: 'nothing is sent to other addresses');
+
+      await tester.enterText(_field('http://example.com:8471'), defaultServerUrl);
+      await connect(tester);
+      expect(find.text('Verbunden'), findsOneWidget);
+      expect(server.calls, containsAll(['POST /v1/accounts', 'POST /v1/login', 'PUT /v1/devices']));
+      expect(door.ops, containsAll(['server_identity', 'sign_login', 'apply_device_list']));
+      await tester.pump(const Duration(seconds: 1));
+      expect(door.profile['serverAuto'], isTrue, reason: 'connects again after the next unlock');
+      final pairing = find.widgetWithText(PillButton, 'Gerät koppeln');
+      expect(tester.widget<PillButton>(pairing).onPressed, isNotNull);
+    });
+
+    testWidgets('a server that is not running is reported, not hidden', (tester) async {
+      final server = FakeServer()..online = false;
+      await _start(tester, server: server);
+      await _unlock(tester);
+      await _openSettings(tester);
+      await connect(tester);
+      expect(find.textContaining('Server nicht erreichbar'), findsOneWidget);
+    });
+
+    testWidgets('pairing shows a code, waits, and adds the new device', (tester) async {
+      final server = FakeServer()..holdGuest = Completer<void>();
+      final door = await _start(tester, server: server);
+      await _unlock(tester);
+      await _openSettings(tester);
+      await connect(tester);
+      await tester.ensureVisible(find.widgetWithText(PillButton, 'Gerät koppeln'));
+      await tester.tap(find.widgetWithText(PillButton, 'Gerät koppeln'));
+      await tester.pumpAndSettle();
+      expect(find.text('7-anker-birne-kerze'), findsOneWidget);
+      expect(find.textContaining('Warte auf das neue Gerät'), findsOneWidget);
+
+      server.holdGuest!.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('Gerät gekoppelt.'), findsOneWidget);
+      expect(find.text('2 Geräte'), findsOneWidget);
+      expect(door.devices, hasLength(2));
+      expect(server.calls, containsAll(['PUT /v1/pairing/7/host', 'PUT /v1/pairing/7/bundle']));
+      expect(server.calls.last, 'PUT /v1/devices', reason: 'the server learns the new list');
+      await tester.tap(find.widgetWithText(PillButton, 'Schließen'));
+      await tester.pumpAndSettle();
+      expect(find.text('7-anker-birne-kerze'), findsNothing);
+    });
+
+    testWidgets('a mistyped code on the new device adds nothing', (tester) async {
+      final server = FakeServer()..guestHello = 'YmFk';
+      final door = await _start(tester, server: server);
+      await _unlock(tester);
+      await _openSettings(tester);
+      await connect(tester);
+      await tester.ensureVisible(find.widgetWithText(PillButton, 'Gerät koppeln'));
+      await tester.tap(find.widgetWithText(PillButton, 'Gerät koppeln'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Nichts wurde hinzugefügt'), findsOneWidget);
+      expect(door.devices, hasLength(1));
+      expect(server.calls.where((c) => c.endsWith('/bundle')), isEmpty);
+    });
+
+    testWidgets('a new device joins with the code from the other device', (tester) async {
+      final server = FakeServer();
+      final door = await _start(tester, door: FakeDoor(), server: server);
+      await tester.tap(find.text('Ich habe schon ein Konto'));
+      await tester.pumpAndSettle();
+      await tester.enterText(_field('7-anker-birne-kerze'), '7-Anker-Birne-Kerze');
+      await tester.enterText(_field('Mindestens 12 Zeichen'), pw);
+      await tester.enterText(_field('Noch einmal'), pw);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Koppeln'));
+      await tester.pumpAndSettle();
+      expect(door.password, pw, reason: 'own vault with its own password');
+      expect(door.unlocked, isTrue);
+      expect(server.calls, containsAll(['GET /v1/pairing/7/host?wait=25', 'PUT /v1/pairing/7/guest']));
+      expect(find.text('Ich habe schon ein Konto'), findsNothing, reason: 'Trair is open');
+    });
+
+    testWidgets('withdrawing a device tells the server, and a withdrawn device learns it', (tester) async {
+      final server = FakeServer();
+      final door = await _start(
+        tester,
+        door: FakeDoor(password: pw, profile: {}, otherDevices: ['Altes Handy']),
+        server: server,
+      );
+      await _unlock(tester);
+      await _openSettings(tester);
+      await connect(tester);
+      server.calls.clear();
+      await tester.ensureVisible(find.widgetWithText(PillButton, 'Entziehen'));
+      await tester.tap(find.widgetWithText(PillButton, 'Entziehen'));
+      await tester.pumpAndSettle();
+      await tester.enterText(_field('Dein Passwort'), pw);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Endgültig entziehen'));
+      await tester.pumpAndSettle();
+      expect(server.calls, ['PUT /v1/devices']);
+
+      door.withdrawnElsewhere = true;
+      await tester.tap(find.widgetWithText(PillButton, 'Trennen'));
+      await tester.pumpAndSettle();
+      await connect(tester);
+      expect(find.textContaining('von einem anderen Gerät entzogen'), findsOneWidget);
     });
   });
 }

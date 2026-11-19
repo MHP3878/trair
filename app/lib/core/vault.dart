@@ -102,6 +102,40 @@ class TrairVault {
   /// tool). The core checks it first.
   Future<CoreAnswer> addBadge(Object? badge) => _call({'op': 'add_badge', 'badge': badge});
 
+  // ------------------------------------------------------------ server (M3)
+
+  /// Public data the server needs: user, device, account key, device list.
+  Future<CoreAnswer> serverIdentity() => _call({'op': 'server_identity'});
+
+  /// Sign the server's login challenge with this device's key.
+  Future<CoreAnswer> signLogin(String challengeHex) => _call({'op': 'sign_login', 'challenge': challengeHex});
+
+  /// The account key agrees to delete the account on the server.
+  Future<CoreAnswer> signDeletion(int now) => _call({'op': 'sign_deletion', 'now': now});
+
+  /// Start pairing as the unlocked device; gives the code to show.
+  Future<CoreAnswer> pairHostStart(int channel) => _call({'op': 'pair_host_start', 'channel': channel});
+
+  /// Finish as the unlocked device with the new device's messages.
+  Future<CoreAnswer> pairHostFinish(String hello, String offer) =>
+      _call({'op': 'pair_host_finish', 'hello': hello, 'offer': offer});
+
+  /// Start pairing as the new device with the typed code.
+  Future<CoreAnswer> pairGuestStart(String code) => _call({'op': 'pair_guest_start', 'code': code});
+
+  /// The new device answers the host's hello.
+  Future<CoreAnswer> pairGuestOffer(String hello) => _call({'op': 'pair_guest_offer', 'hello': hello});
+
+  /// The new device takes the bundle and makes its vault.
+  Future<CoreAnswer> pairGuestFinish(String bundle, String password) =>
+      _call({'op': 'pair_guest_finish', 'bundle': bundle, 'password': password});
+
+  /// Forget a running pairing.
+  Future<CoreAnswer> pairCancel() => _call({'op': 'pair_cancel'});
+
+  /// Take a newer device list from the server (checked by the core).
+  Future<CoreAnswer> applyDeviceList(Object? list) => _call({'op': 'apply_device_list', 'device_list': list});
+
   /// Check the badges of a profile in the core. Only valid ones come back
   /// (`badges`), plus `refused` and `name_warning`. Works while locked.
   Future<CoreAnswer> verifyBadges(String holderKeyHex, String name, List<Object?> badges) =>

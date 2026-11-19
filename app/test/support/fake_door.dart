@@ -42,6 +42,14 @@ class FakeDoor implements CoreDoor {
   /// Every request, without the passwords.
   final List<String> ops = [];
 
+  /// The server's list says this device was withdrawn.
+  bool withdrawnElsewhere = false;
+
+  Map<String, Object?> _list() => {
+    'list': {'seq': devices.length},
+    'signature': 'fake',
+  };
+
   @override
   Future<Map<String, Object?>> call(Map<String, Object?> r) async {
     final op = r['op'] as String;
@@ -98,6 +106,42 @@ class FakeDoor implements CoreDoor {
         if (!valid || device == null) return _fail('refused');
         device['label'] = label;
         return {'ok': true, 'devices': _copy()};
+      case 'server_identity':
+        if (!unlocked) return _fail('locked');
+        return {'ok': true, 'user': 'local-julian', 'device': thisId, 'account_key': accountKey, 'device_list': _list()};
+      case 'sign_login':
+        if (!unlocked) return _fail('locked');
+        return {'ok': true, 'signature': 'sig'};
+      case 'sign_deletion':
+        if (!unlocked) return _fail('locked');
+        return {'ok': true, 'signature': 'del'};
+      case 'apply_device_list':
+        if (withdrawnElsewhere) return _fail('withdrawn');
+        return {'ok': true, 'changed': false, 'devices': _copy()};
+      case 'pair_host_start':
+        if (!unlocked) return _fail('locked');
+        return {'ok': true, 'code': '${r['channel']}-anker-birne-kerze', 'hello': 'aGVsbG8='};
+      case 'pair_host_finish':
+        // The fake guest that typed the wrong code sends "bad".
+        if (r['hello'] == 'YmFk') return _fail('pairing_failed');
+        devices.add(_device('d-0000beef', null, devices.length));
+        return {'ok': true, 'bundle': 'YnVuZGxl', 'device_list': _list(), 'devices': _copy()};
+      case 'pair_guest_start':
+        if (password != null) return _fail('exists');
+        final code = r['code'] as String;
+        if (!RegExp(r'^\d+-[a-z]+-[a-z]+-[a-z]+$').hasMatch(code.trim().toLowerCase())) return _fail('bad_code');
+        return {'ok': true, 'channel': int.parse(code.trim().split('-').first), 'hello': 'Z2hlbGxv'};
+      case 'pair_guest_offer':
+        return {'ok': true, 'offer': 'b2ZmZXI='};
+      case 'pair_guest_finish':
+        final pw = r['password'] as String;
+        if (pw.runes.length < 12) return _fail('weak_password');
+        password = pw;
+        unlocked = true;
+        devices.add(_device('d-0000cafe', null, devices.length));
+        return _open();
+      case 'pair_cancel':
+        return {'ok': true};
       case 'add_badge':
         if (!unlocked) return _fail('locked');
         final b = r['badge'];

@@ -29,7 +29,7 @@ FLUTTER_BASE = [
     "| Flutter SDK | BSD-3-Clause | https://github.com/flutter/flutter |",
     "| Material Icons font (bundled by Flutter) | Apache-2.0 | https://github.com/google/material-design-icons |",
     "| Geist and Geist Mono fonts (app/assets/fonts) | OFL-1.1 | https://github.com/vercel/geist-font |",
-    "| Lucide icons 1.75.0, 28 icons (app/assets/fonts/Lucide.ttf) | ISC (some icons MIT, from Feather) "
+    "| Lucide icons 1.75.0, 29 icons (app/assets/fonts/Lucide.ttf) | ISC (some icons MIT, from Feather) "
     "| https://github.com/lucide-icons/lucide |",
     "",
     "Packages from pub.dev (from app/pubspec.lock, including packages only the tests use;",

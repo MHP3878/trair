@@ -29,9 +29,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   bool _busy = false;
   String _error = '';
 
+  // Joining an existing account as a new device.
+  bool _joining = false;
+  final _joinServer = TextEditingController(text: defaultServerUrl);
+  final _joinCode = TextEditingController();
+  final _joinPw1 = TextEditingController();
+  final _joinPw2 = TextEditingController();
+
   @override
   void dispose() {
-    for (final c in [_code, _name, _pw1, _pw2]) {
+    for (final c in [_code, _name, _pw1, _pw2, _joinServer, _joinCode, _joinPw1, _joinPw2]) {
       c.dispose();
     }
     super.dispose();
@@ -71,7 +78,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       const SizedBox(width: 12),
                       const Text('Trair einrichten', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
                       const Spacer(),
-                      Semantics(
+                      if (!_joining)
+                        Semantics(
                         label: 'Schritt $_step von 3',
                         child: Row(
                           children: [
@@ -96,12 +104,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   AnimatedSwitcher(
                     duration: const Duration(milliseconds: 250),
                     child: KeyedSubtree(
-                      key: ValueKey(_step),
-                      child: switch (_step) {
-                        1 => _stepInvite(),
-                        2 => _stepProfile(),
-                        _ => _stepPassword(state),
-                      },
+                      key: ValueKey(_joining ? 0 : _step),
+                      child: _joining
+                          ? _joinPanel(state)
+                          : switch (_step) {
+                              1 => _stepInvite(state),
+                              2 => _stepProfile(),
+                              _ => _stepPassword(state),
+                            },
                     ),
                   ),
                 ],
@@ -138,7 +148,92 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
   }
 
-  Widget _stepInvite() {
+  bool get _canJoin =>
+      _joinCode.text.trim().isNotEmpty && _joinPw1.text.runes.length >= 12 && _joinPw1.text == _joinPw2.text;
+
+  Future<void> _join(AppState state) async {
+    setState(() => _busy = true);
+    await state.joinWithCode(url: _joinServer.text, code: _joinCode.text, password: _joinPw1.text);
+    if (mounted) setState(() => _busy = false);
+  }
+
+  Widget _joinPanel(AppState state) {
+    final mismatch = _joinPw2.text.isNotEmpty && _joinPw1.text != _joinPw2.text;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text('Dieses Gerät koppeln', style: TrairText.title),
+        const SizedBox(height: 8),
+        const Text(
+          'Öffne Trair auf deinem anderen, entsperrten Gerät: Einstellungen → Geräte → Gerät koppeln. '
+          'Gib den Code ein, der dort steht. Dieses Gerät bekommt dann dein Konto.',
+          style: TextStyle(fontSize: 15, height: 1.55, color: TrairColors.textMuted),
+        ),
+        const SizedBox(height: 20),
+        const FieldLabel('Server'),
+        PillField(controller: _joinServer, hint: defaultServerUrl, mono: true, height: 46, semanticLabel: 'Server'),
+        const SizedBox(height: 14),
+        const FieldLabel('Code vom anderen Gerät'),
+        PillField(
+          controller: _joinCode,
+          hint: '7-anker-birne-kerze',
+          mono: true,
+          height: 52,
+          semanticLabel: 'Kopplungs-Code',
+          onChanged: (_) => setState(() {}),
+        ),
+        const SizedBox(height: 14),
+        const FieldLabel('Passwort für dieses Gerät'),
+        PillField(
+          controller: _joinPw1,
+          hint: 'Mindestens 12 Zeichen',
+          obscure: true,
+          semanticLabel: 'Passwort für dieses Gerät',
+          onChanged: (_) => setState(() {}),
+        ),
+        const SizedBox(height: 10),
+        PillField(
+          controller: _joinPw2,
+          hint: 'Noch einmal',
+          obscure: true,
+          semanticLabel: 'Passwort wiederholen',
+          onChanged: (_) => setState(() {}),
+        ),
+        if (mismatch)
+          const Padding(
+            padding: EdgeInsets.only(left: 18, top: 6),
+            child: Text(
+              'Die Passwörter stimmen nicht überein.',
+              style: TextStyle(fontSize: 12, color: TrairColors.amber),
+            ),
+          ),
+        const SizedBox(height: 8),
+        const Text(
+          'Jedes Gerät hat sein eigenes Passwort. Es verlässt dieses Gerät nie.',
+          style: TrairText.small,
+        ),
+        if (state.joinMessage.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 14),
+            child: Text(
+              state.joinMessage,
+              style: TextStyle(fontSize: 13.5, color: _busy ? TrairColors.textSoft : TrairColors.amber),
+            ),
+          ),
+        const SizedBox(height: 22),
+        _nav(
+          onBack: _busy ? null : () => setState(() => _joining = false),
+          next: PillButton(
+            label: _busy ? 'Kopple …' : 'Koppeln',
+            icon: TrairIcons.arrowRight,
+            onPressed: _canJoin && !_busy ? () => _join(state) : null,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _stepInvite(AppState state) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -153,9 +248,22 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         const FieldLabel('Einladungscode'),
         PillField(controller: _code, hint: 'TRAIR-XXXX-XXXX', mono: true, height: 52, semanticLabel: 'Einladungscode'),
         const SizedBox(height: 24),
-        _nav(
-          onBack: null,
-          next: PillButton(label: 'Weiter', onPressed: () => setState(() => _step = 2)),
+        if (state.serverDeletion.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 14),
+            child: Text(state.serverDeletion, style: TrairText.small),
+          ),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            PillButton(
+              label: 'Ich habe schon ein Konto',
+              kind: PillKind.ghost,
+              onPressed: () => setState(() => _joining = true),
+            ),
+            const Spacer(),
+            PillButton(label: 'Weiter', onPressed: () => setState(() => _step = 2)),
+          ],
         ),
       ],
     );

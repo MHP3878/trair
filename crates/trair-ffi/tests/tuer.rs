@@ -28,14 +28,6 @@ fn fresh_dir() -> PathBuf {
     std::env::temp_dir().join(format!("trair-test-{hex}"))
 }
 
-/// Only the tests that build a vault in the core need it (not on Windows).
-#[cfg(not(windows))]
-fn random_password() -> String {
-    let mut bytes = [0u8; 24];
-    getrandom::fill(&mut bytes).unwrap();
-    bytes.iter().map(|b| char::from(b'a' + b % 26)).collect()
-}
-
 fn error(v: &Value) -> &str {
     v["error"].as_str().unwrap_or("")
 }
@@ -360,7 +352,7 @@ fn d09_second_device_is_withdrawn_with_password() {
     use trair_core::vault::Vault;
     let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
     // A random password: nothing hard-coded flows into the core.
-    let pw = random_password();
+    let pw = random_text();
     let (mut vault, _) = Vault::create(&pw, json!({})).unwrap();
     let other = DeviceIdentity::generate().unwrap();
     let list = vault
@@ -520,5 +512,282 @@ fn d11_own_badges_are_checked_and_stored() {
         error(&call(json!({"op": "add_badge", "badge": {"x": 1}}))),
         "locked"
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn b64(bytes: &[u8]) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+fn unb64(v: &Value) -> Vec<u8> {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD
+        .decode(v.as_str().unwrap())
+        .unwrap()
+}
+
+#[test]
+fn d12_door_as_the_unlocked_pc_pairs_a_new_device() {
+    use trair_core::pairing::{Code, PairingGuest};
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let dir = fresh_dir();
+    call(json!({"op": "init", "dir": dir}));
+    call(json!({"op": "create", "password": PW, "profile": {"name": "Julian"}}));
+    let me = call(json!({"op": "server_identity"}));
+    assert_eq!(me["ok"], true, "{me}");
+
+    let started = call(json!({"op": "pair_host_start", "channel": 42}));
+    let code = started["code"].as_str().unwrap().to_string();
+    assert!(
+        code.starts_with("42-") && code.split('-').count() == 4,
+        "{code}"
+    );
+    let (mut guest, guest_hello) = PairingGuest::start(&Code::parse(&code).unwrap()).unwrap();
+    let offer = guest.offer(&unb64(&started["hello"])).unwrap();
+    let done =
+        call(json!({"op": "pair_host_finish", "hello": b64(&guest_hello), "offer": b64(&offer)}));
+    assert_eq!(done["ok"], true, "{done}");
+    assert_eq!(done["devices"].as_array().unwrap().len(), 2);
+    let joined = guest.finish(&unb64(&done["bundle"])).unwrap();
+    assert_eq!(
+        hex::encode(joined.account.public_key()),
+        me["account_key"].as_str().unwrap()
+    );
+    assert_eq!(
+        serde_json::to_value(&joined.list).unwrap(),
+        done["device_list"]
+    );
+    // Used up; and the new list was stored in the vault.
+    assert_eq!(
+        error(&call(
+            json!({"op": "pair_host_finish", "hello": b64(&guest_hello), "offer": b64(&offer)})
+        )),
+        "no_pairing"
+    );
+    call(json!({"op": "lock"}));
+    let again = call(json!({"op": "unlock", "password": PW}));
+    assert_eq!(again["devices"].as_array().unwrap().len(), 2);
+
+    // A wrong code adds nothing and uses the pairing up.
+    let started = call(json!({"op": "pair_host_start", "channel": 43}));
+    let wrong = Code::random(43).unwrap();
+    let (mut bad, bad_hello) = PairingGuest::start(&wrong).unwrap();
+    let bad_offer = bad.offer(&unb64(&started["hello"])).unwrap();
+    let r =
+        call(json!({"op": "pair_host_finish", "hello": b64(&bad_hello), "offer": b64(&bad_offer)}));
+    assert_eq!(error(&r), "pairing_failed");
+    // Locking ends a running pairing.
+    call(json!({"op": "pair_host_start", "channel": 44}));
+    call(json!({"op": "lock"}));
+    call(json!({"op": "unlock", "password": PW}));
+    assert_eq!(
+        error(&call(
+            json!({"op": "pair_host_finish", "hello": "eA==", "offer": "eA=="})
+        )),
+        "no_pairing"
+    );
+    let r = call(json!({"op": "unlock", "password": PW}));
+    assert_eq!(
+        r["devices"].as_array().unwrap().len(),
+        2,
+        "nothing was added by the failed runs"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn d13_door_as_the_new_device_joins_with_the_code() {
+    use trair_core::pairing::PairingHost;
+    use trair_core::proofs::verify_login;
+    use trair_core::vault::{KdfParams, Vault};
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let host_pw = random_text();
+    let (mut host, _) = Vault::create_with(
+        &host_pw,
+        json!({"name": "Julian"}),
+        KdfParams {
+            m_kib: 8,
+            t: 1,
+            p: 1,
+        },
+    )
+    .unwrap();
+    let (mut h, code, host_hello) = PairingHost::start(7, std::time::Instant::now()).unwrap();
+
+    let dir = fresh_dir();
+    call(json!({"op": "init", "dir": dir}));
+    assert_eq!(
+        error(&call(
+            json!({"op": "pair_guest_start", "code": "7-kein-echter-code"})
+        )),
+        "bad_code"
+    );
+    let started = call(json!({"op": "pair_guest_start", "code": code.text().to_uppercase()}));
+    assert_eq!(started["channel"], 7, "{started}");
+    let offered = call(json!({"op": "pair_guest_offer", "hello": b64(&host_hello)}));
+    let bundle = h
+        .finish(
+            &unb64(&started["hello"]),
+            &unb64(&offered["offer"]),
+            &mut host,
+            std::time::Instant::now(),
+        )
+        .unwrap();
+    // Too short a password does not use the pairing up.
+    let r = call(json!({"op": "pair_guest_finish", "bundle": b64(&bundle), "password": "kurz"}));
+    assert_eq!(error(&r), "weak_password");
+    let joined = call(json!({"op": "pair_guest_finish", "bundle": b64(&bundle), "password": PW}));
+    assert_eq!(joined["ok"], true, "{joined}");
+    assert_eq!(
+        joined["fingerprint"],
+        host.account().fingerprint().grouped()
+    );
+    assert_eq!(joined["profile"]["name"], "Julian");
+    assert_eq!(joined["devices"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        error(&call(
+            json!({"op": "pair_guest_start", "code": code.text()})
+        )),
+        "exists"
+    );
+
+    // The new device can log in: its signature fits its entry in the list.
+    let me = call(json!({"op": "server_identity"}));
+    let mut challenge = [0u8; 32];
+    getrandom::fill(&mut challenge).unwrap();
+    let signed = call(json!({"op": "sign_login", "challenge": hex::encode(challenge)}));
+    let list: trair_core::SignedDeviceList =
+        serde_json::from_value(me["device_list"].clone()).unwrap();
+    let entry = list
+        .list
+        .devices
+        .iter()
+        .find(|d| d.id == me["device"].as_str().unwrap())
+        .unwrap();
+    let sig = hex::decode(signed["signature"].as_str().unwrap()).unwrap();
+    assert!(verify_login(entry, me["user"].as_str().unwrap(), &challenge, &sig).is_ok());
+    assert_eq!(
+        error(&call(json!({"op": "sign_login", "challenge": "zz"}))),
+        "bad_request"
+    );
+    let deletion = call(json!({"op": "sign_deletion", "now": 1_800_000_000u64}));
+    assert_eq!(deletion["signature"].as_str().unwrap().len(), 128);
+    call(json!({"op": "lock"}));
+    assert_eq!(
+        error(&call(
+            json!({"op": "sign_login", "challenge": hex::encode(challenge)})
+        )),
+        "locked"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Random text: nothing hard-coded flows into the core's crypto.
+fn random_text() -> String {
+    let mut bytes = [0u8; 24];
+    getrandom::fill(&mut bytes).unwrap();
+    bytes.iter().map(|b| char::from(b'a' + b % 26)).collect()
+}
+
+#[test]
+fn d14_newer_lists_from_the_server_are_taken_only_if_signed_and_fitting() {
+    use trair_core::DeviceIdentity;
+    use trair_core::vault::{KdfParams, Vault};
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let dir = fresh_dir();
+    call(json!({"op": "init", "dir": dir}));
+    // This device is the PC; the "laptop" vault shares the account and
+    // makes list changes, as a second device would.
+    let pc_pw = random_text();
+    let (mut laptop, _) = Vault::create_with(
+        &random_text(),
+        json!({}),
+        KdfParams {
+            m_kib: 8,
+            t: 1,
+            p: 1,
+        },
+    )
+    .unwrap();
+    let pc = DeviceIdentity::generate().unwrap();
+    let with_pc = laptop
+        .device_list()
+        .with_device(laptop.account(), pc.entry())
+        .unwrap();
+    laptop.set_device_list(with_pc.clone()).unwrap();
+    // Give the PC its vault through the door by pairing it from the laptop.
+    let (mut h, code, hello) =
+        trair_core::pairing::PairingHost::start(1, std::time::Instant::now()).unwrap();
+    let started = call(json!({"op": "pair_guest_start", "code": code.text()}));
+    let offered = call(json!({"op": "pair_guest_offer", "hello": b64(&hello)}));
+    let bundle = h
+        .finish(
+            &unb64(&started["hello"]),
+            &unb64(&offered["offer"]),
+            &mut laptop,
+            std::time::Instant::now(),
+        )
+        .unwrap();
+    let joined =
+        call(json!({"op": "pair_guest_finish", "bundle": b64(&bundle), "password": pc_pw}));
+    assert_eq!(joined["ok"], true, "{joined}");
+    let me = joined["device"].as_str().unwrap().to_string();
+    let current = laptop.device_list().clone();
+
+    // Same list again: nothing to do.
+    let r = call(json!({"op": "apply_device_list", "device_list": current}));
+    assert_eq!(r["changed"], false, "{r}");
+    // The laptop pairs a phone: newer, signed, this device still on it.
+    let phone = DeviceIdentity::generate().unwrap();
+    let newer = current
+        .with_device(laptop.account(), phone.entry())
+        .unwrap();
+    let r = call(json!({"op": "apply_device_list", "device_list": newer}));
+    assert_eq!(
+        (
+            r["changed"].as_bool(),
+            r["devices"].as_array().unwrap().len()
+        ),
+        (Some(true), 4),
+        "{r}"
+    );
+    // A forged list (signed by another account) or one without this device.
+    let stranger = Vault::create_with(
+        &random_text(),
+        json!({}),
+        KdfParams {
+            m_kib: 8,
+            t: 1,
+            p: 1,
+        },
+    )
+    .unwrap()
+    .0;
+    // Newer by number than this device's list, but signed by a stranger.
+    let mut forged = stranger.device_list().clone();
+    for _ in 0..4 {
+        let extra = DeviceIdentity::generate().unwrap();
+        forged = forged
+            .with_device(stranger.account(), extra.entry())
+            .unwrap();
+    }
+    assert!(forged.list.seq > 3);
+    assert_eq!(
+        error(&call(
+            json!({"op": "apply_device_list", "device_list": forged})
+        )),
+        "refused"
+    );
+    laptop.set_device_list(newer.clone()).unwrap();
+    laptop.withdraw_device(&me).unwrap();
+    let without_me = laptop.device_list().clone();
+    assert_eq!(
+        error(&call(
+            json!({"op": "apply_device_list", "device_list": without_me})
+        )),
+        "withdrawn"
+    );
+    let _ = with_pc;
     let _ = std::fs::remove_dir_all(&dir);
 }

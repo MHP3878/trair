@@ -50,6 +50,12 @@ flutter test
 dart format --output=none --set-exit-if-changed .
 ```
 
+## Koppeln ausprobieren (auf einem PC)
+
+1. `trair-server.exe` starten (Download aus der CI: Artefakt `Trair-Server`). Er lauscht auf `http://127.0.0.1:8471`.
+2. Trair starten, Konto anlegen, Einstellungen → Server → Verbinden, dann Geräte → Gerät koppeln.
+3. Eine zweite Trair-Instanz mit eigenem Datenordner starten: in PowerShell `$env:TRAIR_DATA_DIR = "$env:TEMP\Trair-Zweitgeraet"; .\Trair.exe`. Dort „Ich habe schon ein Konto“ wählen und den Code eingeben.
+
 ## Lizenz
 
 Trair ist freie Software unter der GNU Affero General Public License, Version 3 oder neuer. Siehe `LICENSE` und `COPYING`.
