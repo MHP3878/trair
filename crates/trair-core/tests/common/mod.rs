@@ -74,6 +74,20 @@ impl Net {
         self.boxes.entry(dev.id().to_string()).or_default();
     }
 
+    /// Register key packages that were made elsewhere (by a Messenger).
+    pub fn register_packages(&mut self, name: &str, one_time: Vec<Vec<u8>>, last_resort: Vec<u8>) {
+        let entry = self.dir.entry(name.to_string()).or_default();
+        entry.one_time.extend(one_time);
+        entry.last_resort = Some(last_resort);
+        self.boxes.entry(name.to_string()).or_default();
+    }
+
+    /// Forget a device (withdrawn): no more packages, no more mail.
+    pub fn unregister(&mut self, name: &str) {
+        self.dir.remove(name);
+        self.boxes.remove(name);
+    }
+
     pub fn publish(&mut self, name: &str, dev: &Device, n: usize) {
         let entry = self.dir.entry(name.to_string()).or_default();
         entry.one_time.extend(dev.key_packages(n).unwrap());

@@ -10,6 +10,8 @@
 
 pub mod account;
 pub mod badges;
+pub mod chats;
+pub mod contacts;
 pub mod devices;
 pub mod error;
 pub mod keypackages;
@@ -17,11 +19,14 @@ pub mod mls;
 pub mod pairing;
 pub mod policy;
 pub mod proofs;
+mod store;
 pub mod teamkey;
 pub mod vault;
 
 pub use account::{Account, DeviceCertificate, Fingerprint};
 pub use badges::{Badge, BadgeKind, Community, VerifiedBadge};
+pub use chats::{Chat, ChatState, Contact, Incoming, Message, Messenger};
+pub use contacts::ContactCode;
 pub use devices::{DeviceIdentity, SignedDeviceList};
 pub use error::{CoreError, Result};
 pub use mls::{Device, Event, KeyPackageOffer, Member, Outgoing};

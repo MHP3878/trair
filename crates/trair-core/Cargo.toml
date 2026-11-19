@@ -33,3 +33,7 @@ getrandom = "=0.4.3"
 zeroize = "=1.9.2"
 # Pairing (M2): SPAKE2 from RustCrypto, MIT OR Apache-2.0.
 spake2 = "=0.4.0"
+# Chats on disk (M4): SQLCipher (BSD-3-Clause) encrypts the whole database
+# file. Its crypto comes from OpenSSL (Apache-2.0), built from source with
+# the program, so no system library is needed. Same rusqlite as the server.
+rusqlite = { version = "=0.43.0", features = ["bundled-sqlcipher-vendored-openssl"] }

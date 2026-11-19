@@ -58,6 +58,20 @@ impl Fingerprint {
         Fingerprint(hex::encode(&Sha256::digest(public_key)[..16]))
     }
 
+    /// Read a fingerprint written as 32 lowercase hex characters (as in a
+    /// contact code). Anything else is refused.
+    pub fn parse(text: &str) -> Result<Self> {
+        let ok = text.len() == 32
+            && text
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+        if ok {
+            Ok(Fingerprint(text.to_string()))
+        } else {
+            Err(CoreError::Rejected("not a fingerprint".into()))
+        }
+    }
+
     /// The fingerprint as 32 hex characters.
     pub fn as_str(&self) -> &str {
         &self.0

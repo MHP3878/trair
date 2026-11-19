@@ -227,6 +227,54 @@ through the real server with the real core).
   vault with the password, and only then sends the deletion, so a wrong
   password never deletes the server side.
 
+## Contacts and chats on the device (M4, step 1)
+
+Code: `crates/trair-core/src/chats.rs`, `contacts.rs`, `store.rs`;
+tests: `crates/trair-core/tests/chats.rs` (real core, every device with
+its own database file), `tests/tresor.rs` (t16, t17).
+
+- **Chat database:** SQLCipher 4 (whole file encrypted: pages, indexes,
+  journal; HMAC per page). The key is 32 random bytes from the vault, so
+  the database opens only after the vault password, and changing the
+  password does not touch it. A wrong key opens nothing; a database of
+  another device or account is refused. Deleted rows are overwritten
+  (`secure_delete`), temporary data stays in memory. SQLCipher's crypto
+  is OpenSSL 3, built from source with Trair (no system library).
+- **What is stored:** contacts (user name, pinned key fingerprint, name),
+  chats, messages, and the MLS state (group keys, private key-package
+  keys). Every change is stored in one transaction *before* anything is
+  sent, and an incoming message is stored before the server may delete
+  it. A message that arrives twice is noticed (hash of the ciphertext).
+- **Contacts only by code:** no phone book, no search. A contact code is
+  `trair1:<user>:<key fingerprint>:<check>`. Adding a contact pins that
+  account key; devices signed by any other key are refused (adding them,
+  and following a chat that contains them). A code protects only as well
+  as the way it was passed on: in person or by QR code it cannot be
+  swapped. "Confirmed" marks a fingerprint compared in person.
+- **Requests:** a chat started by someone who is not a contact is a
+  request. Nothing can be sent into it until it is accepted (accepting
+  pins the key its devices carry). Declining deletes the chat, its keys
+  and its messages on this device; later messages for it are refused.
+  A chat set up by one of the account's own devices (signature checked)
+  is not a request.
+- **Only the two accounts:** a one-to-one chat takes only devices of the
+  two accounts; group chats are refused until M5.
+- **One change at a time:** every chat has a random id. A change (devices
+  added or removed) is a commit for one epoch; the server will take only
+  the first commit per chat and epoch (server side: M4, step 2). The
+  loser throws its commit away, reads the winner and tries again.
+- **Withdrawn devices:** nothing is sent into a chat that still holds a
+  withdrawn device; it has to be removed first. A device removed from a
+  chat deletes its keys for it and keeps only the history.
+
+Known limits of this step:
+
+- Accepting a request, confirming a contact or a name are not yet passed
+  on to the account's other devices.
+- The app does not use this yet (M4, step 2). The server does not yet
+  order commits.
+- Message length is limited to 32 KiB of text; no files or pictures.
+
 ## Rules for this repository
 
 No private keys, passwords, recovery keys, tokens or user data are ever

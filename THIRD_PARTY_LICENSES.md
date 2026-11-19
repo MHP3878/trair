@@ -152,6 +152,8 @@ This file lists every third-party component and its license.
 | openmls_rust_crypto | 0.6.0 | MIT | https://github.com/openmls/openmls/tree/main/openmls_rust_crypto |
 | openmls_serialization_helpers | 0.1.0 | MIT | https://github.com/openmls/openmls/tree/main/serialization_helpers |
 | openmls_traits | 0.6.0 | MIT | https://github.com/openmls/openmls/tree/main/traits |
+| openssl-src | 300.6.1+3.6.3 | MIT/Apache-2.0 | https://github.com/alexcrichton/openssl-src-rs |
+| openssl-sys | 0.9.118 | MIT | https://github.com/rust-openssl/rust-openssl |
 | p256 | 0.13.2 | Apache-2.0 OR MIT | https://github.com/RustCrypto/elliptic-curves/tree/master/p256 |
 | p384 | 0.13.1 | Apache-2.0 OR MIT | https://github.com/RustCrypto/elliptic-curves/tree/master/p384 |
 | password-hash | 0.6.1 | MIT OR Apache-2.0 | https://github.com/RustCrypto/traits |
@@ -217,6 +219,7 @@ This file lists every third-party component and its license.
 | spki | 0.7.3 | Apache-2.0 OR MIT | https://github.com/RustCrypto/formats/tree/master/spki |
 | spki | 0.8.1 | Apache-2.0 OR MIT | https://github.com/RustCrypto/formats |
 | sponge-cursor | 0.1.0 | MIT OR Apache-2.0 | https://github.com/RustCrypto/utils |
+| sqlcipher-src | 420.0.0+sqlcipher-4.20.0-sqlite-3.54.1-libtomcrypt-1.18.2 | MIT AND BSD-3-Clause AND blessing AND WTFPL | https://github.com/LucaCappelletti94/sqlcipher-src |
 | sqlite-wasm-rs | 0.6.3 | MIT | https://github.com/Spxg/sqlite-wasm-rs |
 | subtle | 2.6.1 | BSD-3-Clause | https://github.com/dalek-cryptography/subtle |
 | syn | 2.0.119 | MIT OR Apache-2.0 | https://github.com/dtolnay/syn |

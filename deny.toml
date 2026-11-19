@@ -48,6 +48,14 @@ confidence-threshold = 0.93
 crate = "trair-core"
 allow = ["AGPL-3.0-or-later"]
 
+# SQLCipher (Chat-Datenbank, M4). Der Quellcode-Kasten enthaelt SQLite
+# ("blessing": gemeinfrei mit Segen) und libtomcrypt (WTFPL, wird bei Trair
+# gar nicht gebaut, weil die Kryptografie aus OpenSSL kommt). Beides sind
+# freie, freizuegige Lizenzen, vertraeglich mit AGPL-3.0.
+[[licenses.exceptions]]
+crate = "sqlcipher-src"
+allow = ["blessing", "WTFPL"]
+
 [[licenses.exceptions]]
 crate = "trair-ffi"
 allow = ["AGPL-3.0-or-later"]

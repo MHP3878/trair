@@ -5,6 +5,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use serde::{Deserialize, Serialize};
+
 use crate::account::Fingerprint;
 use crate::devices::DeviceList;
 
@@ -60,7 +62,48 @@ impl Default for Policy {
     }
 }
 
+/// The policy as stored in the chat database.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub(crate) struct PolicyState {
+    strict: bool,
+    pins: Vec<(String, String)>,
+    withdrawn: Vec<String>,
+}
+
 impl Policy {
+    pub(crate) fn export(&self) -> PolicyState {
+        let mut pins: Vec<(String, String)> = self
+            .pins
+            .iter()
+            .map(|(u, f)| (u.clone(), f.as_str().to_string()))
+            .collect();
+        pins.sort();
+        let mut withdrawn: Vec<String> = self.withdrawn.iter().cloned().collect();
+        withdrawn.sort();
+        PolicyState {
+            strict: self.strict,
+            pins,
+            withdrawn,
+        }
+    }
+
+    pub(crate) fn import(state: PolicyState) -> crate::error::Result<Self> {
+        let mut pins = HashMap::new();
+        for (user, fp) in state.pins {
+            pins.insert(user, Fingerprint::parse(&fp)?);
+        }
+        Ok(Policy {
+            strict: state.strict,
+            pins,
+            withdrawn: state.withdrawn.into_iter().collect(),
+        })
+    }
+
+    /// Forget the pinned fingerprint of a user (contact removed).
+    pub fn forget(&mut self, user: &str) {
+        self.pins.remove(user);
+    }
+
     /// Is strict mode on?
     pub fn strict(&self) -> bool {
         self.strict
