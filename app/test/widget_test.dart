@@ -100,6 +100,9 @@ Future<void> _openSettings(WidgetTester tester) async {
 
 TextField _composer(WidgetTester tester) => tester.widget<TextField>(find.byKey(const Key('composer')));
 
+/// A switch, found by its label.
+Finder _switch(String label) => find.byWidgetPredicate((w) => w is PillSwitch && w.label == label);
+
 /// A text field, found by its hint (shown while the field is empty).
 Finder _field(String hint) => find.widgetWithText(TextField, hint);
 
@@ -180,7 +183,7 @@ void main() {
         await _type(tester, 'falsches passwort $i');
       }
       expect(find.textContaining('bitte 5 Sekunden warten'), findsOneWidget);
-      expect(tester.widget<PillButton>(find.byType(PillButton)).onPressed, isNull);
+      expect(tester.widget<PillButton>(find.byType(PillButton).first).onPressed, isNull);
       await tester.pump(const Duration(seconds: 6));
       await tester.pumpAndSettle();
       expect(find.text('Entsperren'), findsOneWidget);
@@ -193,7 +196,9 @@ void main() {
       await _unlock(tester);
       await _ctrl(tester, LogicalKeyboardKey.keyL);
       expect(find.text('Willkommen zurück'), findsOneWidget);
-      expect(find.text('Julian'), findsNothing);
+      // The profile is gone; the name stays only on the account card.
+      expect(find.textContaining('Strenger Modus'), findsNothing);
+      expect(find.text('Julian'), findsOneWidget);
       expect(door.ops, contains('lock'));
       expect(door.unlocked, isFalse);
     });
@@ -215,7 +220,7 @@ void main() {
       await tester.ensureVisible(find.text('5 Min.'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('5 Min.'));
-      final strictSwitch = find.byType(PillSwitch).first;
+      final strictSwitch = _switch('Strenger Modus');
       await tester.ensureVisible(strictSwitch);
       await tester.pumpAndSettle();
       await tester.tap(strictSwitch);
@@ -345,7 +350,7 @@ void main() {
       await _start(tester);
       await _unlock(tester);
       await _openSettings(tester);
-      final strictSwitch = find.byType(PillSwitch).first;
+      final strictSwitch = _switch('Strenger Modus');
       await tester.ensureVisible(strictSwitch);
       await tester.pumpAndSettle();
       await tester.tap(strictSwitch);
@@ -904,7 +909,7 @@ void main() {
       final (_, base) = await startMany(tester);
       await _unlock(tester);
       await _openSettings(tester);
-      final toggle = find.byWidgetPredicate((w) => w is PillSwitch && w.label == 'Auf dem Startbildschirm zeigen');
+      final toggle = _switch('Auf dem Startbildschirm zeigen');
       await tester.ensureVisible(toggle);
       await tester.pumpAndSettle();
       await tester.tap(toggle);

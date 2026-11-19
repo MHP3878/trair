@@ -258,6 +258,8 @@ void main() {
       return bytes!.buffer.asUint8List();
     });
     expect(await tester.runAsync(() => state.setPicture(raw!)), isNull);
+    // The save timer started in real time (inside runAsync).
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 900)));
     await tester.pump(const Duration(seconds: 1));
     expect(File('$base${sep}karte.png').existsSync(), isTrue, reason: 'the start screen shows it');
     await tester.runAsync(() => precacheImage(MemoryImage(state.picture!), element));
