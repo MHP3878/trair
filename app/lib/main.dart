@@ -11,6 +11,7 @@ import 'app_state.dart';
 import 'backend/backend.dart';
 import 'backend/demo_backend.dart';
 import 'core/door.dart';
+import 'core/server.dart';
 import 'core/vault.dart';
 import 'screens/chats_screen.dart';
 import 'screens/community_screen.dart';
@@ -42,9 +43,12 @@ void main() {
 }
 
 class TrairApp extends StatefulWidget {
-  const TrairApp({super.key, required this.backend, required this.vault, this.startupError = ''});
+  const TrairApp({super.key, required this.backend, required this.vault, this.startupError = '', this.transport});
 
   final TrairBackend backend;
+
+  /// How to reach the server; null means real HTTP. Tests pass a fake.
+  final ServerTransport Function(Uri)? transport;
 
   /// The security core. Null if it could not be loaded: the app then only
   /// shows [startupError] and never falls back to demo data.
@@ -56,7 +60,8 @@ class TrairApp extends StatefulWidget {
 }
 
 class _TrairAppState extends State<TrairApp> {
-  late final AppState _state = AppState(widget.backend, widget.vault)..startupError = widget.startupError;
+  late final AppState _state = AppState(widget.backend, widget.vault, transport: widget.transport)
+    ..startupError = widget.startupError;
 
   @override
   void initState() {

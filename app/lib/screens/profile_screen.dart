@@ -22,6 +22,7 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   late final TextEditingController _name;
   late final TextEditingController _about;
+  late final TextEditingController _serverUrl;
   bool _askDelete = false;
   final _oldPw = TextEditingController();
   final _newPw1 = TextEditingController();
@@ -46,6 +47,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     'Profil': GlobalKey(),
     'Trust': GlobalKey(),
     'Geräte': GlobalKey(),
+    'Server': GlobalKey(),
     'Sicherheit': GlobalKey(),
     'Privatsphäre': GlobalKey(),
     'Konto': GlobalKey(),
@@ -64,6 +66,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final state = AppScope.of(context);
     _name = TextEditingController(text: state.userName);
     _about = TextEditingController(text: state.about);
+    _serverUrl = TextEditingController(text: state.serverUrl);
     _nameReady = true;
   }
 
@@ -72,6 +75,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (_nameReady) {
       _name.dispose();
       _about.dispose();
+      _serverUrl.dispose();
     }
     for (final c in [_oldPw, _newPw1, _newPw2, _deletePw, _deviceName, _withdrawPw, _badgeInput]) {
       c.dispose();
@@ -83,6 +87,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     'Profil': TrairIcons.user,
     'Trust': TrairIcons.badgeCheck,
     'Geräte': TrairIcons.monitorSmartphone,
+    'Server': TrairIcons.server,
     'Sicherheit': TrairIcons.shieldCheck,
     'Privatsphäre': TrairIcons.eyeOff,
     'Konto': TrairIcons.userCog,
@@ -113,6 +118,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           _trustCard(),
                           const SizedBox(height: 14),
                           _devicesCard(state),
+                          const SizedBox(height: 14),
+                          _serverCard(state),
                           const SizedBox(height: 14),
                           _securityCard(state),
                           const SizedBox(height: 14),
@@ -391,17 +398,149 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: Text(_deviceError, style: const TextStyle(fontSize: 13, color: TrairColors.amber)),
             ),
           const SizedBox(height: 4),
-          const PillButton(
-            label: 'Gerät koppeln · kommt mit dem Server',
-            icon: TrairIcons.qrCode,
-            kind: PillKind.dashed,
-            expand: true,
-            onPressed: null,
+          if (state.pairing case final p?)
+            _pairingPanel(state, p)
+          else
+            PillButton(
+              label: 'Gerät koppeln',
+              icon: TrairIcons.qrCode,
+              kind: PillKind.dashed,
+              expand: true,
+              onPressed: state.canPair ? () => state.startPairing() : null,
+            ),
+          const SizedBox(height: 10),
+          Text(
+            state.serverStatus == ServerStatus.connected
+                ? 'Auf dem neuen Gerät: Trair öffnen, „Ich habe schon ein Konto“ wählen und den Code eingeben. '
+                      'Ein zweites Gerät rettet dein Konto, wenn dieser PC ausfällt.'
+                : 'Koppeln geht über den Trair-Server: erst unten unter „Server“ verbinden. '
+                      'Ein zweites Gerät rettet dein Konto, wenn dieser PC ausfällt.',
+            style: TrairText.small,
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _pairingPanel(AppState state, PairingProgress p) {
+    final color = switch (p.stage) {
+      PairStage.done => TrairColors.mint,
+      PairStage.failed => TrairColors.amber,
+      _ => TrairColors.textSoft,
+    };
+    final until = p.validUntil;
+    final clock = '${until.hour.toString().padLeft(2, '0')}:${until.minute.toString().padLeft(2, '0')}';
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+      decoration: BoxDecoration(
+        color: const Color(0x146E4FF6),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0x4D8B70FF)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (p.stage == PairStage.waiting || p.stage == PairStage.finishing) ...[
+            const Text('Code für das neue Gerät', style: TrairText.label),
+            const SizedBox(height: 8),
+            SelectableText(
+              p.code,
+              textAlign: TextAlign.center,
+              style: TrairText.mono.copyWith(
+                fontSize: 26,
+                fontWeight: FontWeight.w600,
+                color: TrairColors.text,
+                shadows: glowShadows(TrairColors.accentLight, strength: 30),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text('Gültig bis $clock Uhr, nur einmal.', textAlign: TextAlign.center, style: TrairText.small),
+            const SizedBox(height: 12),
+          ],
+          Row(
+            children: [
+              if (p.stage == PairStage.done)
+                const Icon(TrairIcons.check, size: 16, color: TrairColors.mint)
+              else if (p.stage == PairStage.failed)
+                const Icon(TrairIcons.triangleAlert, size: 16, color: TrairColors.amber),
+              if (p.stage == PairStage.done || p.stage == PairStage.failed) const SizedBox(width: 8),
+              Expanded(
+                child: Text(p.message, style: TextStyle(fontSize: 13.5, color: color)),
+              ),
+              PillButton(
+                label: p.stage == PairStage.done || p.stage == PairStage.failed ? 'Schließen' : 'Abbrechen',
+                kind: PillKind.ghost,
+                height: 36,
+                onPressed: () => state.closePairing(),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _serverCard(AppState state) {
+    final (color, label) = switch (state.serverStatus) {
+      ServerStatus.connected => (TrairColors.mint, 'Verbunden'),
+      ServerStatus.connecting => (TrairColors.accentLight, 'Verbinde …'),
+      ServerStatus.failed => (TrairColors.amber, 'Fehler'),
+      ServerStatus.off => (TrairColors.textMuted, 'Nicht verbunden'),
+    };
+    final connected = state.serverStatus == ServerStatus.connected;
+    return SoftCard(
+      key: _keys['Server'],
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _title(
+            'Server',
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                ),
+                const SizedBox(width: 6),
+                Text(label, style: TextStyle(fontSize: 13, color: color)),
+              ],
+            ),
+          ),
+          const FieldLabel('Adresse'),
+          Row(
+            children: [
+              Expanded(
+                child: PillField(
+                  controller: _serverUrl,
+                  hint: 'http://127.0.0.1:PORT',
+                  mono: true,
+                  height: 46,
+                  semanticLabel: 'Server-Adresse',
+                  onChanged: state.setServerUrl,
+                ),
+              ),
+              const SizedBox(width: 10),
+              PillButton(
+                label: connected ? 'Trennen' : 'Verbinden',
+                kind: connected ? PillKind.ghost : PillKind.primary,
+                height: 46,
+                onPressed: state.serverStatus == ServerStatus.connecting
+                    ? null
+                    : () => connected ? state.disconnect() : state.connect(),
+              ),
+            ],
+          ),
+          if (state.serverMessage.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(state.serverMessage, style: TextStyle(fontSize: 13, color: color)),
+            ),
           const SizedBox(height: 10),
           const Text(
-            'Koppeln geht nur von einem entsperrten Gerät aus, mit einem kurzen Code. Der Knopf wird frei, sobald der '
-            'Trair-Server läuft. Ein zweites Gerät rettet dein Konto, wenn dieser PC ausfällt.',
+            'Vorerst läuft der Server nur auf diesem PC: starte trair-server.exe und verbinde dich. Er sieht nie '
+            'deine Passwörter, Schlüssel oder Nachrichten, nur verschlüsselte Pakete.',
             style: TrairText.small,
           ),
         ],

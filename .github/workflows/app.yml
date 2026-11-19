@@ -47,16 +47,18 @@ jobs:
       - name: Analyse
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: flutter analyze
-      # The real security core, so test/door_native_test.dart can run the
-      # app's door against it (Argon2id with the real settings).
-      - name: Sicherheitskern bauen
+      # The real security core and server, so test/door_native_test.dart and
+      # test/server_native_test.dart run the app against them (Argon2id with
+      # the real settings, pairing through the real relay).
+      - name: Sicherheitskern und Server bauen
         id: core
         working-directory: .
-        run: cargo build -p trair-ffi --release --locked
-      - name: Widget-Tests und Test der Tür zum Kern
+        run: cargo build -p trair-ffi -p trair-server --release --locked
+      - name: Widget-Tests, Tür zum Kern und Koppeln über den echten Server
         if: ${{ !cancelled() && steps.deps.outcome == 'success' && steps.core.outcome == 'success' }}
         env:
           TRAIR_FFI_LIB: ${{ github.workspace }}/target/release/libtrair_ffi.so
+          TRAIR_SERVER_BIN: ${{ github.workspace }}/target/release/trair-server
         run: flutter test
       - name: Bildschirmfotos hochladen
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
@@ -139,12 +141,20 @@ jobs:
           if-no-files-found: error
       # The team tool for the project owner: makes the team key on their own
       # computer. The key itself never comes near CI.
-      - name: Team-Werkzeug bauen
+      - name: Team-Werkzeug und Server bauen
         working-directory: .
-        run: cargo build -p trair-team --release --locked
+        run: cargo build -p trair-team -p trair-server --release --locked
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Trair-Team-Werkzeug
           path: target/release/trair-team.exe
+          retention-days: 30
+          if-no-files-found: error
+      # The server for trying pairing on one computer (M3, step 3). It only
+      # listens on 127.0.0.1 until TLS exists.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Trair-Server
+          path: target/release/trair-server.exe
           retention-days: 30
           if-no-files-found: error

@@ -4,6 +4,7 @@
 // Renders every screen into build/screenshots/*.png, so each CI run shows
 // what the app really looks like (CI uploads them as "Trair-Screenshots").
 
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -16,6 +17,7 @@ import 'package:trair_app/core/vault.dart';
 import 'package:trair_app/main.dart';
 
 import 'support/fake_door.dart';
+import 'support/fake_server.dart';
 
 Future<void> _font(String family, List<String> files) async {
   final loader = FontLoader(family);
@@ -55,7 +57,7 @@ Future<void> _shot(WidgetTester tester, String name) async {
 
 const _pw = 'mein langes passwort';
 
-Future<void> _start(WidgetTester tester, Size size, {FakeDoor? door}) async {
+Future<void> _start(WidgetTester tester, Size size, {FakeDoor? door, FakeServer? server}) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
@@ -63,7 +65,7 @@ Future<void> _start(WidgetTester tester, Size size, {FakeDoor? door}) async {
   await tester.pumpWidget(
     RepaintBoundary(
       key: _shotKey,
-      child: TrairApp(backend: DemoBackend(), vault: TrairVault(d)),
+      child: TrairApp(backend: DemoBackend(), vault: TrairVault(d), transport: server == null ? null : (_) => server),
     ),
   );
   await tester.pumpAndSettle();
@@ -141,6 +143,35 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('So sehen dich andere'));
     await _shot(tester, '15-eigenes-profil');
+  });
+
+  testWidgets('screenshots of the server and pairing', (tester) async {
+    final server = FakeServer()..holdGuest = Completer<void>();
+    await _start(tester, const Size(1440, 900), server: server);
+    await _unlock(tester);
+    await tester.tap(find.text('Strenger Modus an'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Verbinden'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Verbinden'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Verbunden'));
+    await _shot(tester, '16-einstellungen-server');
+    await tester.ensureVisible(find.text('Gerät koppeln'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Gerät koppeln'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('7-anker-birne-kerze'));
+    await _shot(tester, '17-koppeln-code');
+    // Let the waiting pairing finish, so no timer is left.
+    server.holdGuest!.complete();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('screenshot of joining from a new device', (tester) async {
+    await _start(tester, const Size(1440, 900), door: FakeDoor(), server: FakeServer());
+    await tester.tap(find.text('Ich habe schon ein Konto'));
+    await _shot(tester, '18-neues-geraet');
   });
 
   testWidgets('screenshot of a small window', (tester) async {

@@ -72,7 +72,11 @@ fn run() -> Result<(), String> {
             router(server).into_make_service_with_connect_info::<SocketAddr>(),
         )
         .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
+            // Stop on Ctrl+C. If the signal cannot be watched, keep
+            // running instead of stopping at once.
+            if tokio::signal::ctrl_c().await.is_err() {
+                std::future::pending::<()>().await;
+            }
         })
         .await
         .map_err(|e| e.to_string())

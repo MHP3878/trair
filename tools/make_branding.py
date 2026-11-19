@@ -52,6 +52,7 @@ ICONS = {
     "plus": 0xE13D,
     "qr-code": 0xE1DF,
     "search": 0xE151,
+    "server": 0xE153,
     "shield-check": 0xE1FF,
     "square-pen": 0xE172,
     "triangle-alert": 0xE193,

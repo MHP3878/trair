@@ -585,7 +585,9 @@ fn check_own_device(
     Ok(())
 }
 
-fn check_password(password: &str) -> VaultResult<()> {
+/// A password must have at least the minimum length (for the app: check
+/// before a step that cannot be repeated, such as finishing a pairing).
+pub fn check_password(password: &str) -> VaultResult<()> {
     if password.chars().count() < MIN_PASSWORD_CHARS {
         return Err(VaultError::WeakPassword);
     }

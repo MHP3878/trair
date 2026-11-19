@@ -205,6 +205,28 @@ Known limits of the server:
 - The database is not encrypted at rest; it holds public keys, hashes
   and ciphertext.
 
+## The app and the server (M3, step 3)
+
+Code: `app/lib/core/server.dart`, `app/lib/app_state.dart`, the server
+ops in `crates/trair-ffi/src/api.rs`; tests: `crates/trair-ffi/tests/
+tuer.rs` (d12 to d14), `app/test/widget_test.dart` (group "Server und
+Koppeln") and `app/test/server_native_test.dart` (two devices pair
+through the real server with the real core).
+
+- The app only sends; the core computes. Login signatures, pairing keys
+  (SPAKE2 state) and the new device's vault never leave the Rust core.
+  The app sees the code it has to show, public data and ciphertext.
+- Until the server has TLS, the app only talks to a server on the same
+  computer (`http://127.0.0.1`, `localhost` or `[::1]`) and refuses any
+  other address before sending anything.
+- The session token lives only in memory and is gone when Trair locks.
+- A device list from the server is taken only if the account signed it,
+  it is newer, and this device is still on it. If another device
+  withdrew this one, the app says so plainly.
+- Deleting the account signs the server deletion first, deletes the
+  vault with the password, and only then sends the deletion, so a wrong
+  password never deletes the server side.
+
 ## Rules for this repository
 
 No private keys, passwords, recovery keys, tokens or user data are ever

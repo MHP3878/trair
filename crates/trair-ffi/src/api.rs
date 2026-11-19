@@ -20,6 +20,20 @@
 //! | `withdraw_device` | `id`, `password`       | `devices`                        |
 //! | `verify_badges`   | `holder`, `name`, `badges` | `badges`, `refused`, `name_warning` |
 //! | `add_badge`       | `badge`                | `badges`                         |
+//! | `server_identity` |                        | `user`, `device`, `account_key`, `device_list` |
+//! | `sign_login`      | `challenge` (hex)      | `signature` (hex)                |
+//! | `sign_deletion`   | `now`                  | `signature` (hex)                |
+//! | `pair_host_start` | `channel`              | `code`, `hello`                  |
+//! | `pair_host_finish`| `hello`, `offer`       | `bundle`, `device_list`, `devices` |
+//! | `pair_guest_start`| `code`                 | `channel`, `hello`               |
+//! | `pair_guest_offer`| `hello`                | `offer`                          |
+//! | `pair_guest_finish`| `bundle`, `password`  | like `create`                    |
+//! | `pair_cancel`     |                        |                                  |
+//! | `apply_device_list` | `device_list`        | `devices`, `changed`; error `withdrawn` |
+//!
+//! The server ops (M3, step 3) only compute; the app sends the results
+//! over the network. Pairing keys stay in here: the app only ever sees
+//! the code it has to show and messages for the relay (base64).
 //!
 //! `account_key` is the public account key in hex (for the team tool);
 //! `badges` are the own badges that are valid now.
@@ -41,9 +55,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as B64;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use trair_core::SignedDeviceList;
 use trair_core::badges::{self, Badge};
+use trair_core::pairing::{Code, PairingGuest, PairingHost};
+use trair_core::proofs;
 use trair_core::vault::{Vault, VaultError};
 use zeroize::Zeroizing;
 
@@ -104,6 +123,34 @@ enum Request {
     AddBadge {
         badge: Value,
     },
+    ServerIdentity {},
+    SignLogin {
+        challenge: String,
+    },
+    SignDeletion {
+        now: u64,
+    },
+    PairHostStart {
+        channel: u16,
+    },
+    PairHostFinish {
+        hello: String,
+        offer: String,
+    },
+    PairGuestStart {
+        code: String,
+    },
+    PairGuestOffer {
+        hello: String,
+    },
+    PairGuestFinish {
+        bundle: String,
+        password: Zeroizing<String>,
+    },
+    PairCancel {},
+    ApplyDeviceList {
+        device_list: Value,
+    },
 }
 
 #[derive(Default)]
@@ -112,6 +159,8 @@ struct State {
     vault: Option<Vault>,
     failures: u32,
     blocked_until: Option<Instant>,
+    pair_host: Option<PairingHost>,
+    pair_guest: Option<PairingGuest>,
 }
 
 static STATE: Mutex<State> = Mutex::new(State {
@@ -119,6 +168,8 @@ static STATE: Mutex<State> = Mutex::new(State {
     vault: None,
     failures: 0,
     blocked_until: None,
+    pair_host: None,
+    pair_guest: None,
 });
 
 /// Handle one request. Never panics on bad input; a poisoned lock (a
@@ -154,6 +205,7 @@ fn run(state: &mut State, req: Request) -> Value {
         Request::Unlock { password } => unlock(state, &password),
         Request::Lock {} => {
             state.vault = None;
+            state.pair_host = None;
             json!({"ok": true})
         }
         Request::SaveProfile { profile } => save_profile(state, profile),
@@ -171,6 +223,22 @@ fn run(state: &mut State, req: Request) -> Value {
             badges,
         } => verify_badges(&holder, &name, badges),
         Request::AddBadge { badge } => add_badge(state, badge),
+        Request::ServerIdentity {} => server_identity(state),
+        Request::SignLogin { challenge } => sign_login(state, &challenge),
+        Request::SignDeletion { now } => sign_deletion(state, now),
+        Request::PairHostStart { channel } => pair_host_start(state, channel),
+        Request::PairHostFinish { hello, offer } => pair_host_finish(state, &hello, &offer),
+        Request::PairGuestStart { code } => pair_guest_start(state, &code),
+        Request::PairGuestOffer { hello } => pair_guest_offer(state, &hello),
+        Request::PairGuestFinish { bundle, password } => {
+            pair_guest_finish(state, &bundle, &password)
+        }
+        Request::ApplyDeviceList { device_list } => apply_device_list(state, device_list),
+        Request::PairCancel {} => {
+            state.pair_host = None;
+            state.pair_guest = None;
+            json!({"ok": true})
+        }
     }
 }
 
@@ -329,6 +397,204 @@ fn withdraw_device(state: &mut State, id: &str, password: &str) -> Value {
         return vault_error(e);
     }
     with_devices(seal_and_write(vault, &path), vault)
+}
+
+// ---------------------------------------------------------------- server (M3)
+
+/// What the server needs to register this account: all public.
+fn server_identity(state: &State) -> Value {
+    let Some(vault) = state.vault.as_ref() else {
+        return fail("locked");
+    };
+    json!({
+        "ok": true,
+        "user": vault.account().user(),
+        "device": vault.device().id,
+        "account_key": hex::encode(vault.account().public_key()),
+        "device_list": vault.device_list(),
+    })
+}
+
+/// Sign the server's login challenge with this device's key.
+fn sign_login(state: &State, challenge: &str) -> Value {
+    let Some(vault) = state.vault.as_ref() else {
+        return fail("locked");
+    };
+    let Ok(challenge) = hex::decode(challenge) else {
+        return fail("bad_request");
+    };
+    match proofs::sign_login(vault.device(), vault.account().user(), &challenge) {
+        Ok(sig) => json!({"ok": true, "signature": hex::encode(sig)}),
+        Err(_) => fail("bad_request"),
+    }
+}
+
+/// The account key agrees to delete the account on the server.
+fn sign_deletion(state: &State, now: u64) -> Value {
+    let Some(vault) = state.vault.as_ref() else {
+        return fail("locked");
+    };
+    match proofs::sign_account_deletion(vault.account(), now) {
+        Ok(sig) => json!({"ok": true, "signature": hex::encode(sig)}),
+        Err(_) => fail("internal"),
+    }
+}
+
+fn unbase64(text: &str) -> Option<Vec<u8>> {
+    B64.decode(text).ok().filter(|b| !b.is_empty())
+}
+
+/// A device list from the server, made by another device of the account
+/// (after pairing or withdrawing). Taken only if the account signed it,
+/// it is newer and this device is still on it; older or equal lists are
+/// answered with `changed: false`.
+fn apply_device_list(state: &mut State, list: Value) -> Value {
+    let Some(path) = vault_path(state) else {
+        return fail("not_initialized");
+    };
+    let Some(vault) = state.vault.as_mut() else {
+        return fail("locked");
+    };
+    let Ok(list) = serde_json::from_value::<SignedDeviceList>(list) else {
+        return fail("bad_request");
+    };
+    if list.list.seq <= vault.device_list().list.seq {
+        return json!({"ok": true, "changed": false, "devices": devices(vault)});
+    }
+    // Signed by the account, but without this device: another device of
+    // the account withdrew this one. The app says so plainly.
+    match list.verify(vault.account().public_key(), None) {
+        Ok(l) if !l.contains(&vault.device().id) => return fail("withdrawn"),
+        Ok(_) => {}
+        Err(_) => return fail("refused"),
+    }
+    if let Err(e) = vault.set_device_list(list) {
+        return vault_error(e);
+    }
+    let mut answer = seal_and_write(vault, &path);
+    if answer["ok"] == true {
+        answer["changed"] = json!(true);
+        answer["devices"] = devices(vault);
+    }
+    answer
+}
+
+/// The unlocked device starts pairing on a channel from the server.
+fn pair_host_start(state: &mut State, channel: u16) -> Value {
+    if state.vault.is_none() {
+        return fail("locked");
+    }
+    match PairingHost::start(channel, Instant::now()) {
+        Ok((host, code, hello)) => {
+            state.pair_host = Some(host);
+            json!({"ok": true, "code": code.text(), "hello": B64.encode(hello)})
+        }
+        Err(_) => fail("internal"),
+    }
+}
+
+/// The guest's answer arrived: add the new device, store the vault, and
+/// return the bundle for the relay and the new list for the server. The
+/// pairing is used up either way.
+fn pair_host_finish(state: &mut State, hello: &str, offer: &str) -> Value {
+    let Some(path) = vault_path(state) else {
+        return fail("not_initialized");
+    };
+    let Some(mut host) = state.pair_host.take() else {
+        return fail("no_pairing");
+    };
+    let Some(vault) = state.vault.as_mut() else {
+        return fail("locked");
+    };
+    let (Some(hello), Some(offer)) = (unbase64(hello), unbase64(offer)) else {
+        return fail("bad_request");
+    };
+    let bundle = match host.finish(&hello, &offer, vault, Instant::now()) {
+        Ok(b) => b,
+        // Wrong code, changed message or expired: nothing was added.
+        Err(_) => return fail("pairing_failed"),
+    };
+    let mut answer = seal_and_write(vault, &path);
+    if answer["ok"] == true {
+        answer["bundle"] = json!(B64.encode(bundle));
+        answer["device_list"] = json!(vault.device_list());
+        answer["devices"] = devices(vault);
+    }
+    answer
+}
+
+/// A new device (no vault yet) starts pairing with the typed code.
+fn pair_guest_start(state: &mut State, code: &str) -> Value {
+    let Some(path) = vault_path(state) else {
+        return fail("not_initialized");
+    };
+    if path.exists() || state.vault.is_some() {
+        return fail("exists");
+    }
+    let Ok(code) = Code::parse(code) else {
+        return fail("bad_code");
+    };
+    match PairingGuest::start(&code) {
+        Ok((guest, hello)) => {
+            state.pair_guest = Some(guest);
+            json!({"ok": true, "channel": code.channel(), "hello": B64.encode(hello)})
+        }
+        Err(_) => fail("internal"),
+    }
+}
+
+/// The host's hello arrived: answer with this device's encrypted offer.
+fn pair_guest_offer(state: &mut State, hello: &str) -> Value {
+    let Some(guest) = state.pair_guest.as_mut() else {
+        return fail("no_pairing");
+    };
+    let Some(hello) = unbase64(hello) else {
+        return fail("bad_request");
+    };
+    match guest.offer(&hello) {
+        Ok(offer) => json!({"ok": true, "offer": B64.encode(offer)}),
+        Err(_) => {
+            state.pair_guest = None;
+            fail("pairing_failed")
+        }
+    }
+}
+
+/// The bundle arrived: check it, make this device's vault with its own
+/// password and unlock it.
+fn pair_guest_finish(state: &mut State, bundle: &str, password: &str) -> Value {
+    let Some(path) = vault_path(state) else {
+        return fail("not_initialized");
+    };
+    if path.exists() {
+        return fail("exists");
+    }
+    let Some(bundle) = unbase64(bundle) else {
+        return fail("bad_request");
+    };
+    // Check the password before the pairing is used up.
+    if let Err(e) = trair_core::vault::check_password(password) {
+        return vault_error(e);
+    }
+    let Some(guest) = state.pair_guest.take() else {
+        return fail("no_pairing");
+    };
+    let joined = match guest.finish(&bundle) {
+        Ok(j) => j,
+        Err(_) => return fail("pairing_failed"),
+    };
+    match Vault::create_joined(password, joined) {
+        Ok((vault, file)) => {
+            if write_vault(&path, &file).is_err() {
+                return fail("io");
+            }
+            let answer = unlocked_answer(&vault);
+            state.vault = Some(vault);
+            state.failures = 0;
+            answer
+        }
+        Err(e) => vault_error(e),
+    }
 }
 
 fn add_badge(state: &mut State, badge: Value) -> Value {
