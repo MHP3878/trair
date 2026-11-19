@@ -16,6 +16,8 @@ use trair_ffi::api::{VAULT_FILE, handle, wait_after};
 
 static TURN: Mutex<()> = Mutex::new(());
 const PW: &str = "mein langes passwort";
+/// A wrong password for the emergency PIN tests.
+const NOT_PW: &str = "falsch-falsch"; // pragma: allowlist secret (Testpasswort)
 
 fn call(req: Value) -> Value {
     serde_json::from_slice(&handle(&serde_json::to_vec(&req).unwrap())).unwrap()
@@ -1275,7 +1277,7 @@ fn d22_setting_pins_needs_the_password_and_follows_the_rules() {
     let id = three["pins"][0]["id"].as_str().unwrap().to_string();
     assert_eq!(
         error(&call(
-            json!({"op": "notfall_remove", "id": id, "password": "falsch-falsch"})
+            json!({"op": "notfall_remove", "id": id, "password": NOT_PW})
         )),
         "wrong_password"
     );
@@ -1289,9 +1291,7 @@ fn d22_setting_pins_needs_the_password_and_follows_the_rules() {
     );
     assert_eq!(call(json!({"op": "unlock", "password": PW}))["ok"], true);
     assert_eq!(
-        error(&call(
-            json!({"op": "notfall_list", "password": "falsch-falsch"})
-        )),
+        error(&call(json!({"op": "notfall_list", "password": NOT_PW}))),
         "wrong_password"
     );
     let listed = call(json!({"op": "notfall_list", "password": PW}));

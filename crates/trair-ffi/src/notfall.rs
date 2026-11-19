@@ -27,7 +27,7 @@ pub(crate) struct Session {
 fn after_str(a: After) -> &'static str {
     match a {
         After::Vanish => "vanish",
-        After::WrongPassword => "wrong_password",
+        After::WrongPassword => "wrong_password", // pragma: allowlist secret (Fehlercode)
     }
 }
 
