@@ -176,35 +176,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-          const Padding(
-            padding: EdgeInsets.only(left: 4),
-            child: SidebarHeader(title: 'Einstellungen', trailing: BackToChats()),
-          ),
-          const SizedBox(height: 12),
-          for (final entry in _navIcons.entries)
-            InkWell(
-              borderRadius: BorderRadius.circular(8),
-              onTap: () {
-                final ctx = _keys[entry.key]?.currentContext;
-                if (ctx != null) {
-                  Scrollable.ensureVisible(
-                    ctx,
-                    duration: const Duration(milliseconds: 350),
-                    curve: Curves.easeOutCubic,
-                  );
-                }
-              },
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-                child: Row(
-                  children: [
-                    Icon(entry.value, size: 18, color: TrairColors.textMuted),
-                    const SizedBox(width: 12),
-                    Text(entry.key, style: const TextStyle(fontSize: 14.5, color: TrairColors.textSoft)),
-                  ],
+                const Padding(
+                  padding: EdgeInsets.only(left: 4),
+                  child: SidebarHeader(title: 'Einstellungen', trailing: BackToChats()),
                 ),
-              ),
-            ),
+                const SizedBox(height: 12),
+                for (final entry in _navIcons.entries)
+                  InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () {
+                      final ctx = _keys[entry.key]?.currentContext;
+                      if (ctx != null) {
+                        Scrollable.ensureVisible(
+                          ctx,
+                          duration: const Duration(milliseconds: 350),
+                          curve: Curves.easeOutCubic,
+                        );
+                      }
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+                      child: Row(
+                        children: [
+                          Icon(entry.value, size: 18, color: TrairColors.textMuted),
+                          const SizedBox(width: 12),
+                          Text(entry.key, style: const TextStyle(fontSize: 14.5, color: TrairColors.textSoft)),
+                        ],
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),

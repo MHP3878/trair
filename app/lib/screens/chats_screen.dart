@@ -123,89 +123,89 @@ class _ChatsScreenState extends State<ChatsScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-          PillField(
-            controller: _search,
-            focusNode: _searchFocus,
-            hint: 'Suchen',
-            height: 38,
-            semanticLabel: 'Chats durchsuchen (nur auf diesem Gerät)',
-            leading: const Icon(TrairIcons.search, size: 18, color: TrairColors.textMuted),
-            onChanged: (_) => setState(() {}),
-            trailing: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(color: const Color(0x0FFFFFFF), borderRadius: BorderRadius.circular(999)),
-              child: const Text(
-                'Strg K',
-                style: TextStyle(fontFamily: 'GeistMono', fontSize: 11, color: TrairColors.textMuted),
+              PillField(
+                controller: _search,
+                focusNode: _searchFocus,
+                hint: 'Suchen',
+                height: 38,
+                semanticLabel: 'Chats durchsuchen (nur auf diesem Gerät)',
+                leading: const Icon(TrairIcons.search, size: 18, color: TrairColors.textMuted),
+                onChanged: (_) => setState(() {}),
+                trailing: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(color: const Color(0x0FFFFFFF), borderRadius: BorderRadius.circular(999)),
+                  child: const Text(
+                    'Strg K',
+                    style: TextStyle(fontFamily: 'GeistMono', fontSize: 11, color: TrairColors.textMuted),
+                  ),
+                ),
               ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          GlassPanel(
-            lite: true,
-            radius: 999,
-            padding: const EdgeInsets.all(3),
-            child: Row(
-              children: [
-                for (final f in _Filter.values)
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => setState(() => _filter = f),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        height: 32,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: _filter == f ? const Color(0x1AFFFFFF) : Colors.transparent,
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          switch (f) {
-                            _Filter.all => 'Alle',
-                            _Filter.direct => 'Direkt',
-                            _Filter.group => 'Gruppen',
-                          },
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                            color: _filter == f ? TrairColors.text : TrairColors.textMuted,
+              const SizedBox(height: 10),
+              GlassPanel(
+                lite: true,
+                radius: 999,
+                padding: const EdgeInsets.all(3),
+                child: Row(
+                  children: [
+                    for (final f in _Filter.values)
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => setState(() => _filter = f),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            height: 32,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: _filter == f ? const Color(0x1AFFFFFF) : Colors.transparent,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              switch (f) {
+                                _Filter.all => 'Alle',
+                                _Filter.direct => 'Direkt',
+                                _Filter.group => 'Gruppen',
+                              },
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                                color: _filter == f ? TrairColors.text : TrairColors.textMuted,
+                              ),
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
+                  ],
+                ),
+              ),
             ],
           ),
         ),
         const SizedBox(height: 12),
         Expanded(
-            child: ListView(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              children: [
-                if (state.chatsReady) ...[
-                  _sectionLabel('Echt verschlüsselt'),
-                  for (final c in state.realChats) _realRow(state, c),
-                  if (state.realChats.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.fromLTRB(12, 2, 12, 8),
-                      child: Text('Noch keine. Oben auf „Neuer Chat“.', style: TrairText.small),
-                    ),
-                  const SizedBox(height: 8),
-                  _sectionLabel('Demo (nicht verschlüsselt)'),
-                ],
-                for (final c in visible) _chatRow(state, c),
-                if (visible.isEmpty)
+          child: ListView(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            children: [
+              if (state.chatsReady) ...[
+                _sectionLabel('Echt verschlüsselt'),
+                for (final c in state.realChats) _realRow(state, c),
+                if (state.realChats.isEmpty)
                   const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: Text('Kein Chat gefunden.', style: TrairText.muted),
+                    padding: EdgeInsets.fromLTRB(12, 2, 12, 8),
+                    child: Text('Noch keine. Oben auf „Neuer Chat“.', style: TrairText.small),
                   ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
+                _sectionLabel('Demo (nicht verschlüsselt)'),
               ],
-            ),
+              for (final c in visible) _chatRow(state, c),
+              if (visible.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: Text('Kein Chat gefunden.', style: TrairText.muted),
+                ),
+              const SizedBox(height: 10),
+            ],
           ),
+        ),
         const ProfileCard(),
       ],
     );
@@ -608,7 +608,9 @@ class _ChatsScreenState extends State<ChatsScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Container(
-            decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: TrairColors.borderSoft))),
+            decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(color: TrairColors.borderSoft)),
+            ),
             padding: const EdgeInsets.fromLTRB(20, 11, 16, 11),
             child: Row(
               children: [
@@ -780,7 +782,9 @@ class _ChatsScreenState extends State<ChatsScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Container(
-                decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: TrairColors.borderSoft))),
+                decoration: const BoxDecoration(
+                  border: Border(bottom: BorderSide(color: TrairColors.borderSoft)),
+                ),
                 padding: const EdgeInsets.fromLTRB(20, 11, 16, 11),
                 child: Row(
                   children: [

@@ -56,7 +56,9 @@ class ServerRail extends StatelessWidget {
             selected: false,
             onTap: () => ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('Eigene Communities kommen mit den echten Gruppen. „Trair Beta“ ist bis dahin eine Demo.'),
+                content: Text(
+                  'Eigene Communities kommen mit den echten Gruppen. „Trair Beta“ ist bis dahin eine Demo.',
+                ),
               ),
             ),
             builder: (on) => _Disc(
@@ -87,8 +89,10 @@ class _Disc extends StatelessWidget {
   final Widget child;
 
   @override
-  Widget build(BuildContext context) =>
-      ColoredBox(color: color, child: Center(child: child));
+  Widget build(BuildContext context) => ColoredBox(
+    color: color,
+    child: Center(child: child),
+  );
 }
 
 /// One entry of the rail: round, a rounded square when chosen or
