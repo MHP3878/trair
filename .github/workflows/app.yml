@@ -112,11 +112,16 @@ jobs:
           Copy-Item assets/branding/app_icon.ico windows/runner/resources/app_icon.ico -Force
           if (-not (Select-String -Path windows/runner/main.cpp -Pattern 'L"Trair"' -Quiet)) { throw "Fenstertitel nicht gesetzt" }
           if (-not (Select-String -Path windows/CMakeLists.txt -Pattern 'BINARY_NAME "Trair"' -Quiet)) { throw "Dateiname nicht gesetzt" }
-      # The core's Windows parts (DPAPI, screenshot block) are tested here,
-      # on Windows, then the DLL is built and placed next to Trair.exe.
-      - name: Sicherheitskern und Team-Werkzeug testen (Windows)
+      # The core's Windows parts (DPAPI, screenshot block) are checked and
+      # tested here, on Windows, together with the chat database (SQLCipher
+      # with OpenSSL, built from source); then the DLL is built and placed
+      # next to Trair.exe.
+      - name: Clippy für Windows-Code
         working-directory: .
-        run: cargo test -p trair-ffi -p trair-team --locked
+        run: cargo clippy -p trair-ffi -p trair-core --all-targets --locked -- -D warnings
+      - name: Sicherheitskern, Chats und Team-Werkzeug testen (Windows)
+        working-directory: .
+        run: cargo test -p trair-ffi -p trair-core -p trair-team --locked
       - name: Sicherheitskern bauen
         working-directory: .
         run: cargo build -p trair-ffi --release --locked
