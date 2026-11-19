@@ -265,3 +265,40 @@ fn t15_debug_output_has_no_secrets() {
 fn hex_of(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
+
+#[test]
+fn t16_chat_key_is_random_kept_and_not_tied_to_the_password() {
+    let (mut v, file) = new_vault();
+    let (w, _) = new_vault();
+    assert_ne!(v.chats_key(), w.chats_key(), "every vault has its own key");
+    assert_ne!(v.chats_key(), &[0u8; 32]);
+    let key = *v.chats_key();
+    assert_eq!(open(&file, &PW).unwrap().chats_key(), &key);
+    assert!(!open(&file, &PW).unwrap().migrated());
+    // A new password does not change the key of the chat database.
+    let other = secret(25);
+    v.change_password_with(&other, CHEAP).unwrap();
+    let file = v.seal().unwrap();
+    assert_eq!(open(&file, &other).unwrap().chats_key(), &key);
+    // The key is never readable in the file.
+    assert!(!file.windows(32).any(|w| w == key));
+    assert!(!file.windows(64).any(|w| w == hex_of(&key).as_bytes()));
+}
+
+#[test]
+fn t17_a_vault_from_before_m4_gets_a_chat_key_once() {
+    // Written by Trair before chats were stored (M3), see fixtures/README.md.
+    let file = std::fs::read("tests/fixtures/vault-v2-cheap.bin").unwrap();
+    let pw = std::fs::read_to_string("tests/fixtures/vault-v1.password").unwrap();
+    let pw = pw.trim_end();
+    let fp = std::fs::read_to_string("tests/fixtures/vault-v2-cheap.fingerprint").unwrap();
+    let v = open(&file, pw).expect("old vault opens");
+    assert_eq!(v.account().fingerprint().as_str(), fp.trim());
+    assert!(v.migrated(), "the caller has to store the new key");
+    let key = *v.chats_key();
+    let stored = v.seal().unwrap();
+    let again = open(&stored, pw).unwrap();
+    assert!(!again.migrated());
+    assert_eq!(again.chats_key(), &key, "the same key from now on");
+    assert_eq!(again.device_list().list.devices.len(), 1);
+}

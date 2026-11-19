@@ -6,7 +6,10 @@ prüfen damit, dass alte Tresore beim Öffnen sauber umziehen.
 
 - `vault-v1-cheap.bin`: billige Argon2-Einstellungen, nur für schnelle Tests.
 - `vault-v1-real.bin`: echte Einstellungen (256 MiB, 4 Durchläufe).
-- `vault-v1.password`: das Passwort beider Dateien.
+- `vault-v2-cheap.bin`: Version 2 (mit Gerät), wie Trair sie vor M4
+  geschrieben hat, noch ohne Schlüssel für die Chat-Datenbank. Billige
+  Einstellungen. `tests/tresor.rs` prüft, dass der Schlüssel einmal dazukommt.
+- `vault-v1.password`: das Passwort aller drei Dateien.
 - `*.fingerprint`: Fingerabdruck des Kontos darin, zum Vergleich.
 
 Das Konto darin ist ein Wegwerf-Konto, das nur für diese Tests erzeugt

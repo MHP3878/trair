@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use crate::account::{Account, DeviceCertificate, Fingerprint, SCHEME};
 use crate::devices::DeviceIdentity;
 use crate::error::{CoreError, Result, internal};
-use crate::policy::{Policy, Trust};
+use crate::policy::{Policy, PolicyState, Trust};
 
 /// The only cipher suite Trair uses: X25519, AES-128-GCM, SHA-256, Ed25519.
 pub const CIPHERSUITE: Ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
@@ -74,6 +74,8 @@ pub enum Event {
         group: String,
         /// Everyone in the group, with trust levels.
         members: Vec<Member>,
+        /// The device that added this one (its signature is checked).
+        by: Member,
         /// The welcome used the last-resort key package. Call
         /// [`Device::self_update`] for this group right away.
         via_last_resort: bool,
@@ -113,6 +115,17 @@ pub enum Event {
 struct Payload {
     seq: u64,
     text: String,
+}
+
+/// What a device keeps besides the OpenMLS key-value store: which groups
+/// it has, its message counters, its last-resort package and its policy.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub(crate) struct DeviceState {
+    groups: Vec<String>,
+    seq_out: Vec<(String, u64)>,
+    seq_in: Vec<(String, String, u64)>,
+    last_resort: Option<Vec<u8>>,
+    policy: PolicyState,
 }
 
 /// One device of an account.
@@ -164,6 +177,125 @@ impl Device {
             seq_in: HashMap::new(),
             last_resort: None,
         })
+    }
+
+    /// A device as it was saved: the OpenMLS key-value store plus
+    /// [`DeviceState`]. Every group listed there must load.
+    pub(crate) fn restore(
+        account: &Account,
+        identity: &DeviceIdentity,
+        values: HashMap<Vec<u8>, Vec<u8>>,
+        state: DeviceState,
+    ) -> Result<Self> {
+        let mut dev = Self::from_identity(account, identity)?;
+        {
+            let mut map = dev
+                .provider
+                .storage()
+                .values
+                .write()
+                .map_err(|_| CoreError::Internal("storage lock".into()))?;
+            for (k, v) in values {
+                map.insert(k, v);
+            }
+        }
+        for group in state.groups {
+            let g = MlsGroup::load(
+                dev.provider.storage(),
+                &GroupId::from_slice(group.as_bytes()),
+            )
+            .map_err(internal)?
+            .ok_or_else(|| CoreError::Storage(format!("group {group} is missing")))?;
+            dev.groups.insert(group, g);
+        }
+        dev.seq_out = state.seq_out.into_iter().collect();
+        dev.seq_in = state
+            .seq_in
+            .into_iter()
+            .map(|(g, s, n)| ((g, s), n))
+            .collect();
+        dev.last_resort = state
+            .last_resort
+            .map(|b| KeyPackageRef::tls_deserialize_exact(b.as_slice()))
+            .transpose()
+            .map_err(|_| CoreError::Storage("last-resort reference is not readable".into()))?;
+        dev.policy = Policy::import(state.policy)?;
+        Ok(dev)
+    }
+
+    /// The state to save next to the key-value store.
+    pub(crate) fn export_state(&self) -> DeviceState {
+        let mut groups: Vec<String> = self.groups.keys().cloned().collect();
+        groups.sort();
+        let mut seq_out: Vec<(String, u64)> =
+            self.seq_out.iter().map(|(g, n)| (g.clone(), *n)).collect();
+        seq_out.sort();
+        let mut seq_in: Vec<(String, String, u64)> = self
+            .seq_in
+            .iter()
+            .map(|((g, s), n)| (g.clone(), s.clone(), *n))
+            .collect();
+        seq_in.sort();
+        DeviceState {
+            groups,
+            seq_out,
+            seq_in,
+            last_resort: self
+                .last_resort
+                .as_ref()
+                .and_then(|r| r.tls_serialize_detached().ok()),
+            policy: self.policy.export(),
+        }
+    }
+
+    /// Visit the OpenMLS key-value store (for saving it).
+    pub(crate) fn with_values<T>(
+        &self,
+        f: impl FnOnce(&HashMap<Vec<u8>, Vec<u8>>) -> T,
+    ) -> Result<T> {
+        let map = self
+            .provider
+            .storage()
+            .values
+            .read()
+            .map_err(|_| CoreError::Internal("storage lock".into()))?;
+        Ok(f(&map))
+    }
+
+    /// Drop a group from this device: its keys are deleted, later
+    /// messages for it are refused.
+    pub fn forget_group(&mut self, group: &str) -> Result<()> {
+        let mut g = self
+            .groups
+            .remove(group)
+            .ok_or_else(|| CoreError::UnknownGroup(group.to_string()))?;
+        g.delete(self.provider.storage()).map_err(internal)?;
+        self.seq_out.remove(group);
+        self.seq_in.retain(|(g, _), _| g != group);
+        Ok(())
+    }
+
+    /// The account fingerprint of a user in a group, from that user's
+    /// checked device certificates. None if the user is not in the group
+    /// or the certificates disagree.
+    pub fn account_of(&self, group: &str, user: &str) -> Result<Option<Fingerprint>> {
+        let g = self.group(group)?;
+        let mut found: Option<Fingerprint> = None;
+        for m in g.members() {
+            let Ok(c) =
+                DeviceCertificate::check(m.credential.serialized_content(), &m.signature_key)
+            else {
+                continue;
+            };
+            if c.user != user {
+                continue;
+            }
+            match &found {
+                Some(f) if *f != c.account => return Ok(None),
+                _ => found = Some(c.account),
+            }
+        }
+        Ok(found)
     }
 
     /// `user:device`
@@ -468,6 +600,40 @@ impl Device {
         })
     }
 
+    /// Remove single devices (for example a withdrawn one) from a group.
+    pub fn remove_devices(&mut self, group: &str, ids: &[String]) -> Result<Outgoing> {
+        let targets: Vec<(LeafNodeIndex, String)> = self
+            .members_indexed(group)?
+            .into_iter()
+            .filter(|(_, m)| ids.contains(&m.id) && m.trust != Trust::Own)
+            .map(|(i, m)| (i, m.id))
+            .collect();
+        if targets.is_empty() {
+            return Err(CoreError::Rejected(format!(
+                "none of these devices is in {group}"
+            )));
+        }
+        let epoch = self.epoch(group)?;
+        let idx: Vec<LeafNodeIndex> = targets.iter().map(|t| t.0).collect();
+        let (provider, keys) = (&self.provider, &self.keys);
+        let g = self
+            .groups
+            .get_mut(group)
+            .ok_or_else(|| CoreError::UnknownGroup(group.to_string()))?;
+        let (commit, welcome, _) = g.remove_members(provider, keys, &idx).map_err(internal)?;
+        Ok(Outgoing {
+            group: group.to_string(),
+            epoch,
+            commit: commit.to_bytes().map_err(internal)?,
+            welcome: welcome
+                .map(|w| w.to_bytes())
+                .transpose()
+                .map_err(internal)?,
+            added: Vec::new(),
+            removed: targets.into_iter().map(|t| t.1).collect(),
+        })
+    }
+
     /// Replace this device's keys in a group (needed after joining through
     /// the last-resort key package, and useful from time to time).
     pub fn self_update(&mut self, group: &str) -> Result<Outgoing> {
@@ -599,6 +765,11 @@ impl Device {
                     other => CoreError::Rejected(format!("{other:?}")),
                 }
             })?;
+        let by = staged.welcome_sender().map_err(internal)?;
+        let by = self.judge(
+            by.credential().serialized_content(),
+            by.signature_key().as_slice(),
+        );
         // Check every member before the group is stored.
         let members: Vec<Member> = staged
             .members()
@@ -618,6 +789,7 @@ impl Device {
         Ok(Event::Joined {
             group,
             members,
+            by,
             via_last_resort,
         })
     }

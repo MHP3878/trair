@@ -17,7 +17,7 @@ Trair wird ein Messenger, der sich so einfach bedienen lässt wie WhatsApp oder 
 
 | Ordner | Inhalt |
 | --- | --- |
-| `crates/trair-core` | Rust-Kern der App: Konten, Geräte und unterschriebene Geräteliste, Koppeln mit Code (SPAKE2), unterschriebene Abzeichen, MLS-Gruppen, strenger Modus, Tresor. Angriffstests: `tests/angriffe.rs`, `tests/koppeln.rs`, `tests/abzeichen.rs` |
+| `crates/trair-core` | Rust-Kern der App: Konten, Geräte und unterschriebene Geräteliste, Koppeln mit Code (SPAKE2), unterschriebene Abzeichen, MLS-Gruppen, strenger Modus, Tresor, Kontakte per Code und Chats in einer verschlüsselten Datenbank (SQLCipher). Angriffstests: `tests/angriffe.rs`, `tests/koppeln.rs`, `tests/abzeichen.rs`, `tests/chats.rs` |
 | `crates/trair-team` | Team-Werkzeug: erzeugt den Trair-Team-Schlüssel auf dem eigenen PC und unterschreibt Team-Abzeichen (`trair-team neu`, `zeigen`, `abzeichen`) |
 | `crates/trair-ffi` | Die schmale Tür zwischen App und Kern: vier C-Funktionen, JSON-Nachrichten, unter Windows DPAPI und Bildschirmfoto-Schutz |
 | `crates/trair-server` | Server (M3): Konten, Anmeldung per Geräteschlüssel, Zustellung verschlüsselter Nachrichten ohne Absender, Kopplungs-Relay. Läuft vorerst nur lokal: `cargo run -p trair-server` |

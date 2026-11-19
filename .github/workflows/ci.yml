@@ -36,11 +36,8 @@ jobs:
       - name: Tests
         run: cargo test --workspace --locked
       # The Windows-only code of the door (DPAPI, screenshot block) is
-      # checked with Clippy here too; the Windows job also tests it.
-      - name: Clippy für Windows-Code
-        run: |
-          rustup target add x86_64-pc-windows-msvc
-          cargo clippy -p trair-ffi --target x86_64-pc-windows-msvc --all-targets --locked -- -D warnings
+      # checked with Clippy in the Windows job (app.yml): since M4 the core
+      # builds OpenSSL for SQLCipher, which only works on Windows itself.
 
   deny:
     name: Lizenzen und bekannte Schwachstellen

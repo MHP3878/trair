@@ -160,6 +160,7 @@ struct ContentRef<'a> {
     labels: &'a BTreeMap<String, String>,
     profile: &'a Value,
     badges: &'a [Badge],
+    chats_key: &'a str,
 }
 
 #[derive(Deserialize)]
@@ -177,6 +178,9 @@ struct Content {
     // Missing before own badges were stored (19.11.2026).
     #[serde(default)]
     badges: Vec<Badge>,
+    // Missing before chats were stored on disk (M4). Hex, 32 bytes.
+    #[serde(default)]
+    chats_key: Option<String>,
 }
 
 /// What a new device receives when it is paired: everything to build its
@@ -203,6 +207,7 @@ pub struct Vault {
     labels: BTreeMap<String, String>,
     profile: Value,
     badges: Vec<Badge>,
+    chats_key: Zeroizing<[u8; 32]>,
     migrated: bool,
 }
 
@@ -272,6 +277,7 @@ impl Vault {
             labels,
             profile: joined.profile,
             badges: Vec::new(),
+            chats_key: Zeroizing::new(random::<32>()?),
             migrated: false,
         };
         let file = vault.seal()?;
@@ -324,6 +330,18 @@ impl Vault {
                 }
             };
         check_own_device(&account, &device, &list)?;
+        // Each device has its own random key for its chat database. Older
+        // vaults get one now and are stored again (see `migrated`).
+        let (chats_key, new_chats_key) = match content.chats_key {
+            Some(hex_key) => {
+                let hex_key = Zeroizing::new(hex_key);
+                let mut k = Zeroizing::new([0u8; 32]);
+                hex::decode_to_slice(hex_key.as_bytes(), k.as_mut_slice())
+                    .map_err(|_| VaultError::Damaged("chat key is not readable".into()))?;
+                (k, false)
+            }
+            None => (Zeroizing::new(random::<32>()?), true),
+        };
         Ok(Vault {
             params: header.params,
             salt: header.salt,
@@ -334,12 +352,14 @@ impl Vault {
             labels,
             profile: content.profile,
             badges: content.badges,
-            migrated,
+            chats_key,
+            migrated: migrated || new_chats_key,
         })
     }
 
     /// Encrypt the current state again, with a fresh nonce.
     pub fn seal(&self) -> VaultResult<Vec<u8>> {
+        let chats_key = Zeroizing::new(hex::encode(self.chats_key.as_slice()));
         let content = ContentRef {
             v: PAYLOAD_VERSION,
             user: self.account.user(),
@@ -350,6 +370,7 @@ impl Vault {
             labels: &self.labels,
             profile: &self.profile,
             badges: &self.badges,
+            chats_key: &chats_key,
         };
         let plain = Zeroizing::new(serde_json::to_vec(&content).map_err(internal)?);
         let nonce = random::<NONCE_LEN>()?;
@@ -373,6 +394,12 @@ impl Vault {
         file.extend_from_slice(&header);
         file.extend_from_slice(&sealed);
         Ok(file)
+    }
+
+    /// Key of this device's chat database (SQLCipher). Random, never
+    /// leaves the vault, not tied to the password.
+    pub fn chats_key(&self) -> &[u8; 32] {
+        &self.chats_key
     }
 
     /// The account stored in this vault.

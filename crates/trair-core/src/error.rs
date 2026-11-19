@@ -37,6 +37,10 @@ pub enum CoreError {
     /// User or device names must be short and simple.
     #[error("invalid name: {0}")]
     InvalidName(String),
+    /// The chat database could not be opened or written: wrong key,
+    /// damaged file or a full disk. Nothing was sent.
+    #[error("chat storage: {0}")]
+    Storage(String),
     /// Internal error from the MLS library or the crypto provider.
     #[error("internal error: {0}")]
     Internal(String),
