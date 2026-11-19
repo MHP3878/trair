@@ -1148,14 +1148,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _newPin1.text.runes.length >= min &&
         _newPin1.text == _newPin2.text &&
         (!_pinSends || (_pinChat != null && text.isNotEmpty && text.runes.length <= 500));
-    Widget choice(String label, bool on, VoidCallback pick) => PillButton(
-      label: label,
-      kind: on ? PillKind.primary : PillKind.ghost,
-      height: 36,
-      onPressed: () => setState(() {
-        pick();
-        _pinMessage = '';
-      }),
+    // As wide as the label: in a Wrap a button would otherwise fill the row.
+    Widget choice(String label, bool on, VoidCallback pick) => IntrinsicWidth(
+      child: PillButton(
+        label: label,
+        kind: on ? PillKind.primary : PillKind.ghost,
+        height: 36,
+        onPressed: () => setState(() {
+          pick();
+          _pinMessage = '';
+        }),
+      ),
     );
     return [
       const FieldLabel('Was die neue PIN tut'),
