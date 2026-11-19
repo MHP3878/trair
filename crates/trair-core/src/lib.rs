@@ -16,6 +16,7 @@ pub mod devices;
 pub mod error;
 pub mod keypackages;
 pub mod mls;
+pub mod notfall;
 pub mod pairing;
 pub mod policy;
 pub mod proofs;

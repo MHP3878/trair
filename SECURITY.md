@@ -351,6 +351,53 @@ Konten").
 - The core locks an account's folder for its process (`trair.lock`); a
   second Trair window cannot open the same account at the same time.
 
+## Emergency PINs
+
+Code: `crates/trair-core/src/notfall.rs`, `crates/trair-ffi/src/
+notfall.rs`, `unlock` and `wipe_account` in `api.rs`; tests:
+`crates/trair-core/tests/notfall.rs` (n01–n03), `tuer.rs` (d19–d22),
+`widget_test.dart` (group "Notfall-PINs"), `server_native_test.dart`
+(a PIN sends through the real server).
+
+An emergency PIN is typed on the start screen instead of the password.
+From outside it looks like a wrong password; in fact Trair deletes the
+account on this computer.
+
+- **What is deleted:** the vault, the chat database (and its journal)
+  and the emergency files are overwritten and removed, as with "delete
+  account". Afterwards, as each PIN is set up: the account leaves the
+  start screen (its card goes too), or a new vault takes its place that
+  no password opens, so the account stays listed and every password is
+  "wrong".
+- **A PIN that sends** first writes one message to a chosen chat, logs
+  in, deletes the account on the server, then deletes everything here.
+  If the server does not answer within 12 seconds, it deletes here all
+  the same.
+- **A PIN that only deletes cannot delete the server account**: it opens
+  no key, so it cannot sign the deletion. The server forgets an account
+  after 6 months without login.
+- **Files:** every vault has `notfall.trair` with exactly 3 slots, all
+  the same size, PIN or not: unused slots are random filler. Each slot is
+  sealed with XChaCha20-Poly1305 under a key from Argon2id (same strength
+  as the vault: 256 MiB, 4 passes) over the PIN; one Argon2id run per
+  attempt tries all three slots. `notfall-daten.trair` holds what a
+  sending PIN needs (account key, device key, chat database key, server
+  address; no name, picture or other profile data), sealed with a random
+  key that only sending slots and the vault know; without a sending PIN
+  it is filler of the same size. Both files are wrapped with DPAPI on
+  Windows, like the vault.
+- **Strength:** a PIN that only deletes needs 6 characters; guessing it
+  from a copy of the files gives away no key. A PIN that sends opens the
+  keys, so it needs 12 characters, like the password. A PIN can never
+  be the password, and the password cannot be changed to one of the
+  PINs.
+- **Hidden at an open Trair:** the settings show the PINs only after the
+  password. Setting or removing one needs the password too. At most 3.
+- **Limits:** someone who copied the files before the PIN was typed
+  still has them; deleting cannot reach copies. Deleting on an SSD is not
+  guaranteed to remove every physical trace (see "The local vault"). A
+  message already sent cannot be taken back.
+
 ## Rules for this repository
 
 No private keys, passwords, recovery keys, tokens or user data are ever

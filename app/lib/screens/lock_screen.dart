@@ -48,7 +48,8 @@ class _LockScreenState extends State<LockScreen> {
     _pw.clear();
     setState(() {
       _busy = false;
-      if (!answer.ok) {
+      // "vanished": an emergency PIN took the account off the list.
+      if (!answer.ok && answer.error != 'vanished') {
         _error = vaultErrorText(answer);
         _startWait(answer.wait);
       }

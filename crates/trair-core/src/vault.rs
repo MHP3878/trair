@@ -162,6 +162,10 @@ struct ContentRef<'a> {
     profile: &'a Value,
     badges: &'a [Badge],
     chats_key: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    notfall_key: Option<&'a str>,
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    notfall: &'a [crate::notfall::Entry],
 }
 
 #[derive(Deserialize)]
@@ -182,6 +186,12 @@ struct Content {
     // Missing before chats were stored on disk (M4). Hex, 32 bytes.
     #[serde(default)]
     chats_key: Option<String>,
+    // Emergency PINs: the key of the emergency data file, and what each
+    // PIN does (see `notfall`).
+    #[serde(default)]
+    notfall_key: Option<String>,
+    #[serde(default)]
+    notfall: Vec<crate::notfall::Entry>,
 }
 
 /// What a new device receives when it is paired: everything to build its
@@ -209,6 +219,8 @@ pub struct Vault {
     profile: Value,
     badges: Vec<Badge>,
     chats_key: Zeroizing<[u8; 32]>,
+    notfall_key: Option<Zeroizing<[u8; 32]>>,
+    notfall: Vec<crate::notfall::Entry>,
     migrated: bool,
 }
 
@@ -279,6 +291,8 @@ impl Vault {
             profile: joined.profile,
             badges: Vec::new(),
             chats_key: Zeroizing::new(random::<32>()?),
+            notfall_key: None,
+            notfall: Vec::new(),
             migrated: false,
         };
         let file = vault.seal()?;
@@ -343,6 +357,10 @@ impl Vault {
             }
             None => (Zeroizing::new(random::<32>()?), true),
         };
+        let notfall_key = content
+            .notfall_key
+            .map(|h| hex32(&Zeroizing::new(h)))
+            .transpose()?;
         Ok(Vault {
             params: header.params,
             salt: header.salt,
@@ -354,6 +372,8 @@ impl Vault {
             profile: content.profile,
             badges: content.badges,
             chats_key,
+            notfall_key,
+            notfall: content.notfall,
             migrated: migrated || new_chats_key,
         })
     }
@@ -361,6 +381,10 @@ impl Vault {
     /// Encrypt the current state again, with a fresh nonce.
     pub fn seal(&self) -> VaultResult<Vec<u8>> {
         let chats_key = Zeroizing::new(hex::encode(self.chats_key.as_slice()));
+        let notfall_key = self
+            .notfall_key
+            .as_ref()
+            .map(|k| Zeroizing::new(hex::encode(k.as_slice())));
         let content = ContentRef {
             v: PAYLOAD_VERSION,
             user: self.account.user(),
@@ -372,6 +396,8 @@ impl Vault {
             profile: &self.profile,
             badges: &self.badges,
             chats_key: &chats_key,
+            notfall_key: notfall_key.as_ref().map(|k| k.as_str()),
+            notfall: &self.notfall,
         };
         let plain = Zeroizing::new(serde_json::to_vec(&content).map_err(internal)?);
         let nonce = random::<NONCE_LEN>()?;
@@ -395,6 +421,94 @@ impl Vault {
         file.extend_from_slice(&header);
         file.extend_from_slice(&sealed);
         Ok(file)
+    }
+
+    /// Key of the emergency data file, if an emergency PIN may send.
+    pub fn notfall_key(&self) -> Option<&[u8; 32]> {
+        self.notfall_key.as_deref()
+    }
+
+    /// The key of the emergency data file; made on first use.
+    pub fn ensure_notfall_key(&mut self) -> VaultResult<[u8; 32]> {
+        if self.notfall_key.is_none() {
+            self.notfall_key = Some(Zeroizing::new(random::<32>()?));
+        }
+        Ok(**self
+            .notfall_key
+            .as_ref()
+            .ok_or(VaultError::Internal("no key".into()))?)
+    }
+
+    /// What the emergency PINs do (not the PINs).
+    pub fn notfall_entries(&self) -> &[crate::notfall::Entry] {
+        &self.notfall
+    }
+
+    pub fn set_notfall_entries(&mut self, entries: Vec<crate::notfall::Entry>) {
+        if !entries.iter().any(|e| e.action.message.is_some()) {
+            self.notfall_key = None;
+        }
+        self.notfall = entries;
+    }
+
+    /// What an emergency PIN needs to send one message and delete the
+    /// account on the server: the keys, the device list and the server
+    /// address. Sealed with [`Vault::notfall_key`] next to the vault.
+    pub fn emergency_secrets(&self) -> VaultResult<Zeroizing<Vec<u8>>> {
+        let chats_key = Zeroizing::new(hex::encode(self.chats_key.as_slice()));
+        let server = self.profile.get("server").cloned().unwrap_or(Value::Null);
+        let content = ContentRef {
+            v: PAYLOAD_VERSION,
+            user: self.account.user(),
+            account: self.account.keys(),
+            device_id: &self.device.id,
+            device: &self.device.keys,
+            list: &self.list,
+            labels: &BTreeMap::new(),
+            profile: &serde_json::json!({ "server": server }),
+            badges: &[],
+            chats_key: &chats_key,
+            notfall_key: None,
+            notfall: &[],
+        };
+        Ok(Zeroizing::new(
+            serde_json::to_vec(&content).map_err(internal)?,
+        ))
+    }
+
+    /// An account opened from [`Vault::emergency_secrets`]: only to send
+    /// one message and delete. It cannot be sealed again (no password).
+    pub fn from_emergency_secrets(plain: &[u8]) -> VaultResult<Vault> {
+        let content: Content = serde_json::from_slice(plain)
+            .map_err(|_| VaultError::Damaged("emergency data is not readable".into()))?;
+        let account = Account::from_keys(&content.user, content.account)
+            .map_err(|_| VaultError::Damaged("account keys do not belong together".into()))?;
+        let (Some(id), Some(keys), Some(list)) = (content.device_id, content.device, content.list)
+        else {
+            return Err(VaultError::Damaged("emergency data is incomplete".into()));
+        };
+        let device = DeviceIdentity { id, keys };
+        check_own_device(&account, &device, &list)?;
+        let chats_key = content
+            .chats_key
+            .map(|h| hex32(&Zeroizing::new(h)))
+            .transpose()?
+            .ok_or_else(|| VaultError::Damaged("emergency data has no chat key".into()))?;
+        Ok(Vault {
+            params: KdfParams::DEFAULT,
+            salt: [0; SALT_LEN],
+            key: Zeroizing::new([0; 32]),
+            account,
+            device,
+            list,
+            labels: BTreeMap::new(),
+            profile: content.profile,
+            badges: Vec::new(),
+            chats_key,
+            notfall_key: None,
+            notfall: Vec::new(),
+            migrated: false,
+        })
     }
 
     /// Key of this device's chat database (SQLCipher). Random, never
@@ -643,6 +757,13 @@ pub(crate) fn derive(
         .hash_password_into(password.as_bytes(), salt, key.as_mut_slice())
         .map_err(internal)?;
     Ok(key)
+}
+
+fn hex32(h: &str) -> VaultResult<Zeroizing<[u8; 32]>> {
+    let mut k = Zeroizing::new([0u8; 32]);
+    hex::decode_to_slice(h.as_bytes(), k.as_mut_slice())
+        .map_err(|_| VaultError::Damaged("a key is not readable".into()))?;
+    Ok(k)
 }
 
 pub(crate) fn random<const N: usize>() -> VaultResult<[u8; N]> {

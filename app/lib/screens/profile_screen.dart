@@ -44,12 +44,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? _withdrawing;
   bool _deviceBusy = false;
   String _deviceError = '';
+  final _pinPw = TextEditingController();
+  final _newPin1 = TextEditingController();
+  final _newPin2 = TextEditingController();
+  final _pinText = TextEditingController();
+  bool _pinSends = false;
+  String? _pinChat;
+  String _pinAfter = 'vanish';
+  bool _pinBusy = false;
+  String _pinMessage = '';
+  bool _pinOk = false;
   final _keys = {
     'Profil': GlobalKey(),
     'Trust': GlobalKey(),
     'Geräte': GlobalKey(),
     'Server': GlobalKey(),
     'Sicherheit': GlobalKey(),
+    'Notfall': GlobalKey(),
     'Privatsphäre': GlobalKey(),
     'Konto': GlobalKey(),
   };
@@ -78,7 +89,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _about.dispose();
       _serverUrl.dispose();
     }
-    for (final c in [_oldPw, _newPw1, _newPw2, _deletePw, _deviceName, _withdrawPw, _badgeInput]) {
+    for (final c in [
+      _oldPw,
+      _newPw1,
+      _newPw2,
+      _deletePw,
+      _deviceName,
+      _withdrawPw,
+      _badgeInput,
+      _pinPw,
+      _newPin1,
+      _newPin2,
+      _pinText,
+    ]) {
       c.dispose();
     }
     super.dispose();
@@ -90,6 +113,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     'Geräte': TrairIcons.monitorSmartphone,
     'Server': TrairIcons.server,
     'Sicherheit': TrairIcons.shieldCheck,
+    'Notfall': TrairIcons.triangleAlert,
     'Privatsphäre': TrairIcons.eyeOff,
     'Konto': TrairIcons.userCog,
   };
@@ -123,6 +147,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           _serverCard(state),
                           const SizedBox(height: 14),
                           _securityCard(state),
+                          const SizedBox(height: 14),
+                          _notfallCard(state),
                           const SizedBox(height: 14),
                           _privacyCard(state),
                           const SizedBox(height: 14),
@@ -1008,6 +1034,282 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _pwMessage = vaultErrorText(answer);
         _pwMessageColor = TrairColors.amber;
       }
+    });
+  }
+
+  // ------------------------------------------------------- emergency PINs
+
+  Widget _notfallCard(AppState state) {
+    final pins = state.notfallPins;
+    return SoftCard(
+      key: _keys['Notfall'],
+      borderColor: const Color(0x29FFB547),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _title(
+            'Notfall-PINs',
+            trailing: pins == null
+                ? null
+                : PillButton(label: 'Verbergen', kind: PillKind.ghost, height: 36, onPressed: () => _hidePins(state)),
+          ),
+          const Text(
+            'Tippst du auf dem Startbildschirm eine Notfall-PIN statt des Passworts ein, löscht Trair dieses Konto '
+            'mit allen Nachrichten auf diesem PC. Vorher kann die PIN noch eine Nachricht an einen Chat schicken. '
+            'Für alle anderen sieht es aus wie ein falsch getipptes Passwort.',
+            style: TrairText.muted,
+          ),
+          const SizedBox(height: 14),
+          if (pins == null) ..._pinsLocked(state) else ..._pinsOpen(state, pins),
+        ],
+      ),
+    );
+  }
+
+  /// Hidden until the password: nobody at an open Trair sees whether
+  /// PINs are set.
+  List<Widget> _pinsLocked(AppState state) => [
+    const FieldLabel('Passwort, um die Notfall-PINs zu zeigen'),
+    Row(
+      children: [
+        Expanded(
+          child: PillField(
+            controller: _pinPw,
+            hint: 'Passwort',
+            obscure: true,
+            height: 44,
+            semanticLabel: 'Passwort für Notfall-PINs',
+            onChanged: (_) => setState(() => _pinMessage = ''),
+            onSubmitted: (_) => _showPins(state),
+          ),
+        ),
+        const SizedBox(width: 10),
+        PillButton(
+          label: _pinBusy ? 'Prüfe …' : 'Anzeigen',
+          height: 44,
+          onPressed: _pinBusy || _pinPw.text.isEmpty ? null : () => _showPins(state),
+        ),
+      ],
+    ),
+    if (_pinMessage.isNotEmpty) ...[
+      const SizedBox(height: 8),
+      Text(_pinMessage, style: TextStyle(fontSize: 13, color: _pinOk ? TrairColors.mintText : TrairColors.amber)),
+    ],
+  ];
+
+  List<Widget> _pinsOpen(AppState state, List<NotfallPin> pins) => [
+    if (pins.isEmpty)
+      const Padding(
+        padding: EdgeInsets.only(bottom: 6),
+        child: Text('Noch keine Notfall-PIN.', style: TextStyle(fontSize: 13.5, color: TrairColors.textSoft)),
+      ),
+    for (final pin in pins) _pinTile(state, pin),
+    const SizedBox(height: 10),
+    if (pins.length < 3)
+      ..._pinForm(state)
+    else
+      const Text('3 von 3 Plätzen belegt. Entferne eine PIN, um eine neue zu setzen.', style: TrairText.muted),
+    if (_pinMessage.isNotEmpty) ...[
+      const SizedBox(height: 10),
+      Text(_pinMessage, style: TextStyle(fontSize: 13, color: _pinOk ? TrairColors.mintText : TrairColors.amber)),
+    ],
+  ];
+
+  Widget _pinTile(AppState state, NotfallPin pin) {
+    final what = pin.sends ? 'Schreibt an ${pin.chatName ?? 'einen Chat'}, dann löschen' : 'Löscht alles';
+    final after = pin.after == 'vanish'
+        ? 'Danach verschwindet das Konto aus der Liste.'
+        : 'Danach bleibt das Konto stehen, jedes Passwort gilt als falsch.';
+    return _row(
+      title: what,
+      hint: pin.sends ? '„${pin.text}“\n$after' : after,
+      leading: Container(
+        width: 34,
+        height: 34,
+        decoration: const BoxDecoration(color: Color(0x1FFFB547), shape: BoxShape.circle),
+        child: Icon(pin.sends ? TrairIcons.arrowUp : TrairIcons.triangleAlert, size: 16, color: TrairColors.amber),
+      ),
+      trailing: PillButton(
+        label: 'Entfernen',
+        kind: PillKind.ghost,
+        height: 36,
+        onPressed: _pinBusy ? null : () => _removePin(state, pin),
+      ),
+    );
+  }
+
+  List<Widget> _pinForm(AppState state) {
+    final chats = state.realChats.where((c) => c.state == 'active').toList();
+    if (_pinChat != null && !chats.any((c) => c.id == _pinChat)) _pinChat = null;
+    final min = _pinSends ? 12 : 6;
+    final text = _pinText.text.trim();
+    final ready =
+        !_pinBusy &&
+        _newPin1.text.runes.length >= min &&
+        _newPin1.text == _newPin2.text &&
+        (!_pinSends || (_pinChat != null && text.isNotEmpty && text.runes.length <= 500));
+    Widget choice(String label, bool on, VoidCallback pick) => PillButton(
+      label: label,
+      kind: on ? PillKind.primary : PillKind.ghost,
+      height: 36,
+      onPressed: () => setState(() {
+        pick();
+        _pinMessage = '';
+      }),
+    );
+    return [
+      const FieldLabel('Was die neue PIN tut'),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          choice('Nur löschen', !_pinSends, () => _pinSends = false),
+          choice('Erst schreiben, dann löschen', _pinSends, () => _pinSends = true),
+        ],
+      ),
+      if (_pinSends) ...[
+        const SizedBox(height: 14),
+        const FieldLabel('An welchen Chat'),
+        if (chats.isEmpty)
+          const Text(
+            'Noch kein echter Chat. Starte erst einen, dann kann eine PIN dorthin schreiben.',
+            style: TrairText.muted,
+          )
+        else
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [for (final c in chats) choice(c.name, _pinChat == c.id, () => _pinChat = c.id)],
+          ),
+        const SizedBox(height: 10),
+        PillField(
+          controller: _pinText,
+          hint: 'Nachricht, zum Beispiel: Ich brauche Hilfe, ruf mich an.',
+          height: 44,
+          semanticLabel: 'Nachricht der Notfall-PIN',
+          onChanged: (_) => setState(() => _pinMessage = ''),
+        ),
+      ],
+      const SizedBox(height: 14),
+      const FieldLabel('Danach'),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          choice('Konto verschwindet', _pinAfter == 'vanish', () => _pinAfter = 'vanish'),
+          choice('Konto bleibt, Passwort „falsch“', _pinAfter == 'wrong_password', () => _pinAfter = 'wrong_password'),
+        ],
+      ),
+      const SizedBox(height: 14),
+      FieldLabel(_pinSends ? 'PIN (mindestens 12 Zeichen, sie öffnet die Schlüssel)' : 'PIN (mindestens 6 Zeichen)'),
+      Row(
+        children: [
+          Expanded(
+            child: PillField(
+              controller: _newPin1,
+              hint: 'Neue PIN',
+              obscure: true,
+              height: 44,
+              semanticLabel: 'Neue Notfall-PIN',
+              onChanged: (_) => setState(() => _pinMessage = ''),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: PillField(
+              controller: _newPin2,
+              hint: 'PIN wiederholen',
+              obscure: true,
+              height: 44,
+              semanticLabel: 'Notfall-PIN wiederholen',
+              onChanged: (_) => setState(() => _pinMessage = ''),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 10),
+      Row(
+        children: [
+          PillButton(
+            label: _pinBusy ? 'Speichere …' : 'PIN speichern',
+            icon: TrairIcons.plus,
+            height: 40,
+            onPressed: ready ? () => _addPin(state) : null,
+          ),
+        ],
+      ),
+    ];
+  }
+
+  Future<void> _showPins(AppState state) async {
+    if (_pinBusy || _pinPw.text.isEmpty) return;
+    setState(() {
+      _pinBusy = true;
+      _pinMessage = '';
+    });
+    final answer = await state.showNotfallPins(_pinPw.text);
+    if (!mounted) return;
+    setState(() {
+      _pinBusy = false;
+      if (!answer.ok) {
+        _pinPw.clear();
+        _pinMessage = vaultErrorText(answer);
+        _pinOk = false;
+      }
+    });
+  }
+
+  void _hidePins(AppState state) {
+    for (final c in [_pinPw, _newPin1, _newPin2, _pinText]) {
+      c.clear();
+    }
+    setState(() {
+      _pinMessage = '';
+      _pinSends = false;
+      _pinChat = null;
+      _pinAfter = 'vanish';
+    });
+    state.hideNotfallPins();
+  }
+
+  Future<void> _addPin(AppState state) async {
+    setState(() {
+      _pinBusy = true;
+      _pinMessage = '';
+    });
+    final answer = await state.addNotfallPin(
+      pin: _newPin1.text,
+      password: _pinPw.text,
+      after: _pinAfter,
+      chat: _pinSends ? _pinChat : null,
+      text: _pinSends ? _pinText.text.trim() : null,
+    );
+    if (!mounted) return;
+    setState(() {
+      _pinBusy = false;
+      _pinOk = answer.ok;
+      if (answer.ok) {
+        _newPin1.clear();
+        _newPin2.clear();
+        _pinText.clear();
+        _pinMessage = 'Notfall-PIN gespeichert. Probier sie nicht aus: Sie löscht wirklich.';
+      } else {
+        _pinMessage = vaultErrorText(answer);
+      }
+    });
+  }
+
+  Future<void> _removePin(AppState state, NotfallPin pin) async {
+    setState(() {
+      _pinBusy = true;
+      _pinMessage = '';
+    });
+    final answer = await state.removeNotfallPin(pin.id, _pinPw.text);
+    if (!mounted) return;
+    setState(() {
+      _pinBusy = false;
+      _pinOk = answer.ok;
+      _pinMessage = answer.ok ? 'Notfall-PIN entfernt.' : vaultErrorText(answer);
     });
   }
 

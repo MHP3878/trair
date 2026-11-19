@@ -102,6 +102,40 @@ class TrairVault {
   /// tool). The core checks it first.
   Future<CoreAnswer> addBadge(Object? badge) => _call({'op': 'add_badge', 'badge': badge});
 
+  // ---------------------------------------------------------- emergency PINs
+
+  /// The emergency PINs. Only with the password: someone at an open
+  /// Trair cannot see whether any are set.
+  Future<CoreAnswer> notfallList(String password) => _call({'op': 'notfall_list', 'password': password});
+
+  /// Set an emergency PIN. [after]: `vanish` or `wrong_password`. With
+  /// [chat] and [text] it first sends that message.
+  Future<CoreAnswer> notfallAdd({
+    required String pin,
+    required String password,
+    required String after,
+    String? chat,
+    String? text,
+  }) => _call({
+    'op': 'notfall_add',
+    'pin': pin,
+    'password': password,
+    'after': after,
+    'chat': ?chat,
+    'text': ?text,
+  });
+
+  Future<CoreAnswer> notfallRemove(String id, String password) =>
+      _call({'op': 'notfall_remove', 'id': id, 'password': password});
+
+  /// While a sending PIN runs: log in and delete with the account's keys.
+  Future<CoreAnswer> notfallSignLogin(String challengeHex) =>
+      _call({'op': 'notfall_sign_login', 'challenge': challengeHex});
+  Future<CoreAnswer> notfallSignDeletion(int now) => _call({'op': 'notfall_sign_deletion', 'now': now});
+
+  /// Sent or not: now everything goes.
+  Future<CoreAnswer> notfallFinish() => _call({'op': 'notfall_finish'});
+
   // ------------------------------------------------------------ server (M3)
 
   /// Public data the server needs: user, device, account key, device list.
@@ -213,6 +247,20 @@ String vaultErrorText(CoreAnswer a) {
       return 'Der Tresor konnte nicht gespeichert werden.';
     case 'too_large':
       return 'Das Profil ist zu groß.';
+    case 'weak_pin':
+      return 'Die PIN braucht mindestens 6 Zeichen.';
+    case 'weak_sending_pin':
+      return 'Eine PIN, die vorher schreibt, öffnet die Schlüssel. Sie braucht mindestens 12 Zeichen, wie das Passwort.';
+    case 'pin_is_password':
+      return 'Passwort und Notfall-PIN dürfen nicht gleich sein.';
+    case 'pin_taken':
+      return 'Diese PIN ist schon vergeben.';
+    case 'full':
+      return 'Mehr als 3 Notfall-PINs gehen nicht.';
+    case 'unknown_chat':
+      return 'Diesen Chat gibt es nicht mehr.';
+    case 'chats_unavailable':
+      return 'Die Chats sind gerade nicht offen.';
     default:
       return 'Unerwarteter Fehler im Sicherheitskern (${a.error}).';
   }

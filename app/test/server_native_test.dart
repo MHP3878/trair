@@ -146,10 +146,11 @@ void main() {
       final bobVault = TrairVault(NativeDoor.load(copy.path));
       expect((await juliaVault.init('${tmp.path}/julian')).ok, isTrue);
       expect((await bobVault.init('${tmp.path}/bob')).ok, isTrue);
-      final julian = AppState(DemoBackend(), juliaVault);
-      final bob = AppState(DemoBackend(), bobVault);
-      for (final (s, name) in [(julian, 'Julian'), (bob, 'Bob')]) {
-        final made = await s.createAccount(name: name, glowColor: TrairColors.accentLight, password: _randomWords());
+      final julian = AppState(DemoBackend(), juliaVault, accountsBase: '${tmp.path}/julian');
+      final bob = AppState(DemoBackend(), bobVault, accountsBase: '${tmp.path}/bob');
+      final julianPw = _randomWords();
+      for (final (s, name, password) in [(julian, 'Julian', julianPw), (bob, 'Bob', _randomWords())]) {
+        final made = await s.createAccount(name: name, glowColor: TrairColors.accentLight, password: password);
         expect(made.ok, isTrue, reason: '${made.raw}');
         expect(s.chatsReady, isTrue, reason: 'the chat database opened');
         s.serverUrl = url;
@@ -183,8 +184,43 @@ void main() {
       await until(() => julian.realMessages[chat]?.any((m) => m.text == 'Angekommen!') ?? false, 'Julian reads it');
       expect(julian.realMessages[chat]!.first.outgoing, isTrue);
 
-      // The server only ever had ciphertext.
+      // An emergency PIN: one message to Bob, then Julian's account is gone,
+      // on this computer and on the server.
+      final julianUser = julian.contactCode.split(':')[1];
+      expect((await julian.showNotfallPins(julianPw)).ok, isTrue);
+      final set = await julian.addNotfallPin(
+        pin: 'notfall pin lang',
+        password: julianPw,
+        after: 'vanish',
+        chat: chat,
+        text: 'Notfall: bitte ruf mich an',
+      );
+      expect(set.ok, isTrue, reason: '${set.raw}');
+      expect(julian.notfallPins!.single.chatName, 'Bob');
       await julian.lock();
+      final fired = await julian.unlock('notfall pin lang');
+      expect(fired.ok, isFalse, reason: 'from outside: a wrong password');
+      await until(
+        () => bob.realMessages[chat]?.any((m) => m.text == 'Notfall: bitte ruf mich an') ?? false,
+        'Bob gets the emergency message',
+      );
+      final left = Directory('${tmp.path}/julian').listSync().map((e) => e.uri.pathSegments.last).toList();
+      expect(left, everyElement(anyOf('trair.lock', 'karte.json', 'karte.png')), reason: 'nothing of the account: $left');
+      // Bob asks the server about Julian: unknown now.
+      final me = await bobVault.serverIdentity();
+      final asBob = ServerApi(HttpTransport(Uri.parse(url)));
+      final c = await asBob.challenge(me.raw['user'] as String, me.raw['device'] as String);
+      final sig = await bobVault.signLogin(c.body['challenge'] as String);
+      final login = await asBob.login(
+        me.raw['user'] as String,
+        me.raw['device'] as String,
+        c.body['challenge'] as String,
+        sig.raw['signature'] as String,
+      );
+      asBob.token = login.body['token'] as String;
+      expect((await asBob.account(julianUser)).ok, isFalse, reason: 'deleted on the server');
+
+      // The server only ever had ciphertext.
       await bob.lock();
       // The database and its write-ahead log.
       final stored = [
@@ -192,7 +228,7 @@ void main() {
           if (File('${tmp.path}/$name').existsSync()) ...await File('${tmp.path}/$name').readAsBytes(),
       ];
       final text = latin1.decode(stored, allowInvalid: true);
-      for (final secret in ['Hallo Bob', 'Angekommen', 'Julian', 'Bob']) {
+      for (final secret in ['Hallo Bob', 'Angekommen', 'Notfall', 'Julian', 'Bob']) {
         expect(text.contains(secret), isFalse, reason: '"$secret" is readable on the server');
       }
     },

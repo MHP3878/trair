@@ -63,6 +63,30 @@ class RealChat {
   bool get isRequest => state == 'request';
 }
 
+/// An emergency PIN as the settings show it (never the PIN itself).
+class NotfallPin {
+  const NotfallPin({required this.id, required this.after, this.chat, this.chatName, this.text});
+
+  factory NotfallPin.fromJson(Map<String, Object?> j) => NotfallPin(
+    id: j['id'] as String,
+    after: j['after'] as String,
+    chat: j['chat'] as String?,
+    chatName: j['chat_name'] as String?,
+    text: j['text'] as String?,
+  );
+
+  final String id;
+
+  /// vanish: the account leaves the list. wrong_password: it stays, but
+  /// no password opens it any more.
+  final String after;
+  final String? chat;
+  final String? chatName;
+  final String? text;
+
+  bool get sends => chat != null;
+}
+
 class RealMessage {
   const RealMessage({required this.id, required this.text, required this.outgoing, required this.at, this.missing = 0});
 
@@ -403,7 +427,86 @@ class AppState extends ChangeNotifier {
 
   Future<CoreAnswer> unlock(String password) async {
     final answer = await vault!.unlock(password);
-    if (answer.ok) _unlocked(answer);
+    if (answer.ok) {
+      _unlocked(answer);
+      return answer;
+    }
+    final emergency = answer.raw['notfall'];
+    if (emergency is Map<String, Object?>) {
+      await _emergency(emergency);
+      // The account left the list: no "wrong password" under another one.
+      if (emergency['after'] == 'vanish') return CoreAnswer(const {'ok': false, 'error': 'vanished'});
+    }
+    return answer;
+  }
+
+  /// An emergency PIN was typed instead of the password. The core has
+  /// deleted everything already, or it holds the keys for exactly one
+  /// message and deletes once that is out (or the server does not answer
+  /// within a few seconds). From outside it looks like a wrong password.
+  Future<void> _emergency(Map<String, Object?> n) async {
+    if (n['send'] == true) {
+      try {
+        await _emergencySend(n).timeout(const Duration(seconds: 12));
+      } on Object {
+        // Not reachable or too slow: deleted here all the same.
+      } finally {
+        await vault!.notfallFinish();
+      }
+    }
+    if (n['after'] == 'vanish') await _accountGone();
+  }
+
+  /// Send the PIN's message, then delete the account on the server too.
+  Future<void> _emergencySend(Map<String, Object?> n) async {
+    final uri = parseServerUrl(n['server'] as String? ?? '');
+    if (uri == null) return;
+    final api = ServerApi(_transport(uri));
+    final user = n['user'] as String;
+    final device = n['device'] as String;
+    final challenge = await api.challenge(user, device);
+    if (!challenge.ok) return;
+    final c = challenge.body['challenge'] as String;
+    final signed = await vault!.notfallSignLogin(c);
+    if (!signed.ok) return;
+    final login = await api.login(user, device, c, signed.raw['signature'] as String);
+    if (!login.ok) return;
+    api.token = login.body['token'] as String;
+    await api.sendMessage(n['to'], n['body'] as String);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final deletion = await vault!.notfallSignDeletion(now);
+    if (deletion.ok) await api.deleteAccount(now, deletion.raw['signature'] as String);
+  }
+
+  // ------------------------------------------------------- emergency PINs
+
+  /// Null: hidden. The list needs the password, every time the settings
+  /// open it.
+  List<NotfallPin>? notfallPins;
+
+  Future<CoreAnswer> showNotfallPins(String password) => _pins(vault!.notfallList(password));
+
+  void hideNotfallPins() {
+    notfallPins = null;
+    notifyListeners();
+  }
+
+  Future<CoreAnswer> addNotfallPin({
+    required String pin,
+    required String password,
+    required String after,
+    String? chat,
+    String? text,
+  }) => _pins(vault!.notfallAdd(pin: pin, password: password, after: after, chat: chat, text: text));
+
+  Future<CoreAnswer> removeNotfallPin(String id, String password) => _pins(vault!.notfallRemove(id, password));
+
+  Future<CoreAnswer> _pins(Future<CoreAnswer> call) async {
+    final answer = await call;
+    if (answer.ok) {
+      notfallPins = [for (final j in (answer.raw['pins'] as List).cast<Map<String, Object?>>()) NotfallPin.fromJson(j)];
+      notifyListeners();
+    }
     return answer;
   }
 
@@ -421,6 +524,7 @@ class AppState extends ChangeNotifier {
     devices = answer.devices;
     accountKey = answer.accountKey;
     realBadges = answer.badges;
+    notfallPins = null;
     go(TrairScreen.chats);
     // The start screen shows the current name and picture from now on.
     _writeCard();
@@ -440,6 +544,7 @@ class AppState extends ChangeNotifier {
     devices = const [];
     accountKey = '';
     realBadges = const [];
+    notfallPins = null;
     _forgetChats();
     _forgetServer();
     accountCards = accounts.list(baseExists: _baseExists);
@@ -486,25 +591,30 @@ class AppState extends ChangeNotifier {
       devices = const [];
       accountKey = '';
       realBadges = const [];
-      final gone = _dir;
-      if (gone != null) accounts.removeCard(gone);
-      if (gone == accounts.base) _baseExists = false;
-      account = null;
-      accountCards = accounts.list(baseExists: _baseExists);
-      if (accountCards.isEmpty) {
-        go(TrairScreen.onboarding);
-      } else {
-        // Other accounts stay: back to the list. The empty folder goes
-        // once the core has let go of it.
-        for (final c in accountCards) {
-          if (await _open(c)) break;
-        }
-        accounts.removeEmpty(except: _dir);
-        accountMessage = serverDeletion.isEmpty ? 'Konto gelöscht.' : 'Konto gelöscht. $serverDeletion';
-        go(TrairScreen.lock);
-      }
+      await _accountGone(message: serverDeletion.isEmpty ? 'Konto gelöscht.' : 'Konto gelöscht. $serverDeletion');
     }
     return answer;
+  }
+
+  /// The open account is gone: its card leaves the list. Other accounts
+  /// stay (back to the list), otherwise the first start follows.
+  Future<void> _accountGone({String message = ''}) async {
+    final gone = _dir;
+    if (gone != null) accounts.removeCard(gone);
+    if (gone == accounts.base) _baseExists = false;
+    account = null;
+    accountCards = accounts.list(baseExists: _baseExists);
+    if (accountCards.isEmpty) {
+      go(TrairScreen.onboarding);
+    } else {
+      // The empty folder goes once the core has let go of it.
+      for (final c in accountCards) {
+        if (await _open(c)) break;
+      }
+      accounts.removeEmpty(except: _dir);
+      accountMessage = message;
+      go(TrairScreen.lock);
+    }
   }
 
   /// Name a device. The name stays on this device, never in the list

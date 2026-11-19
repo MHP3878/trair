@@ -2,6 +2,7 @@
 // Copyright (C) 2026 The Trair contributors
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -920,6 +921,159 @@ void main() {
       expect(find.text('Konto 1'), findsOneWidget);
       expect(find.text('Name verborgen'), findsOneWidget);
       expect(find.text('Julian'), findsNothing);
+    });
+
+    testWidgets('an emergency PIN takes only its own account off the list', (tester) async {
+      final (door, base) = await startMany(tester, second: true);
+      door.doors[base]!.notfall.add({'id': 'p1', 'pin': 'loesch-123', 'after': 'vanish', 'chat': null, 'text': null});
+      await _unlock(tester);
+      await _ctrl(tester, LogicalKeyboardKey.keyL);
+      expect(find.text('Julian'), findsOneWidget);
+      await tester.tap(find.text('Julian'));
+      await tester.pumpAndSettle();
+      await _type(tester, 'loesch-123');
+      expect(door.doors[base]!.password, isNull, reason: 'the vault is gone');
+      expect(File('$base${Platform.pathSeparator}karte.json').existsSync(), isFalse);
+      expect(find.text('Julian'), findsNothing);
+      expect(find.text('Bob'), findsOneWidget, reason: 'the other account stays');
+      expect(find.text('Passwort falsch.'), findsNothing, reason: 'no hint under the other account');
+      expect(find.text('Neues Konto erstellen'), findsOneWidget);
+    });
+  });
+
+  group('Notfall-PINs', () {
+    /// Settings, scrolled to the card, PINs shown with the password.
+    Future<void> openPins(WidgetTester tester) async {
+      await _openSettings(tester);
+      await tester.ensureVisible(find.text('Notfall-PINs'));
+      await tester.pumpAndSettle();
+      await tester.enterText(_field('Passwort').first, pw);
+      await tester.tap(find.widgetWithText(PillButton, 'Anzeigen'));
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> setPin(WidgetTester tester, String pin) async {
+      await tester.enterText(_field('Neue PIN'), pin);
+      await tester.enterText(_field('PIN wiederholen'), pin);
+      await tester.pumpAndSettle();
+    }
+
+    PillButton save(WidgetTester tester) => tester.widget<PillButton>(find.widgetWithText(PillButton, 'PIN speichern'));
+
+    testWidgets('the PINs stay hidden until the password; a PIN that only deletes leaves nothing', (tester) async {
+      final door = await _start(tester);
+      await _unlock(tester);
+      await _openSettings(tester);
+      await tester.ensureVisible(find.text('Notfall-PINs'));
+      await tester.pumpAndSettle();
+      expect(find.text('Noch keine Notfall-PIN.'), findsNothing, reason: 'hidden at an open Trair');
+      await tester.enterText(_field('Passwort').first, 'falsch geraten');
+      await tester.tap(find.widgetWithText(PillButton, 'Anzeigen'));
+      await tester.pumpAndSettle();
+      expect(find.text('Passwort falsch.'), findsOneWidget);
+      expect(find.text('Noch keine Notfall-PIN.'), findsNothing);
+
+      await tester.enterText(_field('Passwort').first, pw);
+      await tester.tap(find.widgetWithText(PillButton, 'Anzeigen'));
+      await tester.pumpAndSettle();
+      expect(find.text('Noch keine Notfall-PIN.'), findsOneWidget);
+      await setPin(tester, 'kurz');
+      expect(save(tester).onPressed, isNull, reason: 'shorter than 6');
+      await setPin(tester, 'loesch-123');
+      await tester.enterText(_field('PIN wiederholen'), 'loesch-124');
+      await tester.pumpAndSettle();
+      expect(save(tester).onPressed, isNull, reason: 'the two differ');
+      await setPin(tester, 'loesch-123');
+      await tester.tap(find.widgetWithText(PillButton, 'PIN speichern'));
+      await tester.pumpAndSettle();
+      expect(door.notfall.single['after'], 'vanish');
+      expect(find.text('Löscht alles'), findsOneWidget);
+      expect(find.textContaining('Notfall-PIN gespeichert'), findsOneWidget);
+      await tester.tap(find.widgetWithText(PillButton, 'Verbergen'));
+      await tester.pumpAndSettle();
+      expect(find.text('Löscht alles'), findsNothing);
+
+      // On the start screen the PIN looks like a typo, and everything goes.
+      await _ctrl(tester, LogicalKeyboardKey.keyL);
+      await _type(tester, 'loesch-123');
+      expect(door.password, isNull);
+      expect(door.ops, contains('unlock'));
+      expect(find.text('Passwort falsch.'), findsNothing);
+      expect(find.text('Weiter'), findsOneWidget, reason: 'the only account is gone: first start');
+    });
+
+    testWidgets('a PIN can leave the account standing, where every password is wrong', (tester) async {
+      final door = await _start(tester);
+      await _unlock(tester);
+      await openPins(tester);
+      await tester.tap(find.widgetWithText(PillButton, 'Konto bleibt, Passwort „falsch“'));
+      await setPin(tester, 'bleibt-123');
+      await tester.tap(find.widgetWithText(PillButton, 'PIN speichern'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('jedes Passwort gilt als falsch'), findsOneWidget);
+      await _ctrl(tester, LogicalKeyboardKey.keyL);
+      await _type(tester, 'bleibt-123');
+      expect(find.text('Passwort falsch.'), findsOneWidget);
+      expect(find.text('Julian'), findsOneWidget, reason: 'name and picture stay on the list');
+      expect(door.notfall, isEmpty);
+      await _unlock(tester);
+      expect(find.text('Passwort falsch.'), findsOneWidget, reason: 'the real password opens nothing now');
+      expect(find.textContaining('Strenger Modus'), findsNothing);
+    });
+
+    testWidgets('a PIN writes to the chosen chat through the server, then deletes there and here', (tester) async {
+      final server = FakeServer();
+      final door = FakeDoor(password: pw, profile: {'name': 'Julian', 'server': 'http://127.0.0.1:8471'})
+        ..chatsEnabled = true;
+      door.contacts.add({'user': 'local-bob', 'name': 'Bob', 'fingerprint': 'ff' * 16, 'confirmed': true});
+      door.chats.add({'id': 'c1', 'peer': 'local-bob', 'name': 'Bob', 'state': 'active', 'last': 0});
+      await _start(tester, door: door, server: server);
+      await _unlock(tester);
+      await openPins(tester);
+      await tester.tap(find.widgetWithText(PillButton, 'Erst schreiben, dann löschen'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Bob'));
+      await tester.enterText(_field('Nachricht, zum Beispiel: Ich brauche Hilfe, ruf mich an.'), 'Hilfe, ruf mich an');
+      await setPin(tester, 'hilfe-12');
+      expect(save(tester).onPressed, isNull, reason: 'a PIN that opens the keys needs 12 characters');
+      expect(find.textContaining('mindestens 12 Zeichen'), findsOneWidget);
+      await setPin(tester, 'hilfe-hilfe-12');
+      await tester.tap(find.widgetWithText(PillButton, 'PIN speichern'));
+      await tester.pumpAndSettle();
+      expect(door.notfall.single['chat'], 'c1');
+      expect(find.text('Schreibt an Bob, dann löschen'), findsOneWidget);
+
+      await _ctrl(tester, LogicalKeyboardKey.keyL);
+      server.calls.clear();
+      await _type(tester, 'hilfe-hilfe-12');
+      expect(server.calls, [
+        'POST /v1/login/challenge',
+        'POST /v1/login',
+        'POST /v1/messages',
+        'POST /v1/accounts/delete',
+      ]);
+      expect(server.sent.last['to'], [
+        {'user': 'local-bob', 'device': 'd-peer'},
+      ]);
+      expect(utf8.decode(base64.decode(server.sent.last['body'] as String)), 'notfall:Hilfe, ruf mich an');
+      expect(door.ops.last, 'notfall_finish');
+      expect(door.password, isNull);
+      expect(door.chats, isEmpty);
+      expect(find.text('Weiter'), findsOneWidget);
+    });
+
+    testWidgets('without a server the PIN still deletes everything', (tester) async {
+      final server = FakeServer()..online = false;
+      final door = FakeDoor(password: pw, profile: {'name': 'Julian', 'server': 'http://127.0.0.1:8471'})
+        ..chatsEnabled = true;
+      door.chats.add({'id': 'c1', 'peer': 'local-bob', 'name': 'Bob', 'state': 'active', 'last': 0});
+      door.notfall.add({'id': 'p1', 'pin': 'hilfe-hilfe-12', 'after': 'vanish', 'chat': 'c1', 'text': 'Hilfe'});
+      await _start(tester, door: door, server: server);
+      await _type(tester, 'hilfe-hilfe-12');
+      expect(server.sent, isEmpty);
+      expect(door.ops.last, 'notfall_finish');
+      expect(door.password, isNull);
+      expect(find.text('Weiter'), findsOneWidget);
     });
   });
 }

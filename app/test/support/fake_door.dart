@@ -47,6 +47,74 @@ class FakeDoor implements CoreDoor {
   /// The server's list says this device was withdrawn.
   bool withdrawnElsewhere = false;
 
+  // ----- emergency PINs -----
+
+  /// The PINs with what they do (the real core never shows a PIN).
+  final List<Map<String, Object?>> notfall = [];
+  Map<String, Object?>? _running;
+  int _pinIds = 0;
+
+  /// Everything goes, like crates/trair-ffi/src/api.rs wipe_account.
+  void _wipe(String after) {
+    // "wrong_password": another vault stands there that nobody can open.
+    password = after == 'wrong_password' ? '\u0000niemand' : null;
+    profile = {};
+    unlocked = false;
+    notfall.clear();
+    contacts.clear();
+    chats.clear();
+    messages.clear();
+    pending.clear();
+    _running = null;
+  }
+
+  Map<String, Object?> _pins() => {
+    'ok': true,
+    'pins': [
+      for (final p in notfall)
+        {
+          'id': p['id'],
+          'after': p['after'],
+          'chat': p['chat'],
+          'chat_name': p['chat'] == null ? null : _chat(p['chat'])?['name'],
+          'text': p['text'],
+        },
+    ],
+    'max': 3,
+  };
+
+  Map<String, Object?> _notfallOp(String op, Map<String, Object?> r) {
+    switch (op) {
+      case 'notfall_sign_login' || 'notfall_sign_deletion':
+        return _running == null ? _fail('no_session') : {'ok': true, 'signature': 'notfall'};
+      case 'notfall_finish':
+        final running = _running;
+        if (running == null) return _fail('no_session');
+        _wipe(running['after'] as String);
+        return {'ok': true};
+    }
+    if (!unlocked) return _fail('locked');
+    if (r['password'] != password) return _wrong();
+    switch (op) {
+      case 'notfall_list':
+        return _pins();
+      case 'notfall_remove':
+        notfall.removeWhere((p) => p['id'] == r['id']);
+        return _pins();
+      case 'notfall_add':
+        final pin = r['pin'] as String;
+        final chat = r['chat'] as String?;
+        if (pin.runes.length < (chat == null ? 6 : 12)) return _fail(chat == null ? 'weak_pin' : 'weak_sending_pin');
+        if (pin == password) return _fail('pin_is_password');
+        if (chat != null && _chat(chat)?['state'] != 'active') return _fail('unknown_chat');
+        if (notfall.any((p) => p['pin'] == pin)) return _fail('pin_taken');
+        if (notfall.length >= 3) return _fail('full');
+        notfall.add({'id': 'p${++_pinIds}', 'pin': pin, 'after': r['after'], 'chat': chat, 'text': r['text']});
+        return _pins();
+    }
+    return _fail('bad_request');
+  }
+
   // ----- chats (M4): a fake core without encryption -----
 
   /// The chat database opens with the vault.
@@ -222,7 +290,32 @@ class FakeDoor implements CoreDoor {
         return _open();
       case 'unlock':
         if (password == null) return _fail('no_vault');
-        if (r['password'] != password) return _wrong();
+        if (r['password'] != password) {
+          final wrong = _wrong();
+          final pin = notfall.where((p) => p['pin'] == r['password']).firstOrNull;
+          if (pin == null) return wrong;
+          final after = pin['after'] as String;
+          if (pin['chat'] == null) {
+            _wipe(after);
+            return {
+              ...wrong,
+              'notfall': {'after': after, 'send': false},
+            };
+          }
+          _running = pin;
+          return {
+            ...wrong,
+            'notfall': {
+              'after': after,
+              'send': true,
+              'server': profile['server'],
+              'user': 'local-julian',
+              'device': thisId,
+              'body': base64.encode(utf8.encode('notfall:${pin['text']}')),
+              'to': ['${_chat(pin['chat'])?['peer']}:d-peer'],
+            },
+          };
+        }
         failures = 0;
         unlocked = true;
         return _open();
@@ -237,10 +330,12 @@ class FakeDoor implements CoreDoor {
         if (!unlocked) return _fail('locked');
         if (r['old'] != password) return _wrong();
         if ((r['new'] as String).runes.length < 12) return _fail('weak_password');
+        if (notfall.any((p) => p['pin'] == r['new'])) return _fail('pin_is_password');
         password = r['new'] as String;
         return {'ok': true};
       case 'delete_account':
         if (r['password'] != password) return _wrong();
+        notfall.clear();
         password = null;
         profile = {};
         unlocked = false;
@@ -351,6 +446,13 @@ class FakeDoor implements CoreDoor {
           'apply_contact_list' ||
           'withdrawn_members':
         return _chatOp(op, r);
+      case 'notfall_list' ||
+          'notfall_add' ||
+          'notfall_remove' ||
+          'notfall_sign_login' ||
+          'notfall_sign_deletion' ||
+          'notfall_finish':
+        return _notfallOp(op, r);
     }
     return _fail('bad_request');
   }

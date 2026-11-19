@@ -278,6 +278,35 @@ void main() {
     await _shot(tester, '21-kontoauswahl');
   });
 
+  testWidgets('screenshot of the emergency PINs', (tester) async {
+    final door = FakeDoor(password: _pw, profile: {'name': 'Julian', 'glow': 0xFFA18DFF})..chatsEnabled = true;
+    door.chats.add({'id': 'c1', 'peer': 'local-lena', 'name': 'Lena', 'state': 'active', 'last': 0});
+    door.notfall.addAll([
+      {'id': 'p1', 'pin': 'loesch-123', 'after': 'vanish', 'chat': null, 'text': null},
+      {
+        'id': 'p2',
+        'pin': 'hilfe-hilfe-12',
+        'after': 'wrong_password',
+        'chat': 'c1',
+        'text': 'Ich brauche Hilfe, ruf mich bitte an.',
+      },
+    ]);
+    await _start(tester, const Size(1440, 900), door: door);
+    await _unlock(tester);
+    await tester.tap(find.text('Strenger Modus an'));
+    await tester.pumpAndSettle();
+    unawaited(Scrollable.ensureVisible(tester.element(find.text('Notfall-PINs')), alignment: 0.02));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Passwort').first, _pw);
+    await tester.tap(find.text('Anzeigen'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Erst schreiben, dann löschen'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Lena'));
+    await tester.pumpAndSettle();
+    await _shot(tester, '23-notfall-pins');
+  });
+
   testWidgets('screenshot of a small window', (tester) async {
     await _start(tester, const Size(1024, 640));
     await _unlock(tester);
