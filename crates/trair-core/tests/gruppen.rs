@@ -775,8 +775,35 @@ fn g09_strict_mode_notices_a_changed_key_in_a_group() {
     let mut fake = person("bob");
     publish(&mut net, &mut fake, 1);
     let offers = net.fetch("bob");
+    // Even without strict mode.
+    olga.m().set_strict(false).unwrap();
     let r = olga.m().add_to_group(&chat, &offers);
     assert!(matches!(r, Err(CoreError::Blocked(_))), "{r:?}");
+}
+
+#[test]
+fn g15_a_contact_under_another_key_in_a_group_blocks_strict_mode() {
+    let mut net = Net::default();
+    let mut olga = person("olga");
+    let mut max = person("max");
+    let chat = group_of(&mut net, &mut olga, "Verein", &mut [&mut max]);
+    // Max knows Zoe as a contact. Someone else under the name "zoe" joins
+    // with Olga's key; the group never saw the real Zoe.
+    let mut zoe = person("zoe");
+    befriend(&mut max, &mut zoe);
+    let code = olga
+        .m()
+        .create_group_invite(&chat, false, NOW + 3600, NOW)
+        .unwrap();
+    let mut other = person("zoe");
+    let seen = join_with(&mut net, &mut olga, &mut other, &code, NOW);
+    admit_all(&mut net, &mut olga, &seen);
+    poll_ok(&mut net, &mut other);
+    poll_ok(&mut net, &mut max);
+    let r = max.m().send(&chat, "hallo?", NOW);
+    assert!(matches!(r, Err(CoreError::Blocked(_))), "{r:?}");
+    // Olga never had Zoe as a contact: for her the admin's word counts.
+    send(&mut net, &mut olga, &chat, "willkommen");
 }
 
 #[test]
@@ -956,4 +983,96 @@ fn g12_a_member_asks_the_admins_to_remove_its_withdrawn_device() {
     send(&mut net, &mut max, &chat, "wieder da");
     poll_ok(&mut net, &mut ada);
     assert_eq!(texts(&mut ada, &chat), ["wieder da"]);
+}
+
+#[test]
+fn g13_swapped_devices_and_requests_for_others_are_refused() {
+    let mut net = Net::default();
+    let mut olga = person("olga");
+    let mut ada = person("ada");
+    let chat = group_of(&mut net, &mut olga, "Hof", &mut [&mut ada]);
+    let code = olga
+        .m()
+        .create_group_invite(&chat, false, NOW + 3600, NOW)
+        .unwrap();
+    // The server hands Gus a fake "olga" for the key's admin: refused,
+    // the key names Olga's real account key.
+    let mut gus = person("gus");
+    let mut fake = person("olga");
+    publish(&mut net, &mut fake, 1);
+    let offers = net.fetch("olga");
+    // Even without strict mode.
+    gus.m().set_strict(false).unwrap();
+    let r = gus.m().join_group(&code, &offers, NOW);
+    assert!(matches!(r, Err(CoreError::Blocked(_))), "{r:?}");
+    net.unregister(&fake.id());
+
+    // A real request; Olga's device then gets someone else's devices for
+    // Gus: refused.
+    let seen = join_with(&mut net, &mut olga, &mut gus, &code, NOW);
+    let jc = seen
+        .iter()
+        .find_map(|i| match i {
+            Incoming::JoinRequest { chat, .. } => Some(chat.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let mut eve = person("eve");
+    publish(&mut net, &mut eve, 1);
+    let wrong = net.fetch("eve");
+    olga.m().set_strict(false).unwrap();
+    let r = olga.m().admit(&jc, &wrong);
+    assert!(matches!(r, Err(CoreError::Blocked(_))), "{r:?}");
+    let offers = net.fetch("gus");
+    let p = olga.m().admit(&jc, &offers).unwrap();
+    assert!(commit(&mut net, &mut olga, &p));
+    olga.m().close_join(&jc).unwrap();
+    poll_ok(&mut net, &mut gus);
+    poll_ok(&mut net, &mut ada);
+}
+
+#[test]
+fn g14_a_member_cannot_get_someone_elses_device_removed() {
+    // Max runs a modified Trair (a plain device) and asks the admins to
+    // remove Ada's device. Olga's Trair ignores that part.
+    let mut net = Net::default();
+    let mut olga = person("olga");
+    let mut ada = person("ada");
+    let chat = group_of(&mut net, &mut olga, "Hof", &mut [&mut ada]);
+    let (max_acc, mut max) = common::person("max", "pc");
+    net.register(&mut max, 2);
+    let max_code = trair_core::ContactCode {
+        user: "max".into(),
+        fingerprint: max_acc.fingerprint(),
+    }
+    .text();
+    olga.m().add_contact(&max_code, "Max", NOW).unwrap();
+    let offers = net.fetch("max");
+    let p = olga.m().add_to_group(&chat, &offers).unwrap();
+    assert!(commit(&mut net, &mut olga, &p));
+    poll_ok(&mut net, &mut ada);
+    assert!(matches!(
+        &common::poll_ok(&mut net, &mut max)[..],
+        [Event::Joined { .. }]
+    ));
+    let ada_device = ada.id();
+    let bytes = max
+        .encrypt_control(
+            &chat,
+            &serde_json::json!({"remove": [ada_device, "max:pc"]}),
+        )
+        .unwrap();
+    let to = max.recipients(&chat).unwrap();
+    net.send(max.id(), &to, &bytes);
+    poll_ok(&mut net, &mut ada);
+    let got = poll_ok(&mut net, &mut olga);
+    assert!(matches!(&got[..], [Incoming::Group { .. }]), "{got:?}");
+    let v = olga.m().group_view(&chat).unwrap();
+    assert!(!v.members.iter().find(|m| m.user == "ada").unwrap().leaving);
+    assert!(v.members.iter().find(|m| m.user == "max").unwrap().leaving);
+    // Olga's device removes only Max's own device.
+    let Tidy::Commit(p) = olga.m().tidy_group(&chat, NOW).unwrap() else {
+        panic!("nothing to tidy")
+    };
+    assert_eq!(p.removed, ["max:pc"]);
 }
