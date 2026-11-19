@@ -171,7 +171,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         ),
         const SizedBox(height: 20),
         const FieldLabel('Server'),
-        PillField(controller: _joinServer, hint: defaultServerUrl, mono: true, height: 46, semanticLabel: 'Server'),
+        PillField(
+          controller: _joinServer,
+          hint: 'http://127.0.0.1:PORT',
+          mono: true,
+          height: 46,
+          semanticLabel: 'Server',
+        ),
         const SizedBox(height: 14),
         const FieldLabel('Code vom anderen Gerät'),
         PillField(

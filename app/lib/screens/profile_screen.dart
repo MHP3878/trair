@@ -514,7 +514,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               Expanded(
                 child: PillField(
                   controller: _serverUrl,
-                  hint: defaultServerUrl,
+                  hint: 'http://127.0.0.1:PORT',
                   mono: true,
                   height: 46,
                   semanticLabel: 'Server-Adresse',

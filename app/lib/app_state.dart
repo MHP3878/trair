@@ -274,8 +274,9 @@ class AppState extends ChangeNotifier {
     serverMessage = 'Verbinde …';
     notifyListeners();
     final api = ServerApi(_transport(uri));
-    if (!(await api.health()).ok) {
-      _serverFailed('Server nicht erreichbar. Läuft trair-server?');
+    final health = await api.health();
+    if (!health.ok) {
+      _serverFailed('Server nicht erreichbar (${health.error}). Läuft trair-server?');
       return;
     }
     final me = await vault!.serverIdentity();

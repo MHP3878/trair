@@ -8,6 +8,7 @@
 // server and sets TRAIR_FFI_LIB and TRAIR_SERVER_BIN; without them the
 // test is skipped.
 
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
@@ -39,6 +40,12 @@ void main() {
         '--daten',
         '${tmp.path}/server.db',
       ]);
+      // Everything the server says, for the failure messages below.
+      final log = StringBuffer();
+      server.stdout.transform(const SystemEncoding().decoder).listen(log.write);
+      server.stderr.transform(const SystemEncoding().decoder).listen(log.write);
+      var exited = 'läuft';
+      unawaited(server.exitCode.then((code) => exited = 'beendet mit $code'));
       addTearDown(() async {
         server.kill();
         await server.exitCode;
@@ -48,7 +55,7 @@ void main() {
       for (var i = 0; i < 100 && !(await api.health()).ok; i++) {
         await Future<void>.delayed(const Duration(milliseconds: 100));
       }
-      expect((await api.health()).ok, isTrue, reason: 'server did not start');
+      expect((await api.health()).ok, isTrue, reason: 'server did not start: $log');
 
       final pcVault = TrairVault(NativeDoor.load(lib));
       final laptopVault = TrairVault(NativeDoor.load(copy.path));
@@ -62,9 +69,11 @@ void main() {
       final laptopPassword = _randomWords();
       final created = await pc.createAccount(name: 'Julian', glowColor: TrairColors.accentLight, password: pcPassword);
       expect(created.ok, isTrue, reason: '${created.raw}');
+      final stillThere = await api.health();
+      expect(stillThere.ok, isTrue, reason: 'server gone ($exited): ${stillThere.error} $log');
       pc.serverUrl = url;
       await pc.connect();
-      expect(pc.serverStatus, ServerStatus.connected, reason: pc.serverMessage);
+      expect(pc.serverStatus, ServerStatus.connected, reason: '${pc.serverMessage} | server $exited | $log');
 
       // The PC shows a code; the laptop types it.
       final pairing = pc.startPairing();
