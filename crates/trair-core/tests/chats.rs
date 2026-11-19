@@ -900,7 +900,9 @@ fn requests_and_own_devices_get_no_profile_and_send_none_that_counts() {
     poll_ok(&mut net, &mut alice);
     // A stranger's profile is kept (the app shows no picture until accepted).
     assert!(alice.m().profile(mallory.account.user()).unwrap().is_some());
-    // Alice's own profile does not go to a request, with either setting.
+    // Alice's own profile does not go to a request, with either setting,
+    // even without strict mode (which would block the stranger anyway).
+    alice.m().set_strict(false).unwrap();
     assert_eq!(
         share(&mut net, &mut alice, &own_profile(7, "Alice", None), false),
         0
@@ -909,6 +911,7 @@ fn requests_and_own_devices_get_no_profile_and_send_none_that_counts() {
         share(&mut net, &mut alice, &own_profile(7, "Alice", None), true),
         0
     );
+    alice.m().set_strict(true).unwrap();
     alice.m().accept_request(&chat.id, "Mallory", NOW).unwrap();
     assert_eq!(
         share(&mut net, &mut alice, &own_profile(7, "Alice", None), true),
