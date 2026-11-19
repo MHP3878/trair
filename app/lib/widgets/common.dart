@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 The Trair contributors
 
+import 'dart:typed_data';
 import 'dart:ui' show ImageFilter;
 
 import 'package:material_ui/material_ui.dart';
@@ -155,15 +156,32 @@ class _LogoPainter extends CustomPainter {
 
 /// Round avatar with initials on a tinted background.
 class Avatar extends StatelessWidget {
-  const Avatar({super.key, required this.initials, required this.color, this.size = 40, this.square = false});
+  const Avatar({
+    super.key,
+    required this.initials,
+    required this.color,
+    this.size = 40,
+    this.square = false,
+    this.picture,
+  });
 
   final String initials;
   final Color color;
   final double size;
   final bool square;
 
+  /// A profile picture (PNG); without one the initials show.
+  final Uint8List? picture;
+
   @override
   Widget build(BuildContext context) {
+    final pic = picture;
+    if (pic != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(square ? size * 0.32 : size / 2),
+        child: Image.memory(pic, width: size, height: size, fit: BoxFit.cover, gaplessPlayback: true),
+      );
+    }
     return Container(
       width: size,
       height: size,
@@ -545,16 +563,19 @@ class ProfileCard extends StatelessWidget {
                 padding: const EdgeInsets.all(2),
                 child: Row(
                   children: [
-                    Container(
-                      width: 38,
-                      height: 38,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(color: state.glow, shape: BoxShape.circle),
-                      child: Text(
-                        initial,
-                        style: const TextStyle(color: Color(0xFF0B0B12), fontWeight: FontWeight.w700),
+                    if (state.picture != null)
+                      Avatar(initials: initial, color: state.glow, size: 38, picture: state.picture)
+                    else
+                      Container(
+                        width: 38,
+                        height: 38,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(color: state.glow, shape: BoxShape.circle),
+                        child: Text(
+                          initial,
+                          style: const TextStyle(color: Color(0xFF0B0B12), fontWeight: FontWeight.w700),
+                        ),
                       ),
-                    ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(

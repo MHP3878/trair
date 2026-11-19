@@ -18,6 +18,7 @@ import 'package:trair_app/widgets/profile_popup.dart';
 
 import 'support/fake_door.dart';
 import 'support/fake_server.dart';
+import 'support/multi_door.dart';
 
 const pw = 'mein langes passwort';
 
@@ -42,6 +43,15 @@ Future<void> _loadFonts() async {
 }
 
 /// Start the app. Without [door]: a vault exists and Trair is locked.
+/// An empty folder for the account list, deleted after the test.
+String _tempBase() {
+  final dir = Directory.systemTemp.createTempSync('trair-konten-');
+  addTearDown(() {
+    if (dir.existsSync()) dir.deleteSync(recursive: true);
+  });
+  return dir.path;
+}
+
 Future<FakeDoor> _start(
   WidgetTester tester, {
   FakeDoor? door,
@@ -57,6 +67,7 @@ Future<FakeDoor> _start(
     TrairApp(
       backend: DemoBackend(),
       vault: TrairVault(d),
+      accountsBase: _tempBase(),
       transport: (uri) {
         s.addresses.add(uri);
         return s;
@@ -793,6 +804,117 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining('Das passt nicht'), findsOneWidget);
       expect(door.contacts, isEmpty);
+    });
+  });
+
+  group('Mehrere Konten', () {
+    Future<(MultiDoor, String)> startMany(WidgetTester tester, {bool second = false}) async {
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final base = _tempBase();
+      final door = MultiDoor(base);
+      door.doors[base] = FakeDoor(password: pw, profile: {'name': 'Julian', 'glow': 0xFFA18DFF});
+      if (second) {
+        final dir = '$base${Platform.pathSeparator}konten${Platform.pathSeparator}2';
+        Directory(dir).createSync(recursive: true);
+        File('$dir${Platform.pathSeparator}vault.trair').writeAsStringSync('fake');
+        File('$dir${Platform.pathSeparator}karte.json').writeAsStringSync('{"v":1,"name":"Bob","glow":4285529343}');
+        door.doors[dir] = FakeDoor(password: '$pw 2', profile: {'name': 'Bob'});
+      }
+      await tester.pumpWidget(TrairApp(backend: DemoBackend(), vault: TrairVault(door), accountsBase: base));
+      await tester.pumpAndSettle();
+      return (door, base);
+    }
+
+    Future<void> makeAccount(WidgetTester tester, String name, String password) async {
+      await tester.tap(find.text('Weiter'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), name);
+      await tester.tap(find.text('Weiter'));
+      await tester.pumpAndSettle();
+      final fields = find.byType(TextField);
+      await tester.enterText(fields.at(0), password);
+      await tester.enterText(fields.at(1), password);
+      await tester.ensureVisible(find.byType(Checkbox));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(Checkbox));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Trair starten'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('a new account is made from the start screen and both are listed by name', (tester) async {
+      final (door, base) = await startMany(tester);
+      // An account from before has no card yet: "Konto 1" until unlocked.
+      expect(find.text('Konto 1'), findsOneWidget);
+      await _unlock(tester);
+      await _ctrl(tester, LogicalKeyboardKey.keyL);
+      expect(find.text('Julian'), findsOneWidget, reason: 'the card shows the name now');
+
+      await tester.tap(find.text('Neues Konto erstellen'));
+      await tester.pumpAndSettle();
+      expect(find.text('Neues Konto'), findsOneWidget);
+      await makeAccount(tester, 'Bob', 'bobs langes passwort');
+      expect(door.dir, '$base${Platform.pathSeparator}konten${Platform.pathSeparator}2');
+      await _ctrl(tester, LogicalKeyboardKey.keyL);
+      expect(find.text('Julian'), findsOneWidget);
+      expect(find.text('Bob'), findsOneWidget);
+
+      // Back to Julian: his own password opens his account only.
+      await tester.tap(find.text('Julian'));
+      await tester.pumpAndSettle();
+      await _type(tester, 'bobs langes passwort');
+      expect(find.text('Passwort falsch.'), findsOneWidget);
+      await _unlock(tester);
+      expect(door.dir, base);
+      expect(find.textContaining('Strenger Modus'), findsOneWidget);
+    });
+
+    testWidgets('an account open in another window is refused, the others still work', (tester) async {
+      final (door, base) = await startMany(tester, second: true);
+      expect(find.text('Bob'), findsOneWidget);
+      final bobDir = '$base${Platform.pathSeparator}konten${Platform.pathSeparator}2';
+      door.inUse.add(bobDir);
+      await tester.tap(find.text('Bob'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('schon in einem anderen Trair-Fenster offen'), findsOneWidget);
+      expect(door.dir, base, reason: 'Julian stays selected');
+      door.inUse.clear();
+      await tester.tap(find.text('Bob'));
+      await tester.pumpAndSettle();
+      await _type(tester, '$pw 2');
+      expect(door.dir, bobDir);
+      expect(door.doors[bobDir]!.unlocked, isTrue);
+    });
+
+    testWidgets('leaving a new account unfinished leaves no folder behind', (tester) async {
+      final (_, base) = await startMany(tester);
+      await tester.tap(find.text('Neues Konto erstellen'));
+      await tester.pumpAndSettle();
+      final dir = Directory('$base${Platform.pathSeparator}konten${Platform.pathSeparator}2');
+      expect(dir.existsSync(), isTrue);
+      await tester.tap(find.byTooltip('Zurück zur Kontoauswahl'));
+      await tester.pumpAndSettle();
+      expect(dir.existsSync(), isFalse);
+      expect(find.text('Neues Konto erstellen'), findsOneWidget);
+    });
+
+    testWidgets('an account can hide its name and colour from the start screen', (tester) async {
+      final (_, base) = await startMany(tester);
+      await _unlock(tester);
+      await _openSettings(tester);
+      final toggle = find.byWidgetPredicate((w) => w is PillSwitch && w.label == 'Auf dem Startbildschirm zeigen');
+      await tester.ensureVisible(toggle);
+      await tester.pumpAndSettle();
+      await tester.tap(toggle);
+      await tester.pump(const Duration(seconds: 1));
+      final card = File('$base${Platform.pathSeparator}karte.json').readAsStringSync();
+      expect(card, isNot(contains('Julian')), reason: 'nothing about the person outside the vault');
+      await _ctrl(tester, LogicalKeyboardKey.keyL);
+      expect(find.text('Konto 1'), findsOneWidget);
+      expect(find.text('Name verborgen'), findsOneWidget);
+      expect(find.text('Julian'), findsNothing);
     });
   });
 }

@@ -144,6 +144,12 @@ class TrairVault {
   /// Hide the window from screenshots. Returns false where unsupported.
   Future<bool> protectWindow(bool on) async => (await _call({'op': 'protect_window', 'on': on})).ok;
 
+  /// The squares of a QR code for [text], computed by the core.
+  Future<CoreAnswer> qr(String text) => _call({'op': 'qr', 'text': text});
+
+  /// The Windows file dialog for a picture: `path`, or error `cancelled`.
+  Future<CoreAnswer> pickImage() => _call({'op': 'pick_image'});
+
   // ----- chats (M4): the core keeps keys, contacts and history -----
 
   Future<CoreAnswer> contactCode() => _call({'op': 'contact_code'});

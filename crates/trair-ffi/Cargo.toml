@@ -31,6 +31,9 @@ zeroize = { version = "=1.9.2", features = ["serde"] }
 getrandom = "=0.4.3"
 base64 = "=0.22.1"
 hex = "0.4.3"
+# QR codes for contact codes. MIT OR Apache-2.0; only the encoder, no image
+# libraries (the app draws the squares itself).
+qrcode = { version = "=0.15.0", default-features = false, features = ["std"] }
 
 # Windows only: DPAPI (binds the vault to the Windows user) and the
 # screenshot block. Microsoft, MIT OR Apache-2.0.
@@ -39,6 +42,8 @@ windows-sys = { version = "=0.61.2", features = [
   "Win32_Foundation",
   "Win32_Security",
   "Win32_Security_Cryptography",
+  "Win32_System_Com",
   "Win32_System_Threading",
+  "Win32_UI_Controls_Dialogs",
   "Win32_UI_WindowsAndMessaging",
 ] }

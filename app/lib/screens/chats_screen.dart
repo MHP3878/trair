@@ -11,6 +11,7 @@ import '../core/clipboard.dart';
 import '../backend/backend.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/qr.dart';
 import '../widgets/trair_icons.dart';
 
 enum _Filter { all, direct, group }
@@ -417,18 +418,46 @@ class _ChatsScreenState extends State<ChatsScreen> {
           else ...[
             const FieldLabel('Dein Kontaktcode'),
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: SelectableText(
-                    state.contactCode,
-                    style: const TextStyle(fontFamily: 'GeistMono', fontSize: 12.5, color: TrairColors.text),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.fromLTRB(18, 8, 6, 8),
+                        decoration: BoxDecoration(
+                          color: TrairColors.field,
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(color: TrairColors.borderSoft),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: SelectableText(
+                                state.contactCode,
+                                style: const TextStyle(fontFamily: 'GeistMono', fontSize: 12.5, color: TrairColors.text),
+                              ),
+                            ),
+                            RoundIconButton(
+                              icon: TrairIcons.copy,
+                              tooltip: 'Code kopieren',
+                              filled: false,
+                              onPressed: () => Clipboard.setData(ClipboardData(text: state.contactCode)),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      const Text(
+                        'Oder den QR-Code zeigen: Am Handy wird er gescannt, sobald es die Android-App gibt.',
+                        style: TrairText.small,
+                      ),
+                    ],
                   ),
                 ),
-                RoundIconButton(
-                  icon: TrairIcons.copy,
-                  tooltip: 'Code kopieren',
-                  onPressed: () => Clipboard.setData(ClipboardData(text: state.contactCode)),
-                ),
+                const SizedBox(width: 20),
+                QrBox(text: state.contactCode, size: 132),
               ],
             ),
             const SizedBox(height: 20),

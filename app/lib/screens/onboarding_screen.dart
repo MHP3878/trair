@@ -76,8 +76,22 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     children: [
                       const TrairLogo(size: 34),
                       const SizedBox(width: 12),
-                      const Text('Trair einrichten', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                      Text(
+                        state.addingAccount ? 'Neues Konto' : 'Trair einrichten',
+                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                      ),
                       const Spacer(),
+                      if (state.addingAccount)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 10),
+                          child: RoundIconButton(
+                            icon: TrairIcons.x,
+                            tooltip: 'Zurück zur Kontoauswahl',
+                            filled: false,
+                            size: 32,
+                            onPressed: state.backToAccounts,
+                          ),
+                        ),
                       if (!_joining)
                         Semantics(
                           label: 'Schritt $_step von 3',

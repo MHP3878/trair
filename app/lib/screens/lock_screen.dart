@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:material_ui/material_ui.dart';
 
 import '../app_state.dart';
+import '../core/accounts.dart';
 import '../core/vault.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -36,7 +37,7 @@ class _LockScreenState extends State<LockScreen> {
   }
 
   Future<void> _unlock(AppState state) async {
-    if (_busy || _wait > 0 || _pw.text.isEmpty) return;
+    if (_busy || _wait > 0 || _pw.text.isEmpty || state.account == null) return;
     setState(() {
       _busy = true;
       _error = '';
@@ -52,6 +53,68 @@ class _LockScreenState extends State<LockScreen> {
         _startWait(answer.wait);
       }
     });
+  }
+
+  /// One account in the list: picture or glowing initials, name.
+  Widget _accountTile(AppState state, AccountCard c) {
+    final selected = state.account?.dir == c.dir;
+    final color = c.glow != null ? Color(c.glow!) : TrairColors.accentLight;
+    final initials = c.name.isEmpty ? '${c.number}' : c.name.characters.first.toUpperCase();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: _busy
+              ? null
+              : () {
+                  _pw.clear();
+                  setState(() => _error = '');
+                  state.chooseAccount(c);
+                },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.fromLTRB(10, 10, 14, 10),
+            decoration: BoxDecoration(
+              color: selected ? const Color(0x14FFFFFF) : const Color(0x06FFFFFF),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: selected ? color.withAlpha(0x80) : TrairColors.borderSoft),
+              boxShadow: selected ? [BoxShadow(color: color.withAlpha(0x30), blurRadius: 22)] : const [],
+            ),
+            child: Row(
+              children: [
+                Avatar(initials: initials, color: color, size: 42, picture: c.picture),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        c.title,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: c.name.isEmpty ? TrairColors.text : color,
+                          shadows: c.name.isEmpty ? null : glowShadows(color, strength: 18),
+                        ),
+                      ),
+                      Text(c.name.isEmpty ? 'Name verborgen' : 'Konto ${c.number}', style: TrairText.small),
+                    ],
+                  ),
+                ),
+                AnimatedOpacity(
+                  opacity: selected ? 1 : 0,
+                  duration: const Duration(milliseconds: 200),
+                  child: Icon(TrairIcons.check, size: 18, color: color),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   void _startWait(int seconds) {
@@ -97,8 +160,12 @@ class _LockScreenState extends State<LockScreen> {
                         textAlign: TextAlign.center,
                         style: TextStyle(fontSize: 14, color: TrairColors.textMuted),
                       ),
-                      const SizedBox(height: 26),
-                      const FieldLabel('Launcher-Passwort'),
+                      const SizedBox(height: 22),
+                      if (state.accountCards.isNotEmpty) ...[
+                        for (final c in state.accountCards) _accountTile(state, c),
+                        const SizedBox(height: 14),
+                      ],
+                      const FieldLabel('Passwort'),
                       PillField(
                         controller: _pw,
                         hint: 'Passwort eingeben',
@@ -121,6 +188,15 @@ class _LockScreenState extends State<LockScreen> {
                         expand: true,
                         onPressed: blocked ? null : () => _unlock(state),
                       ),
+                      if (state.accountMessage.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: Text(
+                            state.accountMessage,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(fontSize: 13.5, height: 1.45, color: TrairColors.amber),
+                          ),
+                        ),
                       AnimatedSize(
                         duration: const Duration(milliseconds: 200),
                         child: _error.isEmpty
@@ -140,6 +216,19 @@ class _LockScreenState extends State<LockScreen> {
                       ),
                       const SizedBox(height: 18),
                       const Divider(color: TrairColors.borderSoft, height: 1),
+                      const SizedBox(height: 16),
+                      PillButton(
+                        label: 'Neues Konto erstellen',
+                        icon: TrairIcons.userPlus,
+                        kind: PillKind.ghost,
+                        expand: true,
+                        onPressed: _busy
+                            ? null
+                            : () {
+                                _pw.clear();
+                                state.newAccount();
+                              },
+                      ),
                       const SizedBox(height: 14),
                       const Text(
                         'Passwort vergessen? Dann ist dieses Konto für immer weg. Es gibt keine Wiederherstellung.',

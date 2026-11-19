@@ -45,8 +45,9 @@ use crate::devices::{DeviceIdentity, SignedDeviceList, validate_label};
 pub const MAGIC: &[u8; 8] = b"TRAIRV1\0";
 /// Shortest allowed launcher password, in characters.
 pub const MIN_PASSWORD_CHARS: usize = 12;
-/// Largest profile the vault stores, in bytes of JSON.
-pub const MAX_PROFILE_BYTES: usize = 64 * 1024;
+/// Largest profile the vault stores, in bytes of JSON. Room for a small
+/// profile picture (128 × 128 pixels, base64).
+pub const MAX_PROFILE_BYTES: usize = 256 * 1024;
 
 const KDF_ARGON2ID: u8 = 1;
 pub(crate) const SALT_LEN: usize = 16;

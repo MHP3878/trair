@@ -2,6 +2,7 @@
 // Copyright (C) 2026 The Trair contributors
 
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -43,7 +44,15 @@ void main() {
 }
 
 class TrairApp extends StatefulWidget {
-  const TrairApp({super.key, required this.backend, required this.vault, this.startupError = '', this.transport});
+  const TrairApp({
+    super.key,
+    required this.backend,
+    required this.vault,
+    this.startupError = '',
+    this.transport,
+    this.accountsBase,
+    this.pickPicture,
+  });
 
   final TrairBackend backend;
 
@@ -55,13 +64,25 @@ class TrairApp extends StatefulWidget {
   final TrairVault? vault;
   final String startupError;
 
+  /// Folder with the accounts; null means the real data folder. Tests
+  /// pass a temporary one.
+  final String? accountsBase;
+
+  /// Choose a picture; null means the Windows dialog. Tests pass bytes.
+  final Future<Uint8List?> Function()? pickPicture;
+
   @override
   State<TrairApp> createState() => _TrairAppState();
 }
 
 class _TrairAppState extends State<TrairApp> {
-  late final AppState _state = AppState(widget.backend, widget.vault, transport: widget.transport)
-    ..startupError = widget.startupError;
+  late final AppState _state = AppState(
+    widget.backend,
+    widget.vault,
+    transport: widget.transport,
+    accountsBase: widget.accountsBase,
+    pickPicture: widget.pickPicture,
+  )..startupError = widget.startupError;
 
   @override
   void initState() {

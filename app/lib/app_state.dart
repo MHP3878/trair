@@ -3,10 +3,14 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/widgets.dart';
 
 import 'backend/backend.dart';
+import 'core/accounts.dart';
 import 'core/server.dart';
 import 'core/vault.dart';
 import 'theme.dart';
@@ -102,8 +106,40 @@ const maxAboutChars = 190;
 /// App-wide state. Holds no secrets: the keys stay in the Rust core
 /// behind [TrairVault]; this layer only gets the profile and results.
 class AppState extends ChangeNotifier {
-  AppState(this.backend, this.vault, {ServerTransport Function(Uri)? transport})
-    : _transport = transport ?? HttpTransport.new;
+  AppState(
+    this.backend,
+    this.vault, {
+    ServerTransport Function(Uri)? transport,
+    String? accountsBase,
+    Future<Uint8List?> Function()? pickPicture,
+  }) : _transport = transport ?? HttpTransport.new,
+       accounts = Accounts(accountsBase ?? TrairVault.dataDir()),
+       _pickPictureFile = pickPicture;
+
+  /// The accounts on this computer (one folder each).
+  final Accounts accounts;
+  final Future<Uint8List?> Function()? _pickPictureFile;
+
+  /// What the start screen lists; [account] is the one chosen there.
+  List<AccountCard> accountCards = const [];
+  AccountCard? account;
+  String accountMessage = '';
+
+  /// Folder of the account the core has open now.
+  String? _dir;
+
+  /// The core's word on whether the data folder holds a vault (null: it
+  /// could not be asked, another window has it; then the file decides).
+  bool? _baseExists;
+
+  /// A new account is being made; the first start can go back.
+  bool addingAccount = false;
+
+  /// Profile picture, 128 × 128 PNG (stored in the vault).
+  Uint8List? picture;
+
+  /// Show name and picture on the start screen (outside the vault).
+  bool showOnStart = true;
 
   final TrairBackend backend;
   final ServerTransport Function(Uri) _transport;
@@ -198,14 +234,153 @@ class AppState extends ChangeNotifier {
       go(TrairScreen.coreMissing);
       return;
     }
-    final status = await v.init();
-    if (!status.ok) {
+    accounts.removeEmpty();
+    // The data folder first: the core says whether it holds a vault.
+    final status = await v.init(accounts.base);
+    if (!status.ok && status.error != 'in_use') {
       startupError = vaultErrorText(status);
       go(TrairScreen.coreMissing);
       return;
     }
+    final baseFree = status.ok;
+    _baseExists = baseFree ? status.raw['exists'] == true : null;
+    accountCards = accounts.list(baseExists: _baseExists);
     screenProtectionSupported = await v.protectWindow(true);
-    go(status.raw['exists'] == true ? TrairScreen.lock : TrairScreen.onboarding);
+    if (accountCards.isEmpty && baseFree) {
+      _dir = accounts.base;
+      go(TrairScreen.onboarding);
+      return;
+    }
+    if (baseFree && accountCards.isNotEmpty && accountCards.first.dir == accounts.base) {
+      account = accountCards.first;
+      _dir = accounts.base;
+    } else {
+      for (final c in accountCards) {
+        if (await _open(c)) break;
+      }
+    }
+    if (account == null) accountMessage = 'Alle Konten sind schon in anderen Trair-Fenstern offen.';
+    go(TrairScreen.lock);
+  }
+
+  // ------------------------------------------------------------ accounts
+
+  /// Let the core open an account's folder. Fails if another Trair window
+  /// has it.
+  Future<bool> _open(AccountCard c) async {
+    final s = await vault!.init(c.dir);
+    if (!s.ok) {
+      accountMessage = s.error == 'in_use'
+          ? '${c.title} ist schon in einem anderen Trair-Fenster offen.'
+          : vaultErrorText(s);
+      return false;
+    }
+    account = c;
+    _dir = c.dir;
+    accountMessage = '';
+    return true;
+  }
+
+  /// Choose another account on the start screen.
+  Future<void> chooseAccount(AccountCard c) async {
+    if (account?.dir == c.dir) return;
+    await _open(c);
+    notifyListeners();
+  }
+
+  /// Make another account on this computer: a fresh folder, then the
+  /// first start.
+  Future<void> newAccount() async {
+    final dir = accounts.newDir();
+    final s = await vault!.init(dir);
+    if (!s.ok) {
+      accountMessage = vaultErrorText(s);
+      notifyListeners();
+      return;
+    }
+    _dir = dir;
+    account = null;
+    addingAccount = true;
+    go(TrairScreen.onboarding);
+  }
+
+  /// Leave the first start of a new account and go back to the list.
+  Future<void> backToAccounts() async {
+    accountCards = accounts.list(baseExists: _baseExists);
+    for (final c in accountCards) {
+      if (await _open(c)) break;
+    }
+    accounts.removeEmpty(except: _dir);
+    addingAccount = false;
+    go(TrairScreen.lock);
+  }
+
+  /// Store what the start screen shows for this account.
+  void _writeCard() {
+    final dir = _dir;
+    if (dir == null || !unlocked) return;
+    try {
+      accounts.writeCard(dir, name: userName, glow: glow.toARGB32(), picture: picture, hidden: !showOnStart);
+    } on FileSystemException {
+      return;
+    }
+    account = accounts.read(dir);
+    if (dir == accounts.base) _baseExists = true;
+    accountCards = accounts.list(baseExists: _baseExists);
+  }
+
+  void setShowOnStart(bool on) => _change(() => showOnStart = on);
+
+  /// Take a picture: cut to a square from the middle, 128 × 128 pixels.
+  /// Returns an error text, or null.
+  Future<String?> setPicture(Uint8List raw) async {
+    if (raw.length > 20 * 1024 * 1024) return 'Das Bild ist zu groß (höchstens 20 MB).';
+    try {
+      final codec = await ui.instantiateImageCodec(raw);
+      final frame = await codec.getNextFrame();
+      final img = frame.image;
+      final side = img.width < img.height ? img.width : img.height;
+      final src = ui.Rect.fromLTWH((img.width - side) / 2, (img.height - side) / 2, side.toDouble(), side.toDouble());
+      final recorder = ui.PictureRecorder();
+      ui.Canvas(recorder).drawImageRect(
+        img,
+        src,
+        const ui.Rect.fromLTWH(0, 0, 128, 128),
+        ui.Paint()..filterQuality = ui.FilterQuality.high,
+      );
+      final small = await recorder.endRecording().toImage(128, 128);
+      final png = await small.toByteData(format: ui.ImageByteFormat.png);
+      img.dispose();
+      small.dispose();
+      if (png == null) return 'Das Bild ließ sich nicht lesen.';
+      picture = png.buffer.asUint8List();
+    } on Object {
+      return 'Das Bild ließ sich nicht lesen.';
+    }
+    notifyListeners();
+    _scheduleSave();
+    return null;
+  }
+
+  void removePicture() => _change(() => picture = null);
+
+  /// Choose a picture file (Windows dialog) and take it.
+  Future<String?> pickPicture() async {
+    Uint8List? raw;
+    final pick = _pickPictureFile;
+    if (pick != null) {
+      raw = await pick();
+    } else {
+      final chosen = await vault!.pickImage();
+      if (!chosen.ok) return chosen.error == 'cancelled' ? null : 'Bilder wählen geht hier nicht.';
+      try {
+        raw = await File(chosen.raw['path'] as String).readAsBytes();
+      } on FileSystemException {
+        return 'Die Datei ließ sich nicht lesen.';
+      }
+    }
+    if (raw == null) return null;
+    return setPicture(raw);
   }
 
   void go(TrairScreen next) {
@@ -218,7 +393,11 @@ class AppState extends ChangeNotifier {
     userName = name.trim().isEmpty ? 'Ich' : name.trim();
     glow = glowColor;
     final answer = await vault!.create(password, _profileJson());
-    if (answer.ok) _unlocked(answer);
+    if (answer.ok) {
+      _unlocked(answer);
+      addingAccount = false;
+      _writeCard();
+    }
     return answer;
   }
 
@@ -243,6 +422,8 @@ class AppState extends ChangeNotifier {
     accountKey = answer.accountKey;
     realBadges = answer.badges;
     go(TrairScreen.chats);
+    // The start screen shows the current name and picture from now on.
+    _writeCard();
     noteActivity();
     unawaited(_applyScreenProtection());
     if (serverAuto) unawaited(connect());
@@ -261,6 +442,7 @@ class AppState extends ChangeNotifier {
     realBadges = const [];
     _forgetChats();
     _forgetServer();
+    accountCards = accounts.list(baseExists: _baseExists);
     go(TrairScreen.lock);
     // The lock screen is always protected, whatever the setting says.
     screenProtectionSupported = await vault?.protectWindow(true) ?? false;
@@ -304,7 +486,23 @@ class AppState extends ChangeNotifier {
       devices = const [];
       accountKey = '';
       realBadges = const [];
-      go(TrairScreen.onboarding);
+      final gone = _dir;
+      if (gone != null) accounts.removeCard(gone);
+      if (gone == accounts.base) _baseExists = false;
+      account = null;
+      accountCards = accounts.list(baseExists: _baseExists);
+      if (accountCards.isEmpty) {
+        go(TrairScreen.onboarding);
+      } else {
+        // Other accounts stay: back to the list. The empty folder goes
+        // once the core has let go of it.
+        for (final c in accountCards) {
+          if (await _open(c)) break;
+        }
+        accounts.removeEmpty(except: _dir);
+        accountMessage = serverDeletion.isEmpty ? 'Konto gelöscht.' : 'Konto gelöscht. $serverDeletion';
+        go(TrairScreen.lock);
+      }
     }
     return answer;
   }
@@ -775,6 +973,8 @@ class AppState extends ChangeNotifier {
     joinMessage = '';
     // Unlocking connects at once, through the server used for pairing.
     _unlocked(answer, server: url.trim());
+    addingAccount = false;
+    _writeCard();
     _scheduleSave();
     return answer;
   }
@@ -856,6 +1056,7 @@ class AppState extends ChangeNotifier {
   Future<void> _save() async {
     if (!unlocked) return;
     await vault?.saveProfile(_profileJson());
+    _writeCard();
   }
 
   Map<String, Object?> _profileJson() => {
@@ -871,6 +1072,8 @@ class AppState extends ChangeNotifier {
     'profileVisibility': profileVisibility,
     'server': serverUrl,
     'serverAuto': serverAuto,
+    'startCard': showOnStart,
+    'picture': ?(picture == null ? null : base64.encode(picture!)),
   };
 
   void _applyProfile(Map<String, Object?> p) {
@@ -892,6 +1095,13 @@ class AppState extends ChangeNotifier {
     final server = p['server'];
     serverUrl = server is String && server.isNotEmpty ? server : defaultServerUrl;
     serverAuto = p['serverAuto'] as bool? ?? false;
+    showOnStart = p['startCard'] as bool? ?? true;
+    final pic = p['picture'];
+    try {
+      picture = pic is String ? base64.decode(pic) : null;
+    } on FormatException {
+      picture = null;
+    }
     final storedPrivacy = p['privacy'];
     for (final key in privacy.keys) {
       privacy[key] = storedPrivacy is Map && storedPrivacy[key] == true;
