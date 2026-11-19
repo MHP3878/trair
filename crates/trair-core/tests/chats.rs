@@ -1114,7 +1114,7 @@ fn a_vanishing_chat_is_gone_on_both_sides_at_the_end() {
 
     for p in [&mut alice, &mut bob] {
         assert!(p.m().sweep(NOW + 599).unwrap().is_empty());
-        assert_eq!(p.m().sweep(NOW + 600).unwrap(), [chat.clone()]);
+        assert_eq!(p.m().sweep(NOW + 600).unwrap(), std::slice::from_ref(&chat));
         assert!(p.m().chat(&chat).is_err());
         assert!(p.m().messages(&chat, None, 10).unwrap().is_empty());
         assert!(
