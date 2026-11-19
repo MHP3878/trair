@@ -21,6 +21,7 @@ import 'screens/profile_screen.dart';
 import 'screens/start_screen.dart';
 import 'theme.dart';
 import 'widgets/common.dart';
+import 'widgets/server_rail.dart';
 
 void main() {
   // The fonts and icons are bundled files, not Dart packages, so Flutter
@@ -151,11 +152,26 @@ class _Router extends StatelessWidget {
       TrairScreen.community => const CommunityScreen(),
       TrairScreen.profile => const ProfileScreen(),
     };
+    final switcher = AnimatedSwitcher(
+      duration: const Duration(milliseconds: 260),
+      child: KeyedSubtree(key: ValueKey(state.screen), child: page),
+    );
+    // Once open, the rail with direct messages, communities and settings
+    // stays on the left and does not move with the screens.
+    final rail = switch (state.screen) {
+      TrairScreen.chats || TrairScreen.community || TrairScreen.profile => true,
+      _ => false,
+    };
     return Scaffold(
-      body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 260),
-        child: KeyedSubtree(key: ValueKey(state.screen), child: page),
-      ),
+      body: rail
+          ? Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const ServerRail(),
+                Expanded(child: switcher),
+              ],
+            )
+          : switcher,
     );
   }
 }

@@ -76,16 +76,13 @@ class _ChatsScreenState extends State<ChatsScreen> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              SizedBox(width: 304, child: _sidebar(state, chats)),
+              Container(width: 300, color: TrairColors.sidebar, child: _sidebar(state, chats)),
               Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(0, 10, 10, 10),
-                  child: _contactsOpen
-                      ? _contactsPanel(state)
-                      : (_realChat(state) != null
-                            ? _realConversation(state, _realChat(state)!)
-                            : _conversation(state, chat)),
-                ),
+                child: _contactsOpen
+                    ? _contactsPanel(state)
+                    : (_realChat(state) != null
+                          ? _realConversation(state, _realChat(state)!)
+                          : _conversation(state, chat)),
               ),
             ],
           ),
@@ -104,13 +101,13 @@ class _ChatsScreenState extends State<ChatsScreen> {
       };
       return kindOk && (q.isEmpty || c.name.toLowerCase().contains(q));
     }).toList();
-    final community = state.backend.community();
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 18, 14, 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SidebarHeader(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 10, 0),
+          child: SidebarHeader(
+            title: 'Direktnachrichten',
             trailing: RoundIconButton(
               icon: TrairIcons.squarePen,
               tooltip: 'Neuer Chat',
@@ -120,114 +117,97 @@ class _ChatsScreenState extends State<ChatsScreen> {
               }),
             ),
           ),
-          const SizedBox(height: 18),
-          PillField(
-            controller: _search,
-            focusNode: _searchFocus,
-            hint: 'Suchen',
-            height: 42,
-            semanticLabel: 'Chats durchsuchen (nur auf diesem Gerät)',
-            leading: const Icon(TrairIcons.search, size: 18, color: TrairColors.textMuted),
-            onChanged: (_) => setState(() {}),
-            trailing: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(color: const Color(0x0FFFFFFF), borderRadius: BorderRadius.circular(999)),
-              child: const Text(
-                'Strg K',
-                style: TextStyle(fontFamily: 'GeistMono', fontSize: 11, color: TrairColors.textMuted),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              PillField(
+                controller: _search,
+                focusNode: _searchFocus,
+                hint: 'Suchen',
+                height: 38,
+                semanticLabel: 'Chats durchsuchen (nur auf diesem Gerät)',
+                leading: const Icon(TrairIcons.search, size: 18, color: TrairColors.textMuted),
+                onChanged: (_) => setState(() {}),
+                trailing: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(color: const Color(0x0FFFFFFF), borderRadius: BorderRadius.circular(999)),
+                  child: const Text(
+                    'Strg K',
+                    style: TextStyle(fontFamily: 'GeistMono', fontSize: 11, color: TrairColors.textMuted),
+                  ),
+                ),
               ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          GlassPanel(
-            lite: true,
-            radius: 999,
-            padding: const EdgeInsets.all(3),
-            child: Row(
-              children: [
-                for (final f in _Filter.values)
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => setState(() => _filter = f),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        height: 32,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: _filter == f ? const Color(0x1AFFFFFF) : Colors.transparent,
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          switch (f) {
-                            _Filter.all => 'Alle',
-                            _Filter.direct => 'Direkt',
-                            _Filter.group => 'Gruppen',
-                          },
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                            color: _filter == f ? TrairColors.text : TrairColors.textMuted,
+              const SizedBox(height: 10),
+              GlassPanel(
+                lite: true,
+                radius: 999,
+                padding: const EdgeInsets.all(3),
+                child: Row(
+                  children: [
+                    for (final f in _Filter.values)
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => setState(() => _filter = f),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            height: 32,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: _filter == f ? const Color(0x1AFFFFFF) : Colors.transparent,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              switch (f) {
+                                _Filter.all => 'Alle',
+                                _Filter.direct => 'Direkt',
+                                _Filter.group => 'Gruppen',
+                              },
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                                color: _filter == f ? TrairColors.text : TrairColors.textMuted,
+                              ),
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  ),
-              ],
-            ),
+                  ],
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 14),
-          Expanded(
-            child: ListView(
-              children: [
-                if (state.chatsReady) ...[
-                  _sectionLabel('Echt verschlüsselt'),
-                  for (final c in state.realChats) _realRow(state, c),
-                  if (state.realChats.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.fromLTRB(12, 2, 12, 8),
-                      child: Text('Noch keine. Oben auf „Neuer Chat“.', style: TrairText.small),
-                    ),
-                  const SizedBox(height: 8),
-                  _sectionLabel('Demo (nicht verschlüsselt)'),
-                ],
-                for (final c in visible) _chatRow(state, c),
-                if (visible.isEmpty)
+        ),
+        const SizedBox(height: 12),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            children: [
+              if (state.chatsReady) ...[
+                _sectionLabel('Echt verschlüsselt'),
+                for (final c in state.realChats) _realRow(state, c),
+                if (state.realChats.isEmpty)
                   const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: Text('Kein Chat gefunden.', style: TrairText.muted),
+                    padding: EdgeInsets.fromLTRB(12, 2, 12, 8),
+                    child: Text('Noch keine. Oben auf „Neuer Chat“.', style: TrairText.small),
                   ),
-                const SizedBox(height: 14),
-                const Padding(
-                  padding: EdgeInsets.only(left: 12, bottom: 6),
-                  child: Text('Communities', style: TrairText.small),
-                ),
-                InkWell(
-                  borderRadius: BorderRadius.circular(18),
-                  onTap: () => state.go(TrairScreen.community),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(10, 8, 12, 8),
-                    child: Row(
-                      children: [
-                        Avatar(initials: community.initials, color: TrairColors.accentPale, size: 36, square: true),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            community.name,
-                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-                          ),
-                        ),
-                        Text('${community.memberCount} Mitglieder', style: TrairText.small),
-                      ],
-                    ),
-                  ),
-                ),
+                const SizedBox(height: 8),
+                _sectionLabel('Demo (nicht verschlüsselt)'),
               ],
-            ),
+              for (final c in visible) _chatRow(state, c),
+              if (visible.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: Text('Kein Chat gefunden.', style: TrairText.muted),
+                ),
+              const SizedBox(height: 10),
+            ],
           ),
-          const SizedBox(height: 10),
-          const ProfileCard(),
-        ],
-      ),
+        ),
+        const ProfileCard(),
+      ],
     );
   }
 
@@ -248,9 +228,9 @@ class _ChatsScreenState extends State<ChatsScreen> {
       padding: const EdgeInsets.only(bottom: 2),
       child: Material(
         color: active ? TrairColors.cardActive : Colors.transparent,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(8),
         child: InkWell(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(8),
           onTap: () => setState(() {
             _active = c.id;
             _real = null;
@@ -260,10 +240,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
             _draft.clear();
           }),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(10, 10, 12, 10),
+            padding: const EdgeInsets.fromLTRB(8, 7, 10, 7),
             child: Row(
               children: [
-                Avatar(initials: c.initials, color: c.color, size: 44),
+                Avatar(initials: c.initials, color: c.color, size: 40),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -324,8 +304,16 @@ class _ChatsScreenState extends State<ChatsScreen> {
   // ------------------------------------------------------- real chats (M4)
 
   Widget _sectionLabel(String text) => Padding(
-    padding: const EdgeInsets.only(left: 12, bottom: 6, top: 2),
-    child: Text(text, style: TrairText.small),
+    padding: const EdgeInsets.only(left: 10, bottom: 6, top: 6),
+    child: Text(
+      text,
+      style: const TextStyle(
+        fontSize: 11.5,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.3,
+        color: TrairColors.textMuted,
+      ),
+    ),
   );
 
   RealChat? _realChat(AppState state) => _real == null ? null : state.realChats.where((c) => c.id == _real).firstOrNull;
@@ -354,12 +342,12 @@ class _ChatsScreenState extends State<ChatsScreen> {
       padding: const EdgeInsets.only(bottom: 2),
       child: Material(
         color: active ? TrairColors.cardActive : Colors.transparent,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(8),
         child: InkWell(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(8),
           onTap: () => _openReal(state, c.id),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(10, 10, 12, 10),
+            padding: const EdgeInsets.fromLTRB(8, 7, 10, 7),
             child: Row(
               children: [
                 Avatar(
@@ -619,8 +607,11 @@ class _ChatsScreenState extends State<ChatsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 14, 16, 14),
+          Container(
+            decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(color: TrairColors.borderSoft)),
+            ),
+            padding: const EdgeInsets.fromLTRB(20, 11, 16, 11),
             child: Row(
               children: [
                 Expanded(
@@ -790,8 +781,11 @@ class _ChatsScreenState extends State<ChatsScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 14, 16, 14),
+              Container(
+                decoration: const BoxDecoration(
+                  border: Border(bottom: BorderSide(color: TrairColors.borderSoft)),
+                ),
+                padding: const EdgeInsets.fromLTRB(20, 11, 16, 11),
                 child: Row(
                   children: [
                     Expanded(

@@ -3,19 +3,23 @@
 
 import 'package:material_ui/material_ui.dart';
 
-/// Colors of the Pro look (dark, frosted glass, one accent).
+/// Colors: flat, dark layers like Discord, Trair violet as the accent.
+/// From the outside in: rail (communities), side column, main area.
 class TrairColors {
-  static const background = Color(0xFF09090D);
-  static const glass = Color(0x80161620);
-  static const glassLite = Color(0x8C222230);
-  static const glassPopup = Color(0xB81E1E2C);
-  static const card = Color(0x0BFFFFFF);
-  static const cardActive = Color(0x0FFFFFFF);
-  static const field = Color(0x42000000);
-  static const border = Color(0x14FFFFFF);
-  static const borderSoft = Color(0x0FFFFFFF);
-  static const hover = Color(0x09FFFFFF);
-  static const bubbleOther = Color(0x13FFFFFF);
+  static const background = Color(0xFF0E0D13);
+  static const rail = Color(0xFF0E0D13);
+  static const sidebar = Color(0xFF16151D);
+  static const main = Color(0xFF1C1B24);
+  static const glass = Color(0xFF1C1B24);
+  static const glassLite = Color(0xFF25232F);
+  static const glassPopup = Color(0xFF25232F);
+  static const card = Color(0xFF211F2A);
+  static const cardActive = Color(0xFF2C2939);
+  static const field = Color(0xFF121118);
+  static const border = Color(0xFF2E2B39);
+  static const borderSoft = Color(0xFF25232F);
+  static const hover = Color(0xFF221F2C);
+  static const bubbleOther = Color(0xFF2A2836);
   static const text = Color(0xFFEDECF4);
   static const textSoft = Color(0xFFC8C6D4);
   static const textMuted = Color(0xFF9A98AA);

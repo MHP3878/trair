@@ -300,7 +300,7 @@ void main() {
       addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
       await _start(tester);
       await _unlock(tester);
-      await tester.tap(find.text('Trair Beta'));
+      await tester.tap(find.byTooltip('Trair Beta'));
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Leute einladen'));
       await tester.pumpAndSettle();
@@ -368,7 +368,7 @@ void main() {
     testWidgets('community shows open and closed channels', (tester) async {
       await _start(tester);
       await _unlock(tester);
-      await tester.tap(find.text('Trair Beta'));
+      await tester.tap(find.byTooltip('Trair Beta'));
       await tester.pumpAndSettle();
       expect(find.text('Geschlossen · Ende-zu-Ende'), findsOneWidget);
       await tester.tap(find.text('memes'));
@@ -389,7 +389,7 @@ void main() {
     testWidgets('every screen fits a small window without overflow', (tester) async {
       await _start(tester, size: const Size(1024, 640));
       await _unlock(tester);
-      await tester.tap(find.text('Trair Beta'));
+      await tester.tap(find.byTooltip('Trair Beta'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Chats'));
       await tester.pumpAndSettle();
@@ -467,7 +467,7 @@ void main() {
     Future<void> openCommunity(WidgetTester tester) async {
       await _start(tester);
       await _unlock(tester);
-      await tester.tap(find.text('Trair Beta'));
+      await tester.tap(find.byTooltip('Trair Beta'));
       await tester.pumpAndSettle();
     }
 

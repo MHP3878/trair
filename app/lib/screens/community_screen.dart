@@ -40,116 +40,117 @@ class _CommunityScreenState extends State<CommunityScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SizedBox(width: 288, child: _sidebar(state, community)),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(0, 10, 10, 10),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(child: _channel(state, channel)),
-                  const SizedBox(width: 10),
-                  SizedBox(width: 260, child: _members(state, community)),
-                ],
-              ),
-            ),
-          ),
+          Container(width: 280, color: TrairColors.sidebar, child: _sidebar(state, community)),
+          Expanded(child: _channel(state, channel)),
+          SizedBox(width: 248, child: _members(state, community)),
         ],
       ),
     );
   }
 
   Widget _sidebar(AppState state, Community community) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 18, 14, 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const SidebarHeader(trailing: BackToChats()),
-          const SizedBox(height: 18),
-          GlassPanel(
-            lite: true,
-            radius: 22,
-            padding: const EdgeInsets.all(12),
-            child: Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 12, 10, 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Avatar(initials: community.initials, color: TrairColors.accentPale, size: 44, square: true),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                const Padding(
+                  padding: EdgeInsets.only(left: 4),
+                  child: SidebarHeader(title: 'Community', trailing: BackToChats()),
+                ),
+                const SizedBox(height: 10),
+                GlassPanel(
+                  lite: true,
+                  radius: 12,
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
                     children: [
-                      Text(community.name, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-                      Text('${community.memberCount} Mitglieder · geschlossene Beta', style: TrairText.small),
+                      Avatar(initials: community.initials, color: TrairColors.accentPale, size: 44, square: true),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(community.name, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                            Text('${community.memberCount} Mitglieder · geschlossene Beta', style: TrairText.small),
+                          ],
+                        ),
+                      ),
+                      RoundIconButton(
+                        icon: TrairIcons.userPlus,
+                        tooltip: 'Leute einladen',
+                        color: _invite ? const Color(0x336E4FF6) : null,
+                        onPressed: () => setState(() => _invite = !_invite),
+                      ),
                     ],
                   ),
                 ),
-                RoundIconButton(
-                  icon: TrairIcons.userPlus,
-                  tooltip: 'Leute einladen',
-                  color: _invite ? const Color(0x336E4FF6) : null,
-                  onPressed: () => setState(() => _invite = !_invite),
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 220),
+                  child: _invite
+                      ? Padding(
+                          padding: const EdgeInsets.only(top: 10),
+                          child: Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: const Color(0x176E4FF6),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: const Color(0x38A18DFF)),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Einladungscode · nur einmal nutzbar, 24 Std. gültig',
+                                  style: TrairText.small,
+                                ),
+                                const SizedBox(height: 6),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        'TRAIR-7KQ2-M9XD',
+                                        style: TrairText.mono.copyWith(fontSize: 16, letterSpacing: 1.4),
+                                      ),
+                                    ),
+                                    RoundIconButton(
+                                      icon: TrairIcons.copy,
+                                      tooltip: 'Kopieren (verschwindet nach 60 Sekunden)',
+                                      size: 32,
+                                      onPressed: () => copySensitive('TRAIR-7KQ2-M9XD'),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                      : const SizedBox(width: double.infinity),
+                ),
+                const SizedBox(height: 14),
+                Expanded(
+                  child: ListView(
+                    children: [
+                      for (final cat in community.categories) ...[
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+                          child: Text(cat.name, style: TrairText.small),
+                        ),
+                        for (final ch in cat.channels) _channelRow(ch),
+                      ],
+                    ],
+                  ),
                 ),
               ],
             ),
           ),
-          AnimatedSize(
-            duration: const Duration(milliseconds: 220),
-            child: _invite
-                ? Padding(
-                    padding: const EdgeInsets.only(top: 10),
-                    child: Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: const Color(0x176E4FF6),
-                        borderRadius: BorderRadius.circular(22),
-                        border: Border.all(color: const Color(0x38A18DFF)),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('Einladungscode · nur einmal nutzbar, 24 Std. gültig', style: TrairText.small),
-                          const SizedBox(height: 6),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  'TRAIR-7KQ2-M9XD',
-                                  style: TrairText.mono.copyWith(fontSize: 16, letterSpacing: 1.4),
-                                ),
-                              ),
-                              RoundIconButton(
-                                icon: TrairIcons.copy,
-                                tooltip: 'Kopieren (verschwindet nach 60 Sekunden)',
-                                size: 32,
-                                onPressed: () => copySensitive('TRAIR-7KQ2-M9XD'),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  )
-                : const SizedBox(width: double.infinity),
-          ),
-          const SizedBox(height: 14),
-          Expanded(
-            child: ListView(
-              children: [
-                for (final cat in community.categories) ...[
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
-                    child: Text(cat.name, style: TrairText.small),
-                  ),
-                  for (final ch in cat.channels) _channelRow(ch),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(height: 10),
-          const ProfileCard(subtitle: 'Gründer · Trust 3'),
-        ],
-      ),
+        ),
+        const ProfileCard(subtitle: 'Gründer · Trust 3'),
+      ],
     );
   }
 
@@ -219,8 +220,11 @@ class _CommunityScreenState extends State<CommunityScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(22, 16, 16, 12),
+              Container(
+                decoration: const BoxDecoration(
+                  border: Border(bottom: BorderSide(color: TrairColors.borderSoft)),
+                ),
+                padding: const EdgeInsets.fromLTRB(22, 12, 16, 10),
                 child: Row(
                   children: [
                     Expanded(
@@ -417,7 +421,8 @@ class _CommunityScreenState extends State<CommunityScreen> {
 
   Widget _members(AppState state, Community community) {
     return GlassPanel(
-      padding: const EdgeInsets.fromLTRB(12, 18, 12, 14),
+      color: TrairColors.sidebar,
+      padding: const EdgeInsets.fromLTRB(8, 14, 8, 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
