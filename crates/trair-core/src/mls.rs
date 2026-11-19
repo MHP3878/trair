@@ -103,6 +103,15 @@ pub enum Event {
         /// The profile as sent.
         profile: serde_json::Value,
     },
+    /// A chat setting from a member (not yet checked).
+    Control {
+        /// Group id.
+        group: String,
+        /// Sender, proven by the MLS signature.
+        from: String,
+        /// The setting as sent.
+        control: serde_json::Value,
+    },
     /// The group changed.
     Commit {
         /// Group id.
@@ -132,6 +141,10 @@ struct Payload {
     text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     profile: Option<serde_json::Value>,
+    /// Chat settings between the devices (a friendship key's token, when
+    /// the chat vanishes). Not counted either.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    control: Option<serde_json::Value>,
 }
 
 /// What a device keeps besides the OpenMLS key-value store: which groups
@@ -734,6 +747,7 @@ impl Device {
                 seq,
                 text: text.to_string(),
                 profile: None,
+                control: None,
             },
         )
     }
@@ -747,6 +761,21 @@ impl Device {
                 seq: 0,
                 text: String::new(),
                 profile: Some(profile.clone()),
+                control: None,
+            },
+        )
+    }
+
+    /// Encrypt a chat setting for a group. Same checks as a text.
+    pub fn encrypt_control(&mut self, group: &str, control: &serde_json::Value) -> Result<Vec<u8>> {
+        self.check_send(group)?;
+        self.seal(
+            group,
+            &Payload {
+                seq: 0,
+                text: String::new(),
+                profile: None,
+                control: Some(control.clone()),
             },
         )
     }
@@ -887,6 +916,13 @@ impl Device {
             ProcessedMessageContent::ApplicationMessage(a) => {
                 let p: Payload = serde_json::from_slice(&a.into_bytes())
                     .map_err(|_| CoreError::Rejected("unreadable payload".into()))?;
+                if let Some(control) = p.control {
+                    return Ok(Event::Control {
+                        group,
+                        from: sender,
+                        control,
+                    });
+                }
                 if let Some(profile) = p.profile {
                     let user = sender.split(':').next().unwrap_or_default().to_string();
                     let account_key = self

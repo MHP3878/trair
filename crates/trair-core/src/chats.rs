@@ -21,7 +21,7 @@ use rusqlite::{OptionalExtension, Transaction, params};
 use sha2::{Digest, Sha256};
 
 use crate::account::{Account, Fingerprint};
-use crate::contacts::ContactCode;
+use crate::contacts::{ContactCode, InviteCode, InviteKind};
 use crate::devices::{DeviceIdentity, DeviceList};
 use crate::error::{CoreError, Result, internal};
 use crate::mls::{Device, DeviceState, Event, KeyPackageOffer, Member, Outgoing};
@@ -180,6 +180,13 @@ pub enum Incoming {
         /// This device is no longer in the chat.
         left: bool,
     },
+    /// When the chat vanishes changed (`None`: it stays).
+    Ends {
+        /// The chat.
+        chat: String,
+        /// Seconds since 1970.
+        ends: Option<u64>,
+    },
     /// The chat partner sent a newer profile (stored; see
     /// [`Messenger::profile`]).
     Profile {
@@ -314,6 +321,8 @@ impl Messenger {
                 .map_err(sql)?;
             Ok(())
         })?;
+        // Whatever ran out while this device was off goes now.
+        m.sweep(now)?;
         Ok(m)
     }
 
@@ -405,7 +414,46 @@ impl Messenger {
     /// Add a contact from a code. Pins the account key in the code.
     /// Requests from this account become chats.
     pub fn add_contact(&mut self, code: &str, name: &str, now: u64) -> Result<Contact> {
-        let code = ContactCode::parse(code)?;
+        let Ok(invite) = InviteCode::parse(code) else {
+            return self.add_contact_code(ContactCode::parse(code)?, name, now);
+        };
+        if invite.ends <= now {
+            return Err(CoreError::Rejected(
+                "this friendship key has expired".into(),
+            ));
+        }
+        let existed = self.contact(&invite.contact.user)?.is_some();
+        let contact = self.add_contact_code(invite.contact.clone(), name, now)?;
+        // The token goes into the first chat with this account, see
+        // [`Messenger::invite_message`].
+        let (user, token, kind, ends) = (
+            contact.user.clone(),
+            invite.token.to_vec(),
+            invite.kind.letter().to_string(),
+            to_i64(invite.ends),
+        );
+        let vanishing = invite.kind == InviteKind::Vanishing && !existed;
+        self.save(move |tx| {
+            tx.execute(
+                "INSERT INTO redeem (user, token, kind, ends) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT (user) DO UPDATE SET token = excluded.token, kind = excluded.kind,
+                   ends = excluded.ends",
+                params![user, token, kind, ends],
+            )
+            .map_err(sql)?;
+            if vanishing {
+                tx.execute(
+                    "INSERT INTO contact_ends (user, ends) VALUES (?1, ?2) ON CONFLICT (user) DO NOTHING",
+                    params![user, ends],
+                )
+                .map_err(sql)?;
+            }
+            Ok(())
+        })?;
+        Ok(contact)
+    }
+
+    fn add_contact_code(&mut self, code: ContactCode, name: &str, now: u64) -> Result<Contact> {
         if code.user == self.user {
             return Err(CoreError::Rejected("that is your own code".into()));
         }
@@ -860,6 +908,11 @@ impl Messenger {
                 account_key,
                 profile,
             } => self.got_profile(&group, &from, account_key, &profile, now, mark),
+            Event::Control {
+                group,
+                from,
+                control,
+            } => self.got_control(&group, &from, &control, now, mark),
             Event::Commit {
                 group,
                 by,
@@ -973,6 +1026,171 @@ impl Messenger {
             chat,
             update_keys: via_last_resort,
         })
+    }
+
+    // ------------------------------------------ friendship keys, vanishing
+
+    /// A friendship key of this account: works once, until `ends`. With
+    /// [`InviteKind::Vanishing`] the chat it opens vanishes at `ends`.
+    pub fn create_invite(&mut self, kind: InviteKind, ends: u64, now: u64) -> Result<String> {
+        if ends <= now || ends > now + MAX_END_SECS {
+            return Err(CoreError::Rejected("end time out of range".into()));
+        }
+        let mut token = [0u8; 16];
+        getrandom::fill(&mut token).map_err(|e| CoreError::Internal(e.to_string()))?;
+        let hash = digest(&token).to_vec();
+        let (k, e) = (kind.letter().to_string(), to_i64(ends));
+        self.save(move |tx| {
+            tx.execute(
+                "INSERT INTO invites (hash, kind, ends, used) VALUES (?1, ?2, ?3, 0)",
+                params![hash, k, e],
+            )
+            .map_err(sql)?;
+            Ok(())
+        })?;
+        Ok(InviteCode {
+            contact: ContactCode {
+                user: self.user.clone(),
+                fingerprint: self.device.account_fingerprint().clone(),
+            },
+            token,
+            kind,
+            ends,
+        }
+        .text())
+    }
+
+    /// The token of a friendship key this account used, for the first chat
+    /// with its owner (send it after the chat started). `None` if there is
+    /// none or it expired. A vanishing key makes this chat vanish too.
+    pub fn invite_message(
+        &mut self,
+        chat: &str,
+        now: u64,
+    ) -> Result<Option<(Vec<u8>, Vec<String>)>> {
+        let c = self.chat(chat)?;
+        let row: Option<(Vec<u8>, String, i64)> = self
+            .store
+            .conn()
+            .query_row(
+                "SELECT token, kind, ends FROM redeem WHERE user = ?1",
+                [&c.peer],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()
+            .map_err(sql)?;
+        let Some((token, kind, ends)) = row else {
+            return Ok(None);
+        };
+        let peer = c.peer.clone();
+        if to_u64(ends) <= now {
+            self.save(move |tx| {
+                tx.execute("DELETE FROM redeem WHERE user = ?1", [&peer])
+                    .map_err(sql)?;
+                Ok(())
+            })?;
+            return Ok(None);
+        }
+        let control =
+            serde_json::json!({"invite": hex::encode(&token), "kind": kind, "ends": ends});
+        let bytes = self.device.encrypt_control(chat, &control)?;
+        let to = self.recipients(chat)?;
+        let id = chat.to_string();
+        self.save(move |tx| {
+            tx.execute("DELETE FROM redeem WHERE user = ?1", [&peer])
+                .map_err(sql)?;
+            if kind == "v" {
+                set_end(tx, &id, Some(ends))?;
+            }
+            Ok(())
+        })?;
+        Ok(Some((bytes, to)))
+    }
+
+    /// Let a chat vanish at `ends` (`None`: it stays). Both sides delete it
+    /// then; the message for the others is returned.
+    pub fn set_chat_end(
+        &mut self,
+        chat: &str,
+        ends: Option<u64>,
+        now: u64,
+    ) -> Result<(Vec<u8>, Vec<String>)> {
+        let c = self.chat(chat)?;
+        if c.state != ChatState::Active {
+            return Err(CoreError::Blocked("only in an active chat".into()));
+        }
+        if let Some(e) = ends
+            && (e <= now || e > now + MAX_END_SECS)
+        {
+            return Err(CoreError::Rejected("end time out of range".into()));
+        }
+        let bytes = self
+            .device
+            .encrypt_control(chat, &serde_json::json!({"ends": ends}))?;
+        let to = self.recipients(chat)?;
+        let id = chat.to_string();
+        self.save(move |tx| set_end(tx, &id, ends.map(to_i64)))?;
+        Ok((bytes, to))
+    }
+
+    /// When a chat vanishes, if it does.
+    pub fn chat_end(&self, chat: &str) -> Result<Option<u64>> {
+        let e: Option<i64> = self
+            .store
+            .conn()
+            .query_row("SELECT ends FROM chat_ends WHERE chat = ?1", [chat], |r| {
+                r.get(0)
+            })
+            .optional()
+            .map_err(sql)?;
+        Ok(e.map(to_u64))
+    }
+
+    /// Delete what has run out: vanished chats (keys, messages), the
+    /// contacts that came with them, old friendship keys. Returns the
+    /// deleted chats.
+    pub fn sweep(&mut self, now: u64) -> Result<Vec<String>> {
+        let n = to_i64(now);
+        let ids = |sql_text: &str, conn: &rusqlite::Connection| -> Result<Vec<String>> {
+            let mut st = conn.prepare(sql_text).map_err(sql)?;
+            let rows = st.query_map([n], |r| r.get::<_, String>(0)).map_err(sql)?;
+            rows.collect::<rusqlite::Result<Vec<_>>>().map_err(sql)
+        };
+        let chats = ids(
+            "SELECT chat FROM chat_ends WHERE ends <= ?1",
+            self.store.conn(),
+        )?;
+        let users = ids(
+            "SELECT user FROM contact_ends WHERE ends <= ?1",
+            self.store.conn(),
+        )?;
+        for id in &chats {
+            // A chat this device never fully joined has no keys to forget.
+            let _ = self.device.forget_group(id);
+        }
+        let (c2, u2) = (chats.clone(), users);
+        self.save(move |tx| {
+            for id in &c2 {
+                for table in ["messages", "outbox", "profile_sent", "chat_ends"] {
+                    tx.execute(&format!("DELETE FROM {table} WHERE chat = ?1"), [id])
+                        .map_err(sql)?;
+                }
+                tx.execute("DELETE FROM chats WHERE id = ?1", [id])
+                    .map_err(sql)?;
+            }
+            for user in &u2 {
+                for table in ["contacts", "contact_ends", "profiles", "redeem"] {
+                    tx.execute(&format!("DELETE FROM {table} WHERE user = ?1"), [user])
+                        .map_err(sql)?;
+                }
+            }
+            tx.execute("DELETE FROM invites WHERE ends <= ?1", [n])
+                .map_err(sql)?;
+            tx.execute("DELETE FROM redeem WHERE ends <= ?1", [n])
+                .map_err(sql)?;
+            Ok(())
+        })?;
+        Ok(chats)
     }
 
     /// This account's profile for every active chat that does not have
@@ -1197,7 +1415,151 @@ impl Messenger {
     }
 }
 
+/// Longest time a friendship key or a vanishing chat may run: 30 days.
+pub const MAX_END_SECS: u64 = 30 * 86_400;
+
+fn set_end(tx: &Transaction, chat: &str, ends: Option<i64>) -> Result<()> {
+    match ends {
+        Some(e) => tx.execute(
+            "INSERT INTO chat_ends (chat, ends) VALUES (?1, ?2)
+             ON CONFLICT (chat) DO UPDATE SET ends = excluded.ends",
+            params![chat, e],
+        ),
+        None => tx.execute("DELETE FROM chat_ends WHERE chat = ?1", [chat]),
+    }
+    .map_err(sql)?;
+    Ok(())
+}
+
 impl Messenger {
+    /// A chat setting arrived. A friendship key's token from the chat
+    /// partner makes them a contact (once, before the end); an end time
+    /// from the partner or an own device applies to the chat. Anything
+    /// else is only marked as seen.
+    fn got_control(
+        &mut self,
+        group: &str,
+        from: &str,
+        control: &serde_json::Value,
+        now: u64,
+        mark: impl FnOnce(&Transaction) -> Result<()>,
+    ) -> Result<Incoming> {
+        let user = user_of(from).to_string();
+        let Ok(chat) = self.chat(group) else {
+            self.save(mark)?;
+            return Ok(Incoming::Other);
+        };
+        if let Some(token) = control.get("invite").and_then(|t| t.as_str()) {
+            if user != chat.peer {
+                self.save(mark)?;
+                return Ok(Incoming::Other);
+            }
+            return Ok(self
+                .redeem_token(&chat, token, now, mark)?
+                .unwrap_or(Incoming::Other));
+        }
+        let from_ok = user == chat.peer || user == self.user;
+        let ends = match control.get("ends") {
+            Some(serde_json::Value::Null) => Some(None),
+            Some(v) => v
+                .as_u64()
+                .filter(|e| *e > now && *e <= now + MAX_END_SECS)
+                .map(Some),
+            None => None,
+        };
+        match ends {
+            Some(ends) if from_ok && chat.state == ChatState::Active => {
+                let id = group.to_string();
+                self.save(move |tx| {
+                    mark(tx)?;
+                    set_end(tx, &id, ends.map(to_i64))
+                })?;
+                Ok(Incoming::Ends {
+                    chat: group.to_string(),
+                    ends,
+                })
+            }
+            _ => {
+                self.save(mark)?;
+                Ok(Incoming::Other)
+            }
+        }
+    }
+
+    /// Check a token against this account's friendship keys. Valid, unused
+    /// and not expired: the chat partner becomes a contact with the key
+    /// their devices show in this chat, and the chat opens. `Ok(None)`
+    /// after marking the message seen when it does not fit.
+    fn redeem_token(
+        &mut self,
+        chat: &Chat,
+        token: &str,
+        now: u64,
+        mark: impl FnOnce(&Transaction) -> Result<()>,
+    ) -> Result<Option<Incoming>> {
+        let mut t = [0u8; 16];
+        let found: Option<(String, i64, i64)> = if hex::decode_to_slice(token, &mut t).is_ok() {
+            self.store
+                .conn()
+                .query_row(
+                    "SELECT kind, ends, used FROM invites WHERE hash = ?1",
+                    [digest(&t).to_vec()],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .optional()
+                .map_err(sql)?
+        } else {
+            None
+        };
+        let fingerprint = self.device.account_of(&chat.id, &chat.peer)?;
+        let existing = self.contact(&chat.peer)?;
+        let fits = matches!(&found, Some((_, ends, used)) if *used == 0 && to_u64(*ends) > now)
+            && fingerprint.is_some()
+            && existing
+                .as_ref()
+                .is_none_or(|e| Some(&e.fingerprint) == fingerprint.as_ref());
+        let (Some((kind, ends, _)), Some(fingerprint), true) = (found, fingerprint, fits) else {
+            self.save(mark)?;
+            return Ok(None);
+        };
+        self.device.verify(&chat.peer, fingerprint.clone());
+        let hash = digest(&t).to_vec();
+        let (peer, id, fp) = (
+            chat.peer.clone(),
+            chat.id.clone(),
+            fingerprint.as_str().to_string(),
+        );
+        let vanishing = kind == "v";
+        let new_contact = existing.is_none();
+        self.save(move |tx| {
+            mark(tx)?;
+            tx.execute("UPDATE invites SET used = 1 WHERE hash = ?1", [&hash])
+                .map_err(sql)?;
+            tx.execute(
+                "INSERT INTO contacts (user, fingerprint, name, confirmed, added)
+                 VALUES (?1, ?2, ?1, 0, ?3) ON CONFLICT (user) DO NOTHING",
+                params![peer, fp, to_i64(now)],
+            )
+            .map_err(sql)?;
+            set_state(tx, &id, ChatState::Active)?;
+            if vanishing {
+                set_end(tx, &id, Some(ends))?;
+                if new_contact {
+                    tx.execute(
+                        "INSERT INTO contact_ends (user, ends) VALUES (?1, ?2) ON CONFLICT (user) DO NOTHING",
+                        params![peer, ends],
+                    )
+                    .map_err(sql)?;
+                }
+            }
+            Ok(())
+        })?;
+        Ok(Some(Incoming::Chat {
+            chat: self.chat(&chat.id)?,
+            update_keys: false,
+        }))
+    }
+
     /// A profile arrived. Kept only from the chat partner, only if it
     /// passes the checks and only if it is newer; otherwise just marked
     /// as seen.
