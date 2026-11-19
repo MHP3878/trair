@@ -53,7 +53,16 @@ Future<FakeDoor> _start(
   addTearDown(tester.view.reset);
   final d = door ?? FakeDoor(password: pw, profile: {'name': 'Julian'});
   final s = server ?? FakeServer();
-  await tester.pumpWidget(TrairApp(backend: DemoBackend(), vault: TrairVault(d), transport: (_) => s));
+  await tester.pumpWidget(
+    TrairApp(
+      backend: DemoBackend(),
+      vault: TrairVault(d),
+      transport: (uri) {
+        s.addresses.add(uri);
+        return s;
+      },
+    ),
+  );
   await tester.pumpAndSettle();
   return d;
 }
@@ -642,6 +651,7 @@ void main() {
       final door = await _start(tester, door: FakeDoor(), server: server);
       await tester.tap(find.text('Ich habe schon ein Konto'));
       await tester.pumpAndSettle();
+      await tester.enterText(_field(defaultServerUrl), 'http://127.0.0.1:9000');
       await tester.enterText(_field('7-anker-birne-kerze'), '7-Anker-Birne-Kerze');
       await tester.enterText(_field('Mindestens 12 Zeichen'), pw);
       await tester.enterText(_field('Noch einmal'), pw);
@@ -652,6 +662,14 @@ void main() {
       expect(door.unlocked, isTrue);
       expect(server.calls, containsAll(['GET /v1/pairing/7/host?wait=25', 'PUT /v1/pairing/7/guest']));
       expect(find.text('Ich habe schon ein Konto'), findsNothing, reason: 'Trair is open');
+
+      // The new device stays with the server it paired through: it logs
+      // in there at once and keeps the address for the next unlock.
+      await tester.pump(const Duration(seconds: 1));
+      expect(server.calls, contains('POST /v1/login'));
+      expect(server.addresses.map((a) => a.port).toSet(), {9000});
+      expect(door.profile['server'], 'http://127.0.0.1:9000');
+      expect(door.profile['serverAuto'], isTrue);
     });
 
     testWidgets('withdrawing a device tells the server, and a withdrawn device learns it', (tester) async {

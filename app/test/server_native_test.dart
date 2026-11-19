@@ -93,7 +93,11 @@ void main() {
       expect(laptop.userName, 'Julian');
       expect(pc.devices, hasLength(2));
       expect(laptop.devices, hasLength(2));
-      await laptop.connect();
+      // Joining connects the laptop on its own, to the same server.
+      for (var i = 0; i < 100 && laptop.serverStatus == ServerStatus.connecting; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+      expect(laptop.serverUrl, url);
       expect(laptop.serverStatus, ServerStatus.connected, reason: laptop.serverMessage);
 
       // The PC withdraws the laptop: the server refuses it from now on.

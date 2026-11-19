@@ -12,6 +12,9 @@ class FakeServer implements ServerTransport {
   /// Every request as "METHOD path".
   final List<String> calls = [];
 
+  /// The address of every connection the app opened.
+  final List<Uri> addresses = [];
+
   /// False: nothing answers (server not started).
   bool online = true;
   bool _registered = false;

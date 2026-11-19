@@ -157,8 +157,14 @@ class AppState extends ChangeNotifier {
     return answer;
   }
 
-  void _unlocked(CoreAnswer answer) {
+  /// [server]: the address a new device just paired through. Its vault
+  /// has no profile yet, so the address would otherwise be lost.
+  void _unlocked(CoreAnswer answer, {String? server}) {
     _applyProfile(answer.profile);
+    if (server != null) {
+      serverUrl = server;
+      serverAuto = true;
+    }
     fingerprint = answer.fingerprint;
     devices = answer.devices;
     accountKey = answer.accountKey;
@@ -467,9 +473,8 @@ class AppState extends ChangeNotifier {
       );
     }
     joinMessage = '';
-    serverUrl = url.trim();
-    serverAuto = true;
-    _unlocked(answer);
+    // Unlocking connects at once, through the server used for pairing.
+    _unlocked(answer, server: url.trim());
     _scheduleSave();
     return answer;
   }
