@@ -15,6 +15,7 @@ import '../widgets/common.dart';
 import '../widgets/profile_popup.dart';
 import '../widgets/qr.dart';
 import '../widgets/trair_icons.dart';
+import 'group_panel.dart';
 
 enum _Filter { all, direct, group }
 
@@ -42,6 +43,12 @@ class _ChatsScreenState extends State<ChatsScreen> {
   final _code = TextEditingController();
   final _contactName = TextEditingController();
 
+  /// The group column next to a group chat.
+  bool _groupOpen = false;
+  final _groupName = TextEditingController();
+  final Set<String> _groupPick = {};
+  int _groupMinutes = 0;
+
   @override
   void initState() {
     super.initState();
@@ -60,6 +67,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
     _draft.dispose();
     _code.dispose();
     _contactName.dispose();
+    _groupName.dispose();
     super.dispose();
   }
 
@@ -85,6 +93,19 @@ class _ChatsScreenState extends State<ChatsScreen> {
                           ? _realConversation(state, _realChat(state)!)
                           : _conversation(state, chat)),
               ),
+              if (!_contactsOpen &&
+                  _groupOpen &&
+                  _realChat(state) != null &&
+                  _realChat(state)!.isGroup &&
+                  _realChat(state)!.state == 'active')
+                GroupPanel(
+                  chat: _realChat(state)!,
+                  onClose: () => setState(() => _groupOpen = false),
+                  onGone: () => setState(() {
+                    _groupOpen = false;
+                    _real = null;
+                  }),
+                ),
             ],
           ),
         ),
@@ -326,6 +347,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
       _draft.clear();
     });
     unawaited(state.loadMessages(id));
+    if (state.realChats.any((c) => c.id == id && c.isGroup)) unawaited(state.loadGroup(id));
   }
 
   /// A chat partner's name: yours for them, in the colour they chose.
@@ -337,6 +359,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
   );
 
   Widget _realRow(AppState state, RealChat c) {
+    if (c.kind != 'direct') return _groupRow(state, c);
     final active = c.id == _real && !_contactsOpen;
     final p = state.profileFor(c);
     return Padding(
@@ -381,6 +404,91 @@ class _ChatsScreenState extends State<ChatsScreen> {
                           _ => 'Ende-zu-Ende verschlüsselt',
                         },
                         style: c.ends != null && c.state == 'active'
+                            ? const TextStyle(fontSize: 12, color: TrairColors.amber)
+                            : TrairText.small,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                if (c.isRequest) const Icon(TrairIcons.triangleAlert, size: 16, color: TrairColors.amber),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// A group or a join request in the list.
+  Widget _groupRow(AppState state, RealChat c) {
+    final active = c.id == _real && !_contactsOpen;
+    final sub = switch ((c.kind, c.state)) {
+      ('join', _) => 'Beitritt: wartet auf ${state.displayName(c.peer)}',
+      (_, 'request') => 'Gruppeneinladung',
+      (_, 'left') => 'Nicht mehr in der Gruppe',
+      _ when c.ends != null => 'Verschwindet ${vanishesIn(c.ends!)}',
+      _ => [
+        '${c.members} ${c.members == 1 ? 'Mitglied' : 'Mitglieder'}',
+        if (c.role == 'owner') 'deine',
+        if (c.role == 'admin') 'Admin',
+        if (c.role == 'guest') 'Gast',
+      ].join(' · '),
+    };
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: Material(
+        color: active ? TrairColors.cardActive : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => _openReal(state, c.id),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(8, 7, 10, 7),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: const Color(0x246E4FF6),
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: c.isJoin
+                      ? const Icon(TrairIcons.clock, size: 18, color: TrairColors.accentLight)
+                      : Text(
+                          _initials(c.name),
+                          style: const TextStyle(
+                            color: TrairColors.accentLight,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14,
+                          ),
+                        ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              c.isJoin ? 'Gruppenbeitritt' : c.name,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: TrairColors.text),
+                            ),
+                          ),
+                          if (c.isGroup) ...[
+                            const SizedBox(width: 6),
+                            const Icon(TrairIcons.users, size: 13, color: TrairColors.textMuted),
+                          ],
+                        ],
+                      ),
+                      Text(
+                        sub,
+                        style: c.ends != null && c.state == 'active' && c.isGroup
                             ? const TextStyle(fontSize: 12, color: TrairColors.amber)
                             : TrairText.small,
                         overflow: TextOverflow.ellipsis,
@@ -521,6 +629,95 @@ class _ChatsScreenState extends State<ChatsScreen> {
     ];
   }
 
+  static const _groupEnds = {0: 'Bleibt', 1440: 'Nach 1 Tag weg', 10080: 'Nach 7 Tagen weg'};
+
+  /// Start a group: a name, contacts to add now, and whether it vanishes.
+  List<Widget> _newGroup(AppState state) {
+    final name = _groupName.text.trim();
+    return [
+      const FieldLabel('Neue Gruppe'),
+      const Text(
+        'Du bist Besitzer. Name, Mitglieder und Rollen sind Ende-zu-Ende verschlüsselt; '
+        'weitere Leute lädst du später mit einem Einladungsschlüssel ein.',
+        style: TrairText.muted,
+      ),
+      const SizedBox(height: 10),
+      PillField(
+        controller: _groupName,
+        hint: 'Gruppenname',
+        height: 46,
+        semanticLabel: 'Gruppenname',
+        onChanged: (_) => setState(() {}),
+      ),
+      const SizedBox(height: 10),
+      if (state.contacts.isNotEmpty) ...[
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            const Text('Mit', style: TrairText.small),
+            for (final c in state.contacts)
+              IntrinsicWidth(
+                child: PillButton(
+                  label: c.name,
+                  height: 34,
+                  kind: _groupPick.contains(c.user) ? PillKind.primary : PillKind.ghost,
+                  onPressed: () => setState(
+                    () => _groupPick.contains(c.user) ? _groupPick.remove(c.user) : _groupPick.add(c.user),
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 10),
+      ],
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          for (final e in _groupEnds.entries)
+            IntrinsicWidth(
+              child: PillButton(
+                label: e.value,
+                height: 34,
+                kind: e.key == _groupMinutes ? PillKind.primary : PillKind.ghost,
+                onPressed: () => setState(() => _groupMinutes = e.key),
+              ),
+            ),
+        ],
+      ),
+      const SizedBox(height: 10),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: IntrinsicWidth(
+          child: PillButton(
+            label: 'Gruppe erstellen',
+            icon: TrairIcons.users,
+            height: 40,
+            onPressed: name.isEmpty || !state.chatsOnline
+                ? null
+                : () async {
+                    final id = await state.createGroup(
+                      name,
+                      _groupPick.toList(),
+                      minutes: _groupMinutes == 0 ? null : _groupMinutes,
+                    );
+                    if (id != null && mounted) {
+                      _groupName.clear();
+                      _groupPick.clear();
+                      _groupMinutes = 0;
+                      _openReal(state, id);
+                      setState(() => _groupOpen = true);
+                    }
+                  },
+          ),
+        ),
+      ),
+    ];
+  }
+
   Widget _contactsPanel(AppState state) {
     final online = state.chatsOnline;
     return GlassPanel(
@@ -599,7 +796,9 @@ class _ChatsScreenState extends State<ChatsScreen> {
             const SizedBox(height: 22),
             ..._friendKey(state),
             const SizedBox(height: 22),
-            const FieldLabel('Kontakt hinzufügen'),
+            ..._newGroup(state),
+            const SizedBox(height: 22),
+            const FieldLabel('Kontakt hinzufügen oder Gruppe beitreten'),
             PillField(controller: _code, hint: 'trair1:…', mono: true, height: 46, semanticLabel: 'Kontaktcode'),
             const SizedBox(height: 10),
             Row(
@@ -617,6 +816,15 @@ class _ChatsScreenState extends State<ChatsScreen> {
                   label: 'Hinzufügen',
                   onPressed: () async {
                     final code = _code.text.trim();
+                    // A group key: ask its admin to let this account in.
+                    if (code.toLowerCase().startsWith('trair3:')) {
+                      final id = await state.joinGroup(code);
+                      if (id != null && mounted) {
+                        _code.clear();
+                        _openReal(state, id);
+                      }
+                      return;
+                    }
                     if (await state.addContact(code, _contactName.text)) {
                       _code.clear();
                       _contactName.clear();
@@ -683,8 +891,25 @@ class _ChatsScreenState extends State<ChatsScreen> {
     );
   }
 
-  /// A real message, shaped like the demo ones: tail corner and time.
-  Widget _realBubble(RealMessage m) {
+  /// A note of the core in a group's history (joined, left, renamed).
+  Widget _note(AppState state, RealMessage m) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 6),
+    child: Center(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        decoration: BoxDecoration(color: const Color(0x0DFFFFFF), borderRadius: BorderRadius.circular(999)),
+        child: Text(
+          groupNoteText(m.text, (u) => u == state.ownUser ? 'Du' : state.displayName(u)),
+          style: TrairText.small,
+          textAlign: TextAlign.center,
+        ),
+      ),
+    ),
+  );
+
+  /// A real message, shaped like the demo ones: tail corner and time. In a
+  /// group the sender's name stands above what others wrote.
+  Widget _realBubble(RealMessage m, {String? sender, Color? senderColor}) {
     final t = DateTime.fromMillisecondsSinceEpoch(m.at * 1000);
     final time = '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
     const big = Radius.circular(22);
@@ -698,6 +923,19 @@ class _ChatsScreenState extends State<ChatsScreen> {
           child: Column(
             crossAxisAlignment: m.outgoing ? CrossAxisAlignment.end : CrossAxisAlignment.start,
             children: [
+              if (sender != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 3),
+                  child: Text(
+                    sender,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      color: senderColor ?? TrairColors.accentLight,
+                      shadows: senderColor == null ? null : glowShadows(senderColor, strength: 14),
+                    ),
+                  ),
+                ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 decoration: BoxDecoration(
@@ -722,7 +960,225 @@ class _ChatsScreenState extends State<ChatsScreen> {
     );
   }
 
+  /// A group chat, or this account's join request waiting for an admin.
+  Widget _groupConversation(AppState state, RealChat chat) {
+    final messages = state.realMessages[chat.id] ?? const <RealMessage>[];
+    final info = state.groupInfos[chat.id];
+    final changed = info?.members.where((m) => m.keyChanged).map((m) => state.displayName(m.user)).toList() ?? const <String>[];
+    final canWrite = chat.isGroup && chat.state == 'active' && state.chatsOnline;
+    final admin = state.displayName(chat.peer);
+    Future<void> send() async {
+      final text = _draft.text.trim();
+      if (text.isEmpty || !canWrite) return;
+      _draft.clear();
+      await state.sendReal(chat.id, text);
+    }
+
+    Widget banner(String text, List<Widget> actions, {bool warn = false}) => Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+      child: GlassPanel(
+        lite: true,
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            if (warn) ...[
+              const Icon(TrairIcons.triangleAlert, size: 18, color: TrairColors.amber),
+              const SizedBox(width: 10),
+            ],
+            Expanded(child: Text(text, style: TrairText.muted)),
+            for (final a in actions) ...[const SizedBox(width: 8), a],
+          ],
+        ),
+      ),
+    );
+
+    return GlassPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(color: TrairColors.borderSoft)),
+            ),
+            padding: const EdgeInsets.fromLTRB(20, 11, 16, 11),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(color: const Color(0x246E4FF6), borderRadius: BorderRadius.circular(13)),
+                  child: chat.isJoin
+                      ? const Icon(TrairIcons.clock, size: 18, color: TrairColors.accentLight)
+                      : Text(
+                          _initials(chat.name),
+                          style: const TextStyle(color: TrairColors.accentLight, fontWeight: FontWeight.w700),
+                        ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        chat.isJoin ? 'Gruppenbeitritt' : chat.name,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: TrairColors.text),
+                      ),
+                      Text(
+                        chat.isJoin
+                            ? 'Wartet auf $admin'
+                            : [
+                                if (chat.ends != null) 'Verschwindet ${vanishesIn(chat.ends!)}',
+                                '${chat.members} ${chat.members == 1 ? 'Mitglied' : 'Mitglieder'}',
+                                'Gruppe',
+                              ].join(' · '),
+                        overflow: TextOverflow.ellipsis,
+                        style: chat.ends != null && chat.isGroup
+                            ? const TextStyle(fontSize: 12, color: TrairColors.amber)
+                            : TrairText.small,
+                      ),
+                    ],
+                  ),
+                ),
+                if (chat.isGroup && chat.state == 'active') ...[
+                  RoundIconButton(
+                    icon: TrairIcons.users,
+                    tooltip: 'Gruppe verwalten',
+                    filled: _groupOpen,
+                    onPressed: () => setState(() => _groupOpen = !_groupOpen),
+                  ),
+                  const SizedBox(width: 10),
+                ],
+                SecurityCapsule(
+                  text: chat.isRequest ? 'Einladung · unbekannter Admin' : 'Echt Ende-zu-Ende verschlüsselt',
+                  tone: chat.isRequest || changed.isNotEmpty ? CapsuleTone.warn : CapsuleTone.safe,
+                ),
+              ],
+            ),
+          ),
+          if (chat.isRequest)
+            banner(
+              'Jemand, der kein Kontakt ist, hat dich in diese Gruppe geholt. Schreiben geht erst nach dem Annehmen; '
+              'Ablehnen löscht sie hier und sagt den anderen, dass du gehst.',
+              [
+                PillButton(label: 'Annehmen', height: 38, onPressed: () => state.acceptGroup(chat.id)),
+                PillButton(
+                  label: 'Ablehnen',
+                  kind: PillKind.danger,
+                  height: 38,
+                  onPressed: () async {
+                    if (await state.leaveGroup(chat.id) && mounted) setState(() => _real = null);
+                  },
+                ),
+              ],
+            ),
+          if (chat.state == 'left')
+            banner('Du bist nicht mehr in dieser Gruppe. Der Verlauf ist nur noch hier.', [
+              PillButton(
+                label: 'Chat löschen',
+                icon: TrairIcons.trash,
+                kind: PillKind.danger,
+                height: 38,
+                onPressed: () async {
+                  await state.deleteChat(chat.id);
+                  if (mounted) setState(() => _real = null);
+                },
+              ),
+            ]),
+          if (changed.isNotEmpty && state.strict && chat.state == 'active')
+            banner(
+              'Der Schlüssel von ${changed.join(', ')} hat sich geändert. Der strenge Modus sperrt das Senden, '
+              'bis du es prüfst: „Gruppe verwalten“ → Mitglied → „Neuen Schlüssel annehmen“.',
+              const [],
+              warn: true,
+            ),
+          if (state.chatMessage.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Text(state.chatMessage, style: const TextStyle(color: TrairColors.amber, fontSize: 13)),
+            ),
+          Expanded(
+            child: chat.isJoin
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(32),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(TrairIcons.clock, size: 34, color: TrairColors.accentLight),
+                          const SizedBox(height: 12),
+                          Text(
+                            'Beitritt angefragt. Sobald das Trair von $admin deinen Schlüssel geprüft hat, '
+                            'erscheint die Gruppe hier. Dafür muss Trair bei $admin laufen.',
+                            textAlign: TextAlign.center,
+                            style: TrairText.muted,
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                : ListView(
+                    padding: const EdgeInsets.fromLTRB(28, 8, 28, 16),
+                    children: [
+                      for (final m in messages)
+                        if (m.isNote)
+                          _note(state, m)
+                        else
+                          _realBubble(
+                            m,
+                            sender: m.outgoing ? null : state.displayName(m.user),
+                            senderColor: m.outgoing ? null : state.peerProfiles[m.user]?.glow,
+                          ),
+                    ],
+                  ),
+          ),
+          if (!chat.isJoin)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 18),
+              child: GlassPanel(
+                lite: true,
+                radius: 999,
+                padding: const EdgeInsets.all(6),
+                child: Row(
+                  children: [
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextField(
+                        key: const Key('real-composer'),
+                        controller: _draft,
+                        enabled: canWrite,
+                        onSubmitted: (_) => send(),
+                        style: const TextStyle(fontSize: 14.5, color: TrairColors.text),
+                        decoration: InputDecoration.collapsed(
+                          hintText: switch (chat.state) {
+                            'request' => 'Erst annehmen',
+                            'left' => 'Du bist nicht mehr in der Gruppe',
+                            _ => state.chatsOnline ? 'Nachricht an ${chat.name}' : 'Nicht verbunden',
+                          },
+                          hintStyle: const TextStyle(color: TrairColors.placeholder, fontSize: 14.5),
+                        ),
+                      ),
+                    ),
+                    RoundIconButton(
+                      icon: TrairIcons.arrowUp,
+                      tooltip: 'Senden',
+                      size: 40,
+                      color: TrairColors.accent,
+                      iconColor: Colors.white,
+                      onPressed: canWrite ? send : null,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _realConversation(AppState state, RealChat chat) {
+    if (chat.kind != 'direct') return _groupConversation(state, chat);
     final messages = state.realMessages[chat.id] ?? const <RealMessage>[];
     final p = state.profileFor(chat);
     final chosen = p == null || p.name.trim().toLowerCase() == chat.name.trim().toLowerCase() ? null : p.name;
@@ -850,6 +1306,31 @@ class _ChatsScreenState extends State<ChatsScreen> {
                       height: 38,
                       onPressed: () async {
                         await state.declineRequest(chat.id);
+                        if (mounted) setState(() => _real = null);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          if (chat.state == 'left')
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+              child: GlassPanel(
+                lite: true,
+                padding: const EdgeInsets.all(14),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Text('Dieses Gerät ist nicht mehr im Chat. Der Verlauf ist nur noch hier.', style: TrairText.muted),
+                    ),
+                    const SizedBox(width: 10),
+                    PillButton(
+                      label: 'Chat löschen',
+                      kind: PillKind.danger,
+                      height: 38,
+                      onPressed: () async {
+                        await state.deleteChat(chat.id);
                         if (mounted) setState(() => _real = null);
                       },
                     ),

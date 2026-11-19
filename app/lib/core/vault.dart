@@ -235,6 +235,43 @@ class TrairVault {
   Future<CoreAnswer> applyContactList(String accountKey, Object? list) =>
       _call({'op': 'apply_contact_list', 'account_key': accountKey, 'device_list': list});
 
+  // ----- groups (M5): the core checks every change against the rules -----
+
+  Future<CoreAnswer> createGroup(String name, int? minutes, List<Object?> offers) =>
+      _call({'op': 'create_group', 'name': name, 'minutes': minutes, 'offers': offers});
+  Future<CoreAnswer> groupInfo(String chat) => _call({'op': 'group_info', 'chat': chat});
+  Future<CoreAnswer> addToGroup(String chat, List<Object?> offers) =>
+      _call({'op': 'add_to_group', 'chat': chat, 'offers': offers});
+  Future<CoreAnswer> kick(String chat, String user) => _call({'op': 'kick', 'chat': chat, 'user': user});
+  Future<CoreAnswer> setAdmin(String chat, String user, bool admin) =>
+      _call({'op': 'set_admin', 'chat': chat, 'user': user, 'admin': admin});
+  Future<CoreAnswer> handOver(String chat, String user) => _call({'op': 'hand_over', 'chat': chat, 'user': user});
+  Future<CoreAnswer> renameGroup(String chat, String name) =>
+      _call({'op': 'rename_group', 'chat': chat, 'name': name});
+  Future<CoreAnswer> setGroupEnd(String chat, int? minutes) =>
+      _call({'op': 'set_group_end', 'chat': chat, 'minutes': minutes});
+  Future<CoreAnswer> closeGroup(String chat) => _call({'op': 'close_group', 'chat': chat});
+  Future<CoreAnswer> leavePrepare(String chat) => _call({'op': 'leave_prepare', 'chat': chat});
+  Future<CoreAnswer> leaveGroup(String chat) => _call({'op': 'leave_group', 'chat': chat});
+  Future<CoreAnswer> acceptGroup(String chat) => _call({'op': 'accept_group', 'chat': chat});
+  Future<CoreAnswer> deleteChat(String chat) => _call({'op': 'delete_chat', 'chat': chat});
+  Future<CoreAnswer> acceptNewKey(String chat, String user) =>
+      _call({'op': 'accept_new_key', 'chat': chat, 'user': user});
+  Future<CoreAnswer> proposeUpdate(String chat) => _call({'op': 'propose_update', 'chat': chat});
+  Future<CoreAnswer> tidyGroup(String chat) => _call({'op': 'tidy_group', 'chat': chat});
+  Future<CoreAnswer> createGroupInvite(String chat, int minutes, {bool guest = false}) =>
+      _call({'op': 'create_group_invite', 'chat': chat, 'minutes': minutes, 'guest': guest});
+  Future<CoreAnswer> revokeGroupInvites(String chat) => _call({'op': 'revoke_group_invites', 'chat': chat});
+  Future<CoreAnswer> groupInvites(String chat) => _call({'op': 'group_invites', 'chat': chat});
+  Future<CoreAnswer> joinGroup(String code, List<Object?> offers) =>
+      _call({'op': 'join_group', 'code': code, 'offers': offers});
+  Future<CoreAnswer> joinMessage(String chat) => _call({'op': 'join_message', 'chat': chat});
+  Future<CoreAnswer> joinRequests() => _call({'op': 'join_requests'});
+  Future<CoreAnswer> admit(String chat, List<Object?> offers) =>
+      _call({'op': 'admit', 'chat': chat, 'offers': offers});
+  Future<CoreAnswer> closeJoin(String chat) => _call({'op': 'close_join', 'chat': chat});
+  Future<CoreAnswer> denyJoin(String chat) => _call({'op': 'deny_join', 'chat': chat});
+
   /// Where the vault lives: %APPDATA%\Trair on Windows.
   static String dataDir() {
     final env = Platform.environment;

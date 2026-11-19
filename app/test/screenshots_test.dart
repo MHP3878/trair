@@ -350,6 +350,62 @@ void main() {
     await _shot(tester, '23-notfall-pins');
   });
 
+  testWidgets('screenshots of a group with members, roles and a key', (tester) async {
+    final server = FakeServer();
+    final door = FakeDoor(password: _pw, profile: {'name': 'Julian', 'glow': 0xFFA18DFF})..chatsEnabled = true;
+    for (final (user, name) in const [('local-lena', 'Lena'), ('local-malik', 'Malik'), ('local-aylin', 'Aylin')]) {
+      door.contacts.add({'user': user, 'name': name, 'fingerprint': 'ff' * 16, 'confirmed': false});
+    }
+    door.peerProfiles.add({'user': 'local-lena', 'rev': 1, 'name': 'Lena M.', 'glow': 0xFF5EE6B0, 'about': '', 'badges': []});
+    door.peerProfiles.add({'user': 'local-malik', 'rev': 1, 'name': 'Malik', 'glow': 0xFFFFB547, 'about': '', 'badges': []});
+    await _start(tester, const Size(1440, 900), door: door, server: server);
+    await _unlock(tester);
+    await tester.tap(find.text('Strenger Modus an'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Verbinden'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Verbinden'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Chats'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Neuer Chat'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.widgetWithText(TextField, 'Gruppenname'));
+    await tester.enterText(find.widgetWithText(TextField, 'Gruppenname'), 'Abi 2026');
+    await tester.pumpAndSettle();
+    for (final name in ['Lena', 'Malik', 'Aylin']) {
+      await tester.tap(find.widgetWithText(PillButton, name));
+      await tester.pumpAndSettle();
+    }
+    await tester.tap(find.widgetWithText(PillButton, 'Nach 1 Tag weg'));
+    await tester.pumpAndSettle();
+    await _shot(tester, '25-neue-gruppe');
+    await tester.tap(find.widgetWithText(PillButton, 'Gruppe erstellen'));
+    await tester.pumpAndSettle();
+    for (final (user, text) in const [
+      ('local-lena', 'Wer bringt die Musikbox mit?'),
+      ('local-malik', 'Ich! Und Snacks.'),
+    ]) {
+      server.deliver(FakeDoor.wire({'kind': 'group_message', 'chat': 'g1', 'user': user, 'text': text}));
+    }
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('real-composer')), 'Perfekt, dann bis Samstag!');
+    await tester.tap(find.byTooltip('Senden'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Mitglied verwalten').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Zum Admin machen'));
+    await tester.pumpAndSettle();
+    await _shot(tester, '26-gruppe');
+    await tester.ensureVisible(find.widgetWithText(PillButton, 'Einladungsschlüssel erstellen'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(PillButton, 'Einladungsschlüssel erstellen'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.textContaining('trair3:'));
+    await tester.pumpAndSettle();
+    await _shot(tester, '27-gruppe-einladen');
+  });
+
   testWidgets('screenshot of a small window', (tester) async {
     await _start(tester, const Size(1024, 640));
     await _unlock(tester);

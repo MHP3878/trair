@@ -50,6 +50,9 @@ class RealChat {
     required this.state,
     this.last = 0,
     this.ends,
+    this.kind = 'direct',
+    this.role,
+    this.members = 0,
   });
 
   factory RealChat.fromJson(Map<String, Object?> j) => RealChat(
@@ -59,7 +62,23 @@ class RealChat {
     state: j['state'] as String? ?? 'active',
     last: (j['last'] as num?)?.toInt() ?? 0,
     ends: (j['ends'] as num?)?.toInt(),
+    kind: j['kind'] as String? ?? 'direct',
+    role: j['role'] as String?,
+    members: (j['members'] as num?)?.toInt() ?? 0,
   );
+
+  /// direct, group, or join (this account waits for an admin).
+  final String kind;
+
+  /// In a group: owner, admin, member or guest.
+  final String? role;
+
+  /// In a group: how many accounts.
+  final int members;
+
+  bool get isGroup => kind == 'group';
+  bool get isJoin => kind == 'join';
+  bool get isAdmin => role == 'owner' || role == 'admin';
 
   /// Seconds since 1970 when the chat vanishes on both sides; null: never.
   final int? ends;
@@ -73,6 +92,81 @@ class RealChat {
   final int last;
 
   bool get isRequest => state == 'request';
+}
+
+/// A member of a group as the core reports it.
+class GroupMember {
+  const GroupMember({
+    required this.user,
+    required this.role,
+    this.guestUntil,
+    this.devices = 1,
+    this.leaving = false,
+    this.keyChanged = false,
+  });
+
+  factory GroupMember.fromJson(Map<String, Object?> j) => GroupMember(
+    user: j['user'] as String,
+    role: j['role'] as String? ?? 'member',
+    guestUntil: (j['guest_until'] as num?)?.toInt(),
+    devices: (j['devices'] as List?)?.length ?? 1,
+    leaving: j['leaving'] == true,
+    keyChanged: j['key_changed'] == true,
+  );
+
+  final String user;
+
+  /// owner, admin, member or guest.
+  final String role;
+
+  /// A guest leaves then (seconds since 1970).
+  final int? guestUntil;
+  final int devices;
+
+  /// Left or asked to remove devices; an admin's device removes them.
+  final bool leaving;
+
+  /// The account key differs from the first one seen in this group.
+  final bool keyChanged;
+
+  bool get isAdmin => role == 'owner' || role == 'admin';
+}
+
+/// A group: name, own role, end, members.
+class GroupInfo {
+  const GroupInfo({required this.name, required this.me, required this.members, this.ends, this.myEnd});
+
+  factory GroupInfo.fromJson(Map<String, Object?> j) => GroupInfo(
+    name: j['name'] as String? ?? '',
+    me: j['me'] as String? ?? 'member',
+    ends: (j['ends'] as num?)?.toInt(),
+    myEnd: (j['my_end'] as num?)?.toInt(),
+    members: [for (final m in (j['members'] as List? ?? const []).cast<Map<String, Object?>>()) GroupMember.fromJson(m)],
+  );
+
+  final String name;
+
+  /// This account's role.
+  final String me;
+  final int? ends;
+
+  /// When the group ends for this account (a guest leaves earlier).
+  final int? myEnd;
+  final List<GroupMember> members;
+
+  bool get isOwner => me == 'owner';
+  bool get isAdmin => me == 'owner' || me == 'admin';
+}
+
+/// A group key made here: works for many until [ends].
+class GroupKey {
+  const GroupKey(this.code, this.ends, {this.guest = false});
+
+  final String code;
+  final DateTime ends;
+
+  /// Who joins with it leaves again at [ends].
+  final bool guest;
 }
 
 /// A friendship key made on this device: works once, until [ends].
@@ -151,7 +245,14 @@ class NotfallPin {
 }
 
 class RealMessage {
-  const RealMessage({required this.id, required this.text, required this.outgoing, required this.at, this.missing = 0});
+  const RealMessage({
+    required this.id,
+    required this.text,
+    required this.outgoing,
+    required this.at,
+    this.missing = 0,
+    this.user = '-',
+  });
 
   factory RealMessage.fromJson(Map<String, Object?> j) => RealMessage(
     id: (j['id'] as num).toInt(),
@@ -159,12 +260,18 @@ class RealMessage {
     outgoing: j['outgoing'] == true,
     at: (j['at'] as num?)?.toInt() ?? 0,
     missing: (j['missing'] as num?)?.toInt() ?? 0,
+    user: j['user'] as String? ?? '-',
   );
 
   final int id;
   final String text;
   final bool outgoing;
   final int at;
+
+  /// Who wrote it; empty for a note of the core (joined, left, …).
+  final String user;
+
+  bool get isNote => user.isEmpty;
 
   /// Earlier messages of the sender that never arrived.
   final int missing;
@@ -298,6 +405,12 @@ class AppState extends ChangeNotifier {
   // Real chats (M4). Empty while locked.
   bool chatsReady = false;
   String contactCode = '';
+
+  /// This account's user name on the server (from its contact code).
+  String get ownUser {
+    final parts = contactCode.split(':');
+    return parts.length > 1 ? parts[1] : '';
+  }
   List<RealContact> contacts = const [];
   List<RealChat> realChats = const [];
   final Map<String, List<RealMessage>> realMessages = {};
@@ -805,6 +918,8 @@ class AppState extends ChangeNotifier {
     _receiveRun++;
     _sweeper?.cancel();
     friendKey = null;
+    groupInfos = {};
+    groupKeys = {};
     chatsReady = false;
     peerProfiles = const {};
     _profilesStale = true;
@@ -924,6 +1039,8 @@ class AppState extends ChangeNotifier {
     'bad_package' => 'Vom anderen Konto kam kein passendes Gerät.',
     'withdrawn_member' => 'Im Chat ist noch ein entzogenes Gerät.',
     'storage' => 'Die Chat-Datenbank ist nicht lesbar oder voll.',
+    'not_allowed' => 'Das erlauben die Regeln dieser Gruppe nicht (nur Admins, nur der Besitzer).',
+    'outdated' => 'Ein Gerät hat noch eine Trair-Version ohne Gruppen. Es muss Trair erst aktualisieren.',
     'chats_unavailable' => 'Die Chat-Datenbank ließ sich nicht öffnen.',
     _ => 'Fehler: ${a.error}',
   };
@@ -1022,6 +1139,286 @@ class AppState extends ChangeNotifier {
     await refreshChats();
   }
 
+  // ---------------------------------------------------------- groups (M5)
+
+  /// Groups as the core last reported them, by chat.
+  Map<String, GroupInfo> groupInfos = {};
+
+  /// The last group key made here, by chat (shown until closed).
+  Map<String, GroupKey> groupKeys = {};
+
+  /// Key packages carry what groups need from this version on.
+  static const keyPackageVersion = 2;
+  int _keyPackageVersion = 0;
+
+  /// The name to show for [user]: yours for a contact, else what they
+  /// call themselves, else the account name.
+  String displayName(String user) {
+    for (final c in contacts) {
+      if (c.user == user) return c.name;
+    }
+    final p = peerProfiles[user];
+    if (p != null && p.name.trim().isNotEmpty) return p.name.trim();
+    return user;
+  }
+
+  Future<void> loadGroup(String chat) async {
+    final a = await vault?.groupInfo(chat);
+    if (a == null || !a.ok) return;
+    groupInfos = {...groupInfos, chat: GroupInfo.fromJson((a.raw['group'] as Map).cast<String, Object?>())};
+    notifyListeners();
+  }
+
+  bool _needServer() {
+    if (_api != null && chatsReady) return false;
+    chatMessage = 'Erst mit dem Server verbinden.';
+    notifyListeners();
+    return true;
+  }
+
+  Future<String?> _ownUser() async {
+    final me = await vault!.serverIdentity();
+    return me.ok ? me.raw['user'] as String : null;
+  }
+
+  /// Start a group with contacts (and this account's other devices).
+  /// [minutes]: the group vanishes for everyone then.
+  Future<String?> createGroup(String name, List<String> users, {int? minutes}) async {
+    if (_needServer()) return null;
+    final api = _api!;
+    final own = await _ownUser();
+    final offers = [
+      for (final u in users) ...await api.claim(u),
+      if (own != null) ...await api.claim(own),
+    ];
+    final made = await vault!.createGroup(name, minutes, offers);
+    if (!made.ok) {
+      chatMessage = _chatError(made);
+      notifyListeners();
+      return null;
+    }
+    final commit = made.raw['commit'];
+    chatMessage = commit is Map && !await _pushCommit(api, commit.cast<String, Object?>())
+        ? 'Der Server hat die neue Gruppe nicht angenommen.'
+        : '';
+    final id = (made.raw['chat'] as Map)['id'] as String;
+    await refreshChats();
+    await loadGroup(id);
+    await loadMessages(id);
+    return id;
+  }
+
+  /// A change of a group: the core checks it, the server takes it (or
+  /// another admin was faster: then it is thrown away, try again).
+  Future<bool> _groupChange(String chat, Future<CoreAnswer> Function() make) async {
+    if (_needServer()) return false;
+    final api = _api!;
+    final a = await make();
+    if (!a.ok) {
+      chatMessage = _chatError(a);
+      notifyListeners();
+      return false;
+    }
+    var ok = true;
+    final commit = a.raw['commit'];
+    if (commit is Map) ok = await _pushCommit(api, commit.cast<String, Object?>());
+    chatMessage = ok ? '' : 'Gleichzeitig hat ein anderer Admin etwas geändert. Bitte noch einmal.';
+    await refreshChats();
+    if (realChats.any((c) => c.id == chat)) {
+      await loadGroup(chat);
+      if (realMessages.containsKey(chat)) await loadMessages(chat);
+    } else {
+      groupInfos = {...groupInfos}..remove(chat);
+      realMessages.remove(chat);
+      notifyListeners();
+    }
+    return ok;
+  }
+
+  Future<bool> addToGroup(String chat, List<String> users) async {
+    if (_needServer()) return false;
+    final offers = [for (final u in users) ...await _api!.claim(u)];
+    return _groupChange(chat, () => vault!.addToGroup(chat, offers));
+  }
+
+  Future<bool> kick(String chat, String user) => _groupChange(chat, () => vault!.kick(chat, user));
+  Future<bool> setAdmin(String chat, String user, bool admin) =>
+      _groupChange(chat, () => vault!.setAdmin(chat, user, admin));
+  Future<bool> handOver(String chat, String user) => _groupChange(chat, () => vault!.handOver(chat, user));
+  Future<bool> renameGroup(String chat, String name) => _groupChange(chat, () => vault!.renameGroup(chat, name));
+
+  /// The group vanishes for everyone after [minutes]; null: it stays.
+  Future<bool> setGroupEnd(String chat, int? minutes) =>
+      _groupChange(chat, () => vault!.setGroupEnd(chat, minutes));
+
+  /// Close the group for everyone (owner only).
+  Future<bool> closeGroup(String chat) => _groupChange(chat, () => vault!.closeGroup(chat));
+
+  /// Leave a group: an owner hands on and an admin steps down first; then
+  /// the others are told and this device forgets the group's keys. A
+  /// group request is declined the same way (and deleted).
+  Future<bool> leaveGroup(String chat) async {
+    if (_needServer()) return false;
+    final api = _api!;
+    final prep = await vault!.leavePrepare(chat);
+    final commit = prep.raw['commit'];
+    if (prep.ok && commit is Map && !await _pushCommit(api, commit.cast<String, Object?>())) {
+      chatMessage = 'Gleichzeitig hat ein anderer Admin etwas geändert. Bitte noch einmal.';
+      notifyListeners();
+      return false;
+    }
+    final out = await vault!.leaveGroup(chat);
+    if (!out.ok) {
+      chatMessage = _chatError(out);
+      notifyListeners();
+      return false;
+    }
+    final r = await api.sendMessage(out.raw['to'], out.raw['body'] as String);
+    chatMessage = r.ok ? '' : 'Verlassen, aber die anderen wissen es noch nicht (${r.error}).';
+    groupInfos = {...groupInfos}..remove(chat);
+    await refreshChats();
+    if (realChats.any((c) => c.id == chat)) {
+      await loadMessages(chat);
+    } else {
+      realMessages.remove(chat);
+    }
+    return true;
+  }
+
+  Future<void> acceptGroup(String chat) async {
+    final a = await vault!.acceptGroup(chat);
+    chatMessage = a.ok ? '' : _chatError(a);
+    await refreshChats();
+    await loadGroup(chat);
+  }
+
+  /// Delete a chat this device left, with its history.
+  Future<void> deleteChat(String chat) async {
+    final a = await vault!.deleteChat(chat);
+    chatMessage = a.ok ? '' : _chatError(a);
+    realMessages.remove(chat);
+    groupInfos = {...groupInfos}..remove(chat);
+    await refreshChats();
+  }
+
+  /// Strict mode stopped the group because [user]'s key changed: after
+  /// checking, take the new one.
+  Future<void> acceptNewKey(String chat, String user) async {
+    final a = await vault!.acceptNewKey(chat, user);
+    chatMessage = a.ok ? '' : _chatError(a);
+    await loadGroup(chat);
+  }
+
+  /// A group key, usable many times until [minutes] are over. [guest]:
+  /// those who join with it leave again then.
+  Future<void> createGroupKey(String chat, int minutes, {bool guest = false}) async {
+    final a = await vault!.createGroupInvite(chat, minutes, guest: guest);
+    if (a.ok) {
+      groupKeys = {
+        ...groupKeys,
+        chat: GroupKey(
+          a.raw['code'] as String,
+          DateTime.fromMillisecondsSinceEpoch((a.raw['ends'] as num).toInt() * 1000),
+          guest: guest,
+        ),
+      };
+      chatMessage = '';
+    } else {
+      chatMessage = _chatError(a);
+    }
+    notifyListeners();
+  }
+
+  /// Every key of the group made on this device stops working.
+  Future<void> revokeGroupKeys(String chat) async {
+    final a = await vault!.revokeGroupInvites(chat);
+    groupKeys = {...groupKeys}..remove(chat);
+    chatMessage = a.ok ? 'Alle Schlüssel dieser Gruppe von diesem Gerät gelten nicht mehr.' : _chatError(a);
+    notifyListeners();
+  }
+
+  void closeGroupKey(String chat) {
+    groupKeys = {...groupKeys}..remove(chat);
+    notifyListeners();
+  }
+
+  /// Use a group key: a short join chat carries its token to the admin
+  /// who made it; once their Trair checked it, the group arrives.
+  Future<String?> joinGroup(String code) async {
+    final parts = code.trim().toLowerCase().split(':');
+    if (parts.length != 6 || parts[0] != 'trair3') {
+      chatMessage = 'Das ist kein Gruppenschlüssel.';
+      notifyListeners();
+      return null;
+    }
+    final ends = int.tryParse(parts[4].substring(1)) ?? 0;
+    if (ends * 1000 <= DateTime.now().millisecondsSinceEpoch) {
+      chatMessage = 'Dieser Gruppenschlüssel ist abgelaufen.';
+      notifyListeners();
+      return null;
+    }
+    if (_needServer()) return null;
+    final api = _api!;
+    final own = await _ownUser();
+    final offers = [...await api.claim(parts[1]), if (own != null) ...await api.claim(own)];
+    final j = await vault!.joinGroup(code.trim(), offers);
+    if (!j.ok) {
+      chatMessage = _chatError(j);
+      notifyListeners();
+      return null;
+    }
+    final id = (j.raw['chat'] as Map)['id'] as String;
+    if (await _pushCommit(api, (j.raw['commit'] as Map).cast<String, Object?>())) {
+      final msg = await vault!.joinMessage(id);
+      if (msg.ok && msg.raw['body'] is String) await api.sendMessage(msg.raw['to'], msg.raw['body'] as String);
+      chatMessage = '';
+    } else {
+      chatMessage = 'Der Server hat die Anfrage nicht angenommen.';
+    }
+    await refreshChats();
+    return id;
+  }
+
+  /// Someone brought a valid key of this admin: add their devices.
+  Future<void> _admit(ServerApi api, String joinChat, String user) async {
+    final offers = await api.claim(user);
+    final a = await vault!.admit(joinChat, offers);
+    if (a.ok) {
+      if (await _pushCommit(api, (a.raw['commit'] as Map).cast<String, Object?>())) {
+        await vault!.closeJoin(joinChat);
+      }
+    } else if (a.error == 'rejected') {
+      // Already in the group, or the group is gone: nothing to wait for.
+      await vault!.closeJoin(joinChat);
+    }
+  }
+
+  /// Join requests that arrived while the server or the group was busy.
+  Future<void> _retryJoinRequests(ServerApi api) async {
+    final r = await vault!.joinRequests();
+    for (final j in (r.raw['requests'] as List? ?? const []).cast<Map<String, Object?>>()) {
+      await _admit(api, j['chat'] as String, j['user'] as String);
+    }
+  }
+
+  /// What groups still need: an admin's device removes who left, guests
+  /// whose time is up and withdrawn devices; a member asks to remove its
+  /// own withdrawn devices.
+  Future<void> _tidyGroups(ServerApi api, {Set<String>? only}) async {
+    for (final c in realChats.where((c) => c.isGroup && c.state == 'active')) {
+      if (only != null && !only.contains(c.id)) continue;
+      final t = await vault!.tidyGroup(c.id);
+      if (!t.ok) continue;
+      final commit = t.raw['commit'];
+      if (commit is Map) {
+        await _pushCommit(api, commit.cast<String, Object?>());
+        if (groupInfos.containsKey(c.id)) await loadGroup(c.id);
+      } else if (t.raw['body'] is String) {
+        await api.sendMessage(t.raw['to'], t.raw['body'] as String);
+      }
+    }
+  }
+
   Timer? _sweeper;
 
   /// Vanished chats go every half minute (and when the database opens).
@@ -1034,6 +1431,7 @@ class AppState extends ChangeNotifier {
     for (final id in gone) {
       realMessages.remove(id);
     }
+    groupInfos = {...groupInfos}..removeWhere((k, _) => gone.contains(k));
     _profilesStale = true;
     await refreshChats();
   }
@@ -1090,9 +1488,21 @@ class AppState extends ChangeNotifier {
   Future<void> _chatsOnline(ServerApi api) async {
     final count = await api.keyPackageCount();
     final have = (count.body['count'] as num?)?.toInt() ?? 0;
-    if (count.ok && have < 10) {
-      final kps = await vault!.keyPackages(20, lastResort: have == 0);
-      if (kps.ok) await api.uploadKeyPackages(kps.raw['packages'] as List, kps.raw['last_resort'] as String?);
+    // Packages from before groups lack what groups need: replace once.
+    final replace = _keyPackageVersion < keyPackageVersion;
+    if (count.ok && (have < 10 || replace)) {
+      final kps = await vault!.keyPackages(20, lastResort: have == 0 || replace);
+      if (kps.ok) {
+        final up = await api.uploadKeyPackages(
+          kps.raw['packages'] as List,
+          kps.raw['last_resort'] as String?,
+          replace: replace,
+        );
+        if (up.ok && replace) {
+          _keyPackageVersion = keyPackageVersion;
+          _scheduleSave();
+        }
+      }
     }
     final pending = await vault!.pendingCommits();
     for (final c in (pending.raw['commits'] as List? ?? const []).cast<Map<String, Object?>>()) {
@@ -1104,13 +1514,16 @@ class AppState extends ChangeNotifier {
     }
     await _removeWithdrawn(api);
     await refreshChats();
+    await _tidyGroups(api);
+    await _retryJoinRequests(api);
     final run = ++_receiveRun;
     unawaited(_receiveLoop(api, run));
   }
 
   /// Remove withdrawn devices (own or a contact's) from every chat.
   Future<void> _removeWithdrawn(ServerApi api) async {
-    for (final chat in realChats.where((c) => c.state == 'active')) {
+    // Groups tidy up through their admins (see _tidyGroups).
+    for (final chat in realChats.where((c) => c.state == 'active' && c.kind == 'direct')) {
       final w = await vault!.withdrawnMembers(chat.id);
       final ids = (w.raw['ids'] as List? ?? const []).cast<String>();
       if (ids.isEmpty) continue;
@@ -1137,6 +1550,7 @@ class AppState extends ChangeNotifier {
       failures = 0;
       final ids = <int>[];
       final touched = <String>{};
+      final groupsTouched = <String>{};
       for (final m in (r.body['messages'] as List? ?? const []).cast<Map<String, Object?>>()) {
         final got = await vault!.receive(m['body'] as String);
         if (run != _receiveRun) return;
@@ -1154,10 +1568,27 @@ class AppState extends ChangeNotifier {
             touched.add(chat);
             if (incoming['update_keys'] == true) {
               final out = await vault!.updateKeys(chat);
-              if (out.ok) await _pushCommit(api, (out.raw['commit'] as Map).cast<String, Object?>());
+              if (out.ok) {
+                await _pushCommit(api, (out.raw['commit'] as Map).cast<String, Object?>());
+              } else if (out.error == 'not_allowed') {
+                // A member of a group asks; the next admin's change carries it.
+                final ask = await vault!.proposeUpdate(chat);
+                if (ask.ok) await api.sendMessage(ask.raw['to'], ask.raw['body'] as String);
+              }
             }
-          case 'changed':
+          case 'changed' || 'group':
             touched.add(incoming['chat'] as String);
+            groupsTouched.add(incoming['chat'] as String);
+          case 'join_request':
+            await _admit(api, incoming['chat'] as String, incoming['user'] as String);
+            groupsTouched.add(incoming['group'] as String);
+            touched.add(incoming['group'] as String);
+          case 'join_refused':
+            final out = await vault!.denyJoin(incoming['chat'] as String);
+            if (out.ok) await api.sendMessage(out.raw['to'], out.raw['body'] as String);
+          case 'join_failed':
+            chatMessage = 'Der Beitritt wurde abgelehnt: Der Schlüssel ist abgelaufen oder zurückgezogen.';
+            touched.add('');
           case 'profile':
             _profilesStale = true;
             touched.add('');
@@ -1170,8 +1601,10 @@ class AppState extends ChangeNotifier {
         await refreshChats();
         for (final chat in touched) {
           if (chat.isNotEmpty && realMessages.containsKey(chat)) await loadMessages(chat);
+          if (groupInfos.containsKey(chat)) await loadGroup(chat);
         }
       }
+      if (groupsTouched.isNotEmpty) await _tidyGroups(api, only: groupsTouched);
     }
   }
 
@@ -1414,12 +1847,14 @@ class AppState extends ChangeNotifier {
     'picture': ?(picture == null ? null : base64.encode(picture!)),
     'shareRev': _shareRev,
     'shareHash': _shareHash,
+    'keyPackages': _keyPackageVersion,
   };
 
   void _applyProfile(Map<String, Object?> p) {
     userName = p['name'] as String? ?? '';
     _shareRev = (p['shareRev'] as num?)?.toInt() ?? 0;
     _shareHash = p['shareHash'] as String? ?? '';
+    _keyPackageVersion = (p['keyPackages'] as num?)?.toInt() ?? 0;
     final glowValue = p['glow'];
     glow = glowValue is int ? Color(glowValue) : TrairColors.accentLight;
     final strength = p['glowStrength'];
