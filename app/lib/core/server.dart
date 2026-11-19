@@ -130,4 +130,57 @@ class ServerApi {
 
   Future<ServerReply> getBundle(int channel, int wait) =>
       transport.send('GET', '/v1/pairing/$channel/bundle?wait=$wait', wait: wait);
+
+  // ----- chats (M4) -----
+
+  /// One-time key packages and the last-resort package of this device.
+  Future<ServerReply> uploadKeyPackages(List<Object?> packages, String? lastResort) =>
+      transport.send('POST', '/v1/keypackages', token: token, body: {'packages': packages, 'last_resort': ?lastResort});
+
+  /// How many one-time key packages of this device are left.
+  Future<ServerReply> keyPackageCount() => transport.send('GET', '/v1/keypackages', token: token);
+
+  /// One key package per device of [user], as `{device: user:id, package}`.
+  Future<List<Map<String, Object?>>> claim(String user) async {
+    final r = await transport.send('POST', '/v1/keypackages/claim', token: token, body: {'user': user});
+    if (!r.ok) return const [];
+    return [
+      for (final p in (r.body['packages'] as List? ?? const []).cast<Map<String, Object?>>())
+        {'device': '$user:${p['device']}', 'package': p['package']},
+    ];
+  }
+
+  /// A change of a chat as the core made it; the server takes the first
+  /// per chat and epoch.
+  Future<ServerReply> postCommit(Map<String, Object?> c) => transport.send(
+    'POST',
+    '/v1/commits',
+    token: token,
+    body: {
+      'group': c['chat'],
+      'epoch': c['epoch'],
+      'commit': c['commit'],
+      'to': targets(c['to']),
+      'welcome': c['welcome'],
+      'welcome_to': targets(c['welcome_to']),
+    },
+  );
+
+  /// Ciphertext for devices (`user:device`).
+  Future<ServerReply> sendMessage(Object? to, String body) =>
+      transport.send('POST', '/v1/messages', token: token, body: {'to': targets(to), 'body': body});
+
+  /// Waiting messages; with [wait] the server holds the answer up to that
+  /// many seconds until something arrives.
+  Future<ServerReply> fetchMessages(int wait) =>
+      transport.send('GET', '/v1/messages?wait=$wait', token: token, wait: wait);
+
+  Future<ServerReply> ack(List<int> ids) =>
+      transport.send('POST', '/v1/messages/ack', token: token, body: {'ids': ids});
 }
+
+/// `user:device` ids as the server wants them.
+List<Map<String, String>> targets(Object? ids) => [
+  for (final id in (ids as List? ?? const []).cast<String>())
+    if (id.contains(':')) {'user': id.substring(0, id.indexOf(':')), 'device': id.substring(id.indexOf(':') + 1)},
+];

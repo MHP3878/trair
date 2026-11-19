@@ -699,4 +699,100 @@ void main() {
       expect(find.textContaining('von einem anderen Gerät entzogen'), findsOneWidget);
     });
   });
+
+  group('Echte Chats', () {
+    Future<(FakeDoor, FakeServer)> online(WidgetTester tester) async {
+      final server = FakeServer();
+      final door = FakeDoor(password: pw, profile: {'name': 'Julian'})..chatsEnabled = true;
+      await _start(tester, door: door, server: server);
+      await _unlock(tester);
+      await _openSettings(tester);
+      await tester.ensureVisible(find.widgetWithText(PillButton, 'Verbinden'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Verbinden'));
+      await tester.pumpAndSettle();
+      expect(find.text('Verbunden'), findsOneWidget);
+      await tester.tap(find.text('Chats'));
+      await tester.pumpAndSettle();
+      return (door, server);
+    }
+
+    testWidgets('a contact by code, a real chat through the server, both directions', (tester) async {
+      final (door, server) = await online(tester);
+      // Connecting put key packages and a last-resort package on the server.
+      expect(server.keyPackages, 20);
+      expect(server.lastResort, isNotNull);
+      expect(find.text('Echt verschlüsselt'), findsOneWidget);
+      expect(find.text('Demo (nicht verschlüsselt)'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Neuer Chat'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('trair1:local-julian:'), findsOneWidget);
+      await tester.enterText(_field('trair1:…'), 'trair1:local-bob:${'ff' * 16}:0000');
+      await tester.enterText(_field('Name (nur für dich)'), 'Bob');
+      await tester.tap(find.widgetWithText(PillButton, 'Hinzufügen'));
+      await tester.pumpAndSettle();
+      expect(door.contacts.single['name'], 'Bob');
+      expect(find.textContaining('Deine Kontakte · 1'), findsOneWidget);
+
+      await tester.tap(find.widgetWithText(PillButton, 'Chat starten'));
+      await tester.pumpAndSettle();
+      expect(server.commits.single['welcome_to'], [
+        {'user': 'local-bob', 'device': 'd-peer'},
+      ]);
+      expect(door.pending, isEmpty, reason: 'the server took the change');
+      expect(find.text('Echt Ende-zu-Ende verschlüsselt'), findsWidgets);
+
+      await tester.enterText(find.byKey(const Key('real-composer')), 'Hallo Bob');
+      await tester.tap(find.byTooltip('Senden'));
+      await tester.pumpAndSettle();
+      expect(server.sent.single['to'], [
+        {'user': 'local-bob', 'device': 'd-peer'},
+      ]);
+      expect(find.text('Hallo Bob'), findsOneWidget);
+
+      // Bob answers: the long poll wakes up, the core stores it, the
+      // server is told to delete it.
+      server.deliver(FakeDoor.wire({'kind': 'message', 'chat': 'c1', 'text': 'Hallo Julian'}));
+      await tester.pumpAndSettle();
+      expect(find.text('Hallo Julian'), findsOneWidget);
+      expect(server.acked, [1]);
+    });
+
+    testWidgets('a stranger is a request: no answer before accepting, declining deletes it', (tester) async {
+      final (door, server) = await online(tester);
+      server.deliver(FakeDoor.wire({'kind': 'chat', 'chat': 'x1', 'peer': 'local-fremd'}));
+      server.deliver(FakeDoor.wire({'kind': 'message', 'chat': 'x1', 'text': 'Hallo, kennst du mich?'}));
+      await tester.pumpAndSettle();
+      expect(find.text('Anfrage: kein Kontakt'), findsOneWidget);
+      await tester.tap(find.text('local-fremd'));
+      await tester.pumpAndSettle();
+      expect(find.text('Hallo, kennst du mich?'), findsOneWidget);
+      expect(tester.widget<TextField>(find.byKey(const Key('real-composer'))).enabled, isFalse);
+      await tester.tap(find.widgetWithText(PillButton, 'Annehmen'));
+      await tester.pumpAndSettle();
+      expect(door.contacts.single['user'], 'local-fremd');
+      expect(tester.widget<TextField>(find.byKey(const Key('real-composer'))).enabled, isTrue);
+
+      server.deliver(FakeDoor.wire({'kind': 'chat', 'chat': 'x2', 'peer': 'local-spam'}));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('local-spam'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Ablehnen'));
+      await tester.pumpAndSettle();
+      expect(door.chats.map((c) => c['id']), ['x1']);
+      expect(find.text('local-spam'), findsNothing);
+    });
+
+    testWidgets('a wrong or own code is refused with a message', (tester) async {
+      final (door, _) = await online(tester);
+      await tester.tap(find.byTooltip('Neuer Chat'));
+      await tester.pumpAndSettle();
+      await tester.enterText(_field('trair1:…'), 'trair1:local-julian:${'a1' * 16}:beef');
+      await tester.tap(find.widgetWithText(PillButton, 'Hinzufügen'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Das passt nicht'), findsOneWidget);
+      expect(door.contacts, isEmpty);
+    });
+  });
 }

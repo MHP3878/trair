@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 The Trair contributors
 
+import 'dart:async';
+
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 
@@ -30,6 +32,12 @@ class _ChatsScreenState extends State<ChatsScreen> {
   final _screenFocus = FocusNode(debugLabel: 'chats');
   final _draft = TextEditingController();
 
+  /// Selected real chat (M4); null shows the demo chat.
+  String? _real;
+  bool _contactsOpen = false;
+  final _code = TextEditingController();
+  final _contactName = TextEditingController();
+
   @override
   void initState() {
     super.initState();
@@ -46,6 +54,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
     _searchFocus.dispose();
     _screenFocus.dispose();
     _draft.dispose();
+    _code.dispose();
+    _contactName.dispose();
     super.dispose();
   }
 
@@ -65,7 +75,14 @@ class _ChatsScreenState extends State<ChatsScreen> {
             children: [
               SizedBox(width: 304, child: _sidebar(state, chats)),
               Expanded(
-                child: Padding(padding: const EdgeInsets.fromLTRB(0, 10, 10, 10), child: _conversation(state, chat)),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(0, 10, 10, 10),
+                  child: _contactsOpen
+                      ? _contactsPanel(state)
+                      : (_realChat(state) != null
+                            ? _realConversation(state, _realChat(state)!)
+                            : _conversation(state, chat)),
+                ),
               ),
             ],
           ),
@@ -91,7 +108,14 @@ class _ChatsScreenState extends State<ChatsScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           SidebarHeader(
-            trailing: RoundIconButton(icon: TrairIcons.squarePen, tooltip: 'Neuer Chat', onPressed: () {}),
+            trailing: RoundIconButton(
+              icon: TrairIcons.squarePen,
+              tooltip: 'Neuer Chat',
+              onPressed: () => setState(() {
+                _contactsOpen = true;
+                _real = null;
+              }),
+            ),
           ),
           const SizedBox(height: 18),
           PillField(
@@ -152,6 +176,17 @@ class _ChatsScreenState extends State<ChatsScreen> {
           Expanded(
             child: ListView(
               children: [
+                if (state.chatsReady) ...[
+                  _sectionLabel('Echt verschlüsselt'),
+                  for (final c in state.realChats) _realRow(state, c),
+                  if (state.realChats.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(12, 2, 12, 8),
+                      child: Text('Noch keine. Oben auf „Neuer Chat“.', style: TrairText.small),
+                    ),
+                  const SizedBox(height: 8),
+                  _sectionLabel('Demo (nicht verschlüsselt)'),
+                ],
                 for (final c in visible) _chatRow(state, c),
                 if (visible.isEmpty)
                   const Padding(
@@ -195,7 +230,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
   Widget _chatRow(AppState state, ChatSummary c) {
     final backend = state.backend;
-    final active = c.id == _active;
+    final active = c.id == _active && _real == null && !_contactsOpen;
     final warn = backend.safetyNumberChanged(c.id);
     final msgs = backend.messages(c.id).where((m) => m.kind != MessageKind.system).toList();
     final last = msgs.isEmpty ? null : msgs.last;
@@ -215,6 +250,8 @@ class _ChatsScreenState extends State<ChatsScreen> {
           borderRadius: BorderRadius.circular(18),
           onTap: () => setState(() {
             _active = c.id;
+            _real = null;
+            _contactsOpen = false;
             _read.add(c.id);
             _safetyOpen = false;
             _draft.clear();
@@ -277,6 +314,339 @@ class _ChatsScreenState extends State<ChatsScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------- real chats (M4)
+
+  Widget _sectionLabel(String text) => Padding(
+    padding: const EdgeInsets.only(left: 12, bottom: 6, top: 2),
+    child: Text(text, style: TrairText.small),
+  );
+
+  RealChat? _realChat(AppState state) => _real == null ? null : state.realChats.where((c) => c.id == _real).firstOrNull;
+
+  void _openReal(AppState state, String id) {
+    setState(() {
+      _real = id;
+      _contactsOpen = false;
+      _draft.clear();
+    });
+    unawaited(state.loadMessages(id));
+  }
+
+  Widget _realRow(AppState state, RealChat c) {
+    final active = c.id == _real && !_contactsOpen;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: Material(
+        color: active ? TrairColors.cardActive : Colors.transparent,
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: () => _openReal(state, c.id),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 10, 12, 10),
+            child: Row(
+              children: [
+                Avatar(initials: _initials(c.name), color: TrairColors.accentLight, size: 40),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        c.name,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600),
+                      ),
+                      Text(
+                        switch (c.state) {
+                          'request' => 'Anfrage: kein Kontakt',
+                          'left' => 'Dieses Gerät ist nicht mehr dabei',
+                          _ => 'Ende-zu-Ende verschlüsselt',
+                        },
+                        style: TrairText.small,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                if (c.isRequest) const Icon(TrairIcons.triangleAlert, size: 16, color: TrairColors.amber),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  static String _initials(String name) {
+    final parts = name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    if (parts.isEmpty) return '?';
+    return parts.take(2).map((p) => String.fromCharCode(p.runes.first).toUpperCase()).join();
+  }
+
+  Widget _contactsPanel(AppState state) {
+    final online = state.chatsOnline;
+    return GlassPanel(
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(28, 22, 28, 28),
+        children: [
+          Row(
+            children: [
+              const Expanded(child: Text('Kontakte', style: TrairText.title)),
+              RoundIconButton(
+                icon: TrairIcons.x,
+                tooltip: 'Schließen',
+                filled: false,
+                onPressed: () => setState(() => _contactsOpen = false),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Kein Telefonbuch, keine Suche: Ihr tauscht Kontaktcodes. Der Code legt den Schlüssel des Kontos fest. '
+            'Persönlich oder per QR-Code weitergegeben, kann ihn niemand austauschen.',
+            style: TrairText.muted,
+          ),
+          const SizedBox(height: 18),
+          if (!state.chatsReady)
+            const Text('Die Chat-Datenbank ist nicht offen.', style: TrairText.muted)
+          else ...[
+            const FieldLabel('Dein Kontaktcode'),
+            Row(
+              children: [
+                Expanded(
+                  child: SelectableText(
+                    state.contactCode,
+                    style: const TextStyle(fontFamily: 'GeistMono', fontSize: 12.5, color: TrairColors.text),
+                  ),
+                ),
+                RoundIconButton(
+                  icon: TrairIcons.copy,
+                  tooltip: 'Code kopieren',
+                  onPressed: () => Clipboard.setData(ClipboardData(text: state.contactCode)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            const FieldLabel('Kontakt hinzufügen'),
+            PillField(controller: _code, hint: 'trair1:…', mono: true, height: 46, semanticLabel: 'Kontaktcode'),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: PillField(
+                    controller: _contactName,
+                    hint: 'Name (nur für dich)',
+                    height: 46,
+                    semanticLabel: 'Name',
+                  ),
+                ),
+                const SizedBox(width: 10),
+                PillButton(
+                  label: 'Hinzufügen',
+                  onPressed: () async {
+                    if (await state.addContact(_code.text, _contactName.text)) {
+                      _code.clear();
+                      _contactName.clear();
+                    }
+                  },
+                ),
+              ],
+            ),
+            if (state.chatMessage.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Text(state.chatMessage, style: const TextStyle(color: TrairColors.amber, fontSize: 13)),
+              ),
+            const SizedBox(height: 22),
+            FieldLabel('Deine Kontakte · ${state.contacts.length}'),
+            if (state.contacts.isEmpty) const Text('Noch keine.', style: TrairText.muted),
+            for (final c in state.contacts)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    Avatar(initials: _initials(c.name), color: TrairColors.accentLight, size: 36),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(c.name, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                          Text(
+                            c.fingerprint,
+                            style: const TextStyle(fontFamily: 'GeistMono', fontSize: 11, color: TrairColors.textMuted),
+                          ),
+                        ],
+                      ),
+                    ),
+                    PillButton(
+                      label: 'Chat starten',
+                      kind: PillKind.ghost,
+                      height: 38,
+                      onPressed: online
+                          ? () async {
+                              final id = await state.startChat(c.user);
+                              if (id != null && mounted) _openReal(state, id);
+                            }
+                          : null,
+                    ),
+                  ],
+                ),
+              ),
+            if (!online && state.contacts.isNotEmpty)
+              const Text(
+                'Chats starten geht, sobald der Server verbunden ist (Einstellungen → Server).',
+                style: TrairText.small,
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _realConversation(AppState state, RealChat chat) {
+    final messages = state.realMessages[chat.id] ?? const <RealMessage>[];
+    final canWrite = chat.state == 'active' && state.chatsOnline;
+    Future<void> send() async {
+      final text = _draft.text.trim();
+      if (text.isEmpty || !canWrite) return;
+      _draft.clear();
+      await state.sendReal(chat.id, text);
+    }
+
+    return GlassPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 16, 14),
+            child: Row(
+              children: [
+                Avatar(initials: _initials(chat.name), color: TrairColors.accentLight, size: 40),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(chat.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                      Text(chat.peer, style: TrairText.small),
+                    ],
+                  ),
+                ),
+                SecurityCapsule(
+                  text: chat.isRequest ? 'Anfrage · unbekannter Schlüssel' : 'Echt Ende-zu-Ende verschlüsselt',
+                  tone: chat.isRequest ? CapsuleTone.warn : CapsuleTone.safe,
+                  open: false,
+                  onTap: () {},
+                ),
+              ],
+            ),
+          ),
+          if (chat.isRequest)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+              child: GlassPanel(
+                lite: true,
+                padding: const EdgeInsets.all(14),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Diese Person ist kein Kontakt. Antworten geht erst nach dem Annehmen. Ablehnen löscht den Chat.',
+                        style: TrairText.muted,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    PillButton(label: 'Annehmen', height: 38, onPressed: () => state.acceptRequest(chat.id, '')),
+                    const SizedBox(width: 8),
+                    PillButton(
+                      label: 'Ablehnen',
+                      kind: PillKind.danger,
+                      height: 38,
+                      onPressed: () async {
+                        await state.declineRequest(chat.id);
+                        if (mounted) setState(() => _real = null);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          if (state.chatMessage.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Text(state.chatMessage, style: const TextStyle(color: TrairColors.amber, fontSize: 13)),
+            ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(28, 8, 28, 16),
+              children: [
+                for (final m in messages)
+                  Align(
+                    alignment: m.outgoing ? Alignment.centerRight : Alignment.centerLeft,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 540),
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: m.outgoing ? TrairColors.accent : TrairColors.bubbleOther,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          m.missing > 0 ? '${m.text}\n(${m.missing} Nachricht(en) davor fehlen)' : m.text,
+                          style: m.outgoing ? TrairText.body.copyWith(color: Colors.white) : TrairText.body,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 18),
+            child: GlassPanel(
+              lite: true,
+              radius: 999,
+              padding: const EdgeInsets.all(6),
+              child: Row(
+                children: [
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextField(
+                      key: const Key('real-composer'),
+                      controller: _draft,
+                      enabled: canWrite,
+                      onSubmitted: (_) => send(),
+                      style: const TextStyle(fontSize: 14.5, color: TrairColors.text),
+                      decoration: InputDecoration.collapsed(
+                        hintText: switch (chat.state) {
+                          'request' => 'Erst annehmen',
+                          'left' => 'Dieses Gerät ist nicht mehr im Chat',
+                          _ => state.chatsOnline ? 'Nachricht an ${chat.name}' : 'Nicht verbunden',
+                        },
+                        hintStyle: const TextStyle(color: TrairColors.placeholder, fontSize: 14.5),
+                      ),
+                    ),
+                  ),
+                  RoundIconButton(
+                    icon: TrairIcons.arrowUp,
+                    tooltip: 'Senden',
+                    size: 40,
+                    color: TrairColors.accent,
+                    iconColor: Colors.white,
+                    onPressed: canWrite ? send : null,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

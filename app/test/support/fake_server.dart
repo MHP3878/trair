@@ -26,6 +26,31 @@ class FakeServer implements ServerTransport {
   /// Completed by the test to let the new device arrive later.
   Completer<void>? holdGuest;
 
+  // ----- chats (M4) -----
+
+  /// One-time key packages of this device on the server.
+  int keyPackages = 0;
+  String? lastResort;
+
+  /// Changes and ciphertext that went out, as the app sent them.
+  final List<Map<String, Object?>> commits = [];
+  final List<Map<String, Object?>> sent = [];
+
+  /// Refuse the next change (another device was first) with this hash.
+  String? refuseWithTaken;
+
+  /// Waiting for this device; [deliver] adds to it and wakes a long poll.
+  final List<Map<String, Object?>> _inbox = [];
+  final List<int> acked = [];
+  int _messageIds = 0;
+  Completer<void>? _arrived;
+
+  void deliver(String body) {
+    _inbox.add({'id': ++_messageIds, 'body': body, 'at': 0});
+    _arrived?.complete();
+    _arrived = null;
+  }
+
   @override
   Future<ServerReply> send(
     String method,
@@ -54,9 +79,44 @@ class FakeServer implements ServerTransport {
         return ok();
       case ('POST', '/v1/pairing'):
         return ok({'channel': 7});
+      case ('GET', '/v1/keypackages'):
+        return ok({'count': keyPackages});
+      case ('POST', '/v1/keypackages'):
+        keyPackages += (body!['packages'] as List).length;
+        lastResort = body['last_resort'] as String? ?? lastResort;
+        return ok({'count': keyPackages});
+      case ('POST', '/v1/keypackages/claim'):
+        final user = body!['user'];
+        if (user == 'local-julian') return ok({'packages': <Object?>[]});
+        return ok({
+          'packages': [
+            {'device': 'd-peer', 'package': 'cGFja2FnZQ=='},
+          ],
+        });
+      case ('POST', '/v1/commits'):
+        commits.add(body!);
+        final taken = refuseWithTaken;
+        if (taken != null) {
+          refuseWithTaken = null;
+          return ServerReply(409, {'ok': false, 'error': 'wrong_epoch', 'epoch': 1, 'taken': taken});
+        }
+        return ok({'epoch': (body['epoch'] as int) + 1});
+      case ('POST', '/v1/messages'):
+        sent.add(body!);
+        return ok();
+      case ('GET', '/v1/messages'):
+        // Like the real long poll: wait until something arrives.
+        if (_inbox.isEmpty && wait > 0) await (_arrived ??= Completer<void>()).future;
+        return ok({'messages': List.of(_inbox)});
+      case ('POST', '/v1/messages/ack'):
+        final ids = (body!['ids'] as List).cast<int>();
+        acked.addAll(ids);
+        _inbox.removeWhere((m) => ids.contains(m['id']));
+        return ok();
     }
     if (method == 'GET' && route.startsWith('/v1/accounts/')) {
       return ok({
+        'account_key': 'cd' * 32,
         'device_list': {
           'list': {'seq': 0},
         },

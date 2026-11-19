@@ -19,6 +19,66 @@ enum ServerStatus { off, connecting, connected, failed }
 /// Where a pairing stands, on the unlocked device.
 enum PairStage { waiting, finishing, done, failed }
 
+/// A contact: pinned account key, from a contact code (M4).
+class RealContact {
+  const RealContact({required this.user, required this.name, required this.fingerprint, this.confirmed = false});
+
+  factory RealContact.fromJson(Map<String, Object?> j) => RealContact(
+    user: j['user'] as String,
+    name: j['name'] as String? ?? j['user'] as String,
+    fingerprint: j['fingerprint'] as String? ?? '',
+    confirmed: j['confirmed'] == true,
+  );
+
+  final String user;
+  final String name;
+  final String fingerprint;
+  final bool confirmed;
+}
+
+/// A real, end-to-end encrypted one-to-one chat (M4).
+class RealChat {
+  const RealChat({required this.id, required this.peer, required this.name, required this.state, this.last = 0});
+
+  factory RealChat.fromJson(Map<String, Object?> j) => RealChat(
+    id: j['id'] as String,
+    peer: j['peer'] as String,
+    name: j['name'] as String? ?? j['peer'] as String,
+    state: j['state'] as String? ?? 'active',
+    last: (j['last'] as num?)?.toInt() ?? 0,
+  );
+
+  final String id;
+  final String peer;
+  final String name;
+
+  /// active, request (someone who is no contact wrote first) or left.
+  final String state;
+  final int last;
+
+  bool get isRequest => state == 'request';
+}
+
+class RealMessage {
+  const RealMessage({required this.id, required this.text, required this.outgoing, required this.at, this.missing = 0});
+
+  factory RealMessage.fromJson(Map<String, Object?> j) => RealMessage(
+    id: (j['id'] as num).toInt(),
+    text: j['text'] as String? ?? '',
+    outgoing: j['outgoing'] == true,
+    at: (j['at'] as num?)?.toInt() ?? 0,
+    missing: (j['missing'] as num?)?.toInt() ?? 0,
+  );
+
+  final int id;
+  final String text;
+  final bool outgoing;
+  final int at;
+
+  /// Earlier messages of the sender that never arrived.
+  final int missing;
+}
+
 /// A running pairing, as the unlocked device shows it.
 class PairingProgress {
   PairingProgress(this.code, this.validUntil);
@@ -112,6 +172,17 @@ class AppState extends ChangeNotifier {
   /// Progress of joining as a new device (shown in the first start).
   String joinMessage = '';
 
+  // Real chats (M4). Empty while locked.
+  bool chatsReady = false;
+  String contactCode = '';
+  List<RealContact> contacts = const [];
+  List<RealChat> realChats = const [];
+  final Map<String, List<RealMessage>> realMessages = {};
+
+  /// Last problem with chats, for the screen. Empty if all is well.
+  String chatMessage = '';
+  int _receiveRun = 0;
+
   /// Privacy switches; all off by default (decision 10).
   final Map<String, bool> privacy = {'lese': false, 'tippt': false, 'online': false, 'vorschau': false};
 
@@ -160,6 +231,8 @@ class AppState extends ChangeNotifier {
   /// [server]: the address a new device just paired through. Its vault
   /// has no profile yet, so the address would otherwise be lost.
   void _unlocked(CoreAnswer answer, {String? server}) {
+    chatsReady = answer.raw['chats'] == true;
+    unawaited(refreshChats());
     _applyProfile(answer.profile);
     if (server != null) {
       serverUrl = server;
@@ -186,6 +259,7 @@ class AppState extends ChangeNotifier {
     devices = const [];
     accountKey = '';
     realBadges = const [];
+    _forgetChats();
     _forgetServer();
     go(TrairScreen.lock);
     // The lock screen is always protected, whatever the setting says.
@@ -221,6 +295,7 @@ class AppState extends ChangeNotifier {
           : 'Der Server war nicht erreichbar. Er löscht das Konto nach 6 Monaten ohne Anmeldung selbst.';
     }
     if (answer.ok) {
+      _forgetChats();
       _forgetServer();
       _autoLock?.cancel();
       _saveSoon?.cancel();
@@ -242,7 +317,12 @@ class AppState extends ChangeNotifier {
   /// connected, the server learns it at once and drops that device.
   Future<CoreAnswer> withdrawDevice(String id, String password) async {
     final answer = await _devices(vault!.withdrawDevice(id, password));
-    if (answer.ok) await _pushDeviceList();
+    if (answer.ok) {
+      await _pushDeviceList();
+      // The withdrawn device leaves every chat, or nothing can be sent.
+      final api = _api;
+      if (api != null) await _removeWithdrawn(api);
+    }
     return answer;
   }
 
@@ -255,6 +335,7 @@ class AppState extends ChangeNotifier {
 
   void _forgetServer() {
     _api = null;
+    _receiveRun++;
     _pairingRun++;
     pairing = null;
     serverStatus = ServerStatus.off;
@@ -313,6 +394,7 @@ class AppState extends ChangeNotifier {
     }
     _api = api;
     await _pushDeviceList();
+    if (chatsReady) await _chatsOnline(api);
     serverStatus = ServerStatus.connected;
     serverMessage = 'Verbunden mit ${uri.host}:${uri.port}';
     if (!serverAuto) {
@@ -340,6 +422,224 @@ class AppState extends ChangeNotifier {
   }
 
   bool get canPair => serverStatus == ServerStatus.connected && pairing == null;
+
+  // ------------------------------------------------------------ chats (M4)
+
+  bool get chatsOnline => chatsReady && _api != null && serverStatus == ServerStatus.connected;
+
+  void _forgetChats() {
+    _receiveRun++;
+    chatsReady = false;
+    contactCode = '';
+    contacts = const [];
+    realChats = const [];
+    realMessages.clear();
+    chatMessage = '';
+  }
+
+  /// Read contacts, chats and the own code from the core again.
+  Future<void> refreshChats() async {
+    final v = vault;
+    if (v == null || !chatsReady) return;
+    final code = await v.contactCode();
+    final c = await v.contacts();
+    final ch = await v.chats();
+    if (!chatsReady) return;
+    if (code.ok) contactCode = code.raw['code'] as String;
+    if (c.ok) {
+      contacts = [for (final j in (c.raw['contacts'] as List).cast<Map<String, Object?>>()) RealContact.fromJson(j)];
+    }
+    if (ch.ok) {
+      realChats = [for (final j in (ch.raw['chats'] as List).cast<Map<String, Object?>>()) RealChat.fromJson(j)];
+    }
+    notifyListeners();
+  }
+
+  Future<void> loadMessages(String chat) async {
+    final m = await vault!.messages(chat);
+    if (!m.ok) return;
+    realMessages[chat] = [
+      for (final j in (m.raw['messages'] as List).cast<Map<String, Object?>>()) RealMessage.fromJson(j),
+    ];
+    notifyListeners();
+  }
+
+  String _chatError(CoreAnswer a) => switch (a.error) {
+    'rejected' => 'Das passt nicht (Code falsch oder schon da?).',
+    'blocked' => 'Blockiert: der Schlüssel passt nicht zum bekannten Kontakt.',
+    'bad_package' => 'Vom anderen Konto kam kein passendes Gerät.',
+    'withdrawn_member' => 'Im Chat ist noch ein entzogenes Gerät.',
+    'storage' => 'Die Chat-Datenbank ist nicht lesbar oder voll.',
+    'chats_unavailable' => 'Die Chat-Datenbank ließ sich nicht öffnen.',
+    _ => 'Fehler: ${a.error}',
+  };
+
+  /// Add a contact from their code. [name] is how they appear here.
+  Future<bool> addContact(String code, String name) async {
+    final a = await vault!.addContact(code.trim(), name.trim());
+    chatMessage = a.ok ? '' : _chatError(a);
+    await refreshChats();
+    return a.ok;
+  }
+
+  /// Start a chat with a contact: key packages for their devices and for
+  /// this account's other devices, then the change through the server.
+  Future<String?> startChat(String user) async {
+    final api = _api;
+    if (api == null || !chatsReady) {
+      chatMessage = 'Erst mit dem Server verbinden.';
+      notifyListeners();
+      return null;
+    }
+    final me = await vault!.serverIdentity();
+    final offers = [...await api.claim(user), if (me.ok) ...await api.claim(me.raw['user'] as String)];
+    final started = await vault!.startChat(user, offers);
+    if (!started.ok) {
+      chatMessage = _chatError(started);
+      notifyListeners();
+      return null;
+    }
+    final commit = (started.raw['commit'] as Map).cast<String, Object?>();
+    if (!await _pushCommit(api, commit)) {
+      chatMessage = 'Der Server hat den neuen Chat nicht angenommen.';
+    } else {
+      chatMessage = '';
+    }
+    await refreshChats();
+    return (started.raw['chat'] as Map)['id'] as String;
+  }
+
+  /// Send a text. It is stored first; then the ciphertext goes out.
+  Future<bool> sendReal(String chat, String text) async {
+    final api = _api;
+    final t = text.trim();
+    if (t.isEmpty) return false;
+    if (api == null) {
+      chatMessage = 'Nicht verbunden: erst mit dem Server verbinden.';
+      notifyListeners();
+      return false;
+    }
+    final sent = await vault!.sendMessage(chat, t);
+    if (!sent.ok) {
+      chatMessage = _chatError(sent);
+      notifyListeners();
+      return false;
+    }
+    final r = await api.sendMessage(sent.raw['to'], sent.raw['body'] as String);
+    chatMessage = r.ok ? '' : 'Gespeichert, aber nicht zugestellt (${r.error}).';
+    await loadMessages(chat);
+    await refreshChats();
+    return r.ok;
+  }
+
+  Future<void> acceptRequest(String chat, String name) async {
+    final a = await vault!.acceptRequest(chat, name);
+    chatMessage = a.ok ? '' : _chatError(a);
+    await refreshChats();
+  }
+
+  Future<void> declineRequest(String chat) async {
+    final a = await vault!.declineRequest(chat);
+    chatMessage = a.ok ? '' : _chatError(a);
+    realMessages.remove(chat);
+    await refreshChats();
+  }
+
+  /// Hand a change to the server and tell the core the answer. Without
+  /// an answer (offline) the change stays waiting and goes out again on
+  /// the next connect.
+  Future<bool> _pushCommit(ServerApi api, Map<String, Object?> commit) async {
+    final r = await api.postCommit(commit);
+    if (r.status == 0) return false;
+    final taken = r.body['taken'] as String?;
+    final a = await vault!.commitAnswer(commit['chat'] as String, r.ok, taken);
+    return a.ok && a.raw['applied'] == true;
+  }
+
+  /// After connecting: key packages, waiting changes, contacts' device
+  /// lists, then receive in the background.
+  Future<void> _chatsOnline(ServerApi api) async {
+    final count = await api.keyPackageCount();
+    final have = (count.body['count'] as num?)?.toInt() ?? 0;
+    if (count.ok && have < 10) {
+      final kps = await vault!.keyPackages(20, lastResort: have == 0);
+      if (kps.ok) await api.uploadKeyPackages(kps.raw['packages'] as List, kps.raw['last_resort'] as String?);
+    }
+    final pending = await vault!.pendingCommits();
+    for (final c in (pending.raw['commits'] as List? ?? const []).cast<Map<String, Object?>>()) {
+      await _pushCommit(api, c);
+    }
+    for (final c in contacts) {
+      final acc = await api.account(c.user);
+      if (acc.ok) await vault!.applyContactList(acc.body['account_key'] as String, acc.body['device_list']);
+    }
+    await _removeWithdrawn(api);
+    await refreshChats();
+    final run = ++_receiveRun;
+    unawaited(_receiveLoop(api, run));
+  }
+
+  /// Remove withdrawn devices (own or a contact's) from every chat.
+  Future<void> _removeWithdrawn(ServerApi api) async {
+    for (final chat in realChats.where((c) => c.state == 'active')) {
+      final w = await vault!.withdrawnMembers(chat.id);
+      final ids = (w.raw['ids'] as List? ?? const []).cast<String>();
+      if (ids.isEmpty) continue;
+      final out = await vault!.removeDevices(chat.id, ids);
+      if (out.ok) await _pushCommit(api, (out.raw['commit'] as Map).cast<String, Object?>());
+    }
+  }
+
+  /// Fetch what arrives, let the core process and store it, then tell
+  /// the server to delete it. Stops when locked or disconnected.
+  Future<void> _receiveLoop(ServerApi api, int run) async {
+    var failures = 0;
+    while (run == _receiveRun && identical(api, _api)) {
+      final r = await api.fetchMessages(25);
+      if (run != _receiveRun || !identical(api, _api)) return;
+      if (!r.ok) {
+        if (++failures >= 3) {
+          _serverFailed('Verbindung zum Server verloren (${r.error}).');
+          return;
+        }
+        await Future<void>.delayed(const Duration(seconds: 2));
+        continue;
+      }
+      failures = 0;
+      final ids = <int>[];
+      final touched = <String>{};
+      for (final m in (r.body['messages'] as List? ?? const []).cast<Map<String, Object?>>()) {
+        final got = await vault!.receive(m['body'] as String);
+        if (run != _receiveRun) return;
+        // Keep it on the server only if this device could not store it.
+        if (!const {'storage', 'internal', 'locked', 'chats_unavailable'}.contains(got.error)) {
+          ids.add((m['id'] as num).toInt());
+        }
+        final incoming = (got.raw['incoming'] as Map?)?.cast<String, Object?>();
+        if (incoming == null) continue;
+        switch (incoming['kind']) {
+          case 'message':
+            touched.add((incoming['message'] as Map)['chat'] as String);
+          case 'chat':
+            final chat = (incoming['chat'] as Map)['id'] as String;
+            touched.add(chat);
+            if (incoming['update_keys'] == true) {
+              final out = await vault!.updateKeys(chat);
+              if (out.ok) await _pushCommit(api, (out.raw['commit'] as Map).cast<String, Object?>());
+            }
+          case 'changed':
+            touched.add(incoming['chat'] as String);
+        }
+      }
+      if (ids.isNotEmpty) await api.ack(ids);
+      if (touched.isNotEmpty) {
+        await refreshChats();
+        for (final chat in touched) {
+          if (realMessages.containsKey(chat)) await loadMessages(chat);
+        }
+      }
+    }
+  }
 
   /// Pair a new device: get a channel, show the code, wait for the new
   /// device, add it, and hand over the account. Runs until done, failed,

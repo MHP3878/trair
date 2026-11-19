@@ -144,6 +144,34 @@ class TrairVault {
   /// Hide the window from screenshots. Returns false where unsupported.
   Future<bool> protectWindow(bool on) async => (await _call({'op': 'protect_window', 'on': on})).ok;
 
+  // ----- chats (M4): the core keeps keys, contacts and history -----
+
+  Future<CoreAnswer> contactCode() => _call({'op': 'contact_code'});
+  Future<CoreAnswer> addContact(String code, String name) => _call({'op': 'add_contact', 'code': code, 'name': name});
+  Future<CoreAnswer> contacts() => _call({'op': 'contacts'});
+  Future<CoreAnswer> confirmContact(String user) => _call({'op': 'confirm_contact', 'user': user});
+  Future<CoreAnswer> chats() => _call({'op': 'chats'});
+  Future<CoreAnswer> messages(String chat, {int limit = 200}) =>
+      _call({'op': 'messages', 'chat': chat, 'limit': limit});
+  Future<CoreAnswer> startChat(String user, List<Object?> offers) =>
+      _call({'op': 'start_chat', 'user': user, 'offers': offers});
+  Future<CoreAnswer> removeDevices(String chat, List<String> ids) =>
+      _call({'op': 'remove_devices', 'chat': chat, 'ids': ids});
+  Future<CoreAnswer> updateKeys(String chat) => _call({'op': 'update_keys', 'chat': chat});
+  Future<CoreAnswer> withdrawnMembers(String chat) => _call({'op': 'withdrawn_members', 'chat': chat});
+  Future<CoreAnswer> pendingCommits() => _call({'op': 'pending_commits'});
+  Future<CoreAnswer> commitAnswer(String chat, bool accepted, String? taken) =>
+      _call({'op': 'commit_answer', 'chat': chat, 'accepted': accepted, 'taken': ?taken});
+  Future<CoreAnswer> sendMessage(String chat, String text) => _call({'op': 'send_message', 'chat': chat, 'text': text});
+  Future<CoreAnswer> receive(String body) => _call({'op': 'receive', 'body': body});
+  Future<CoreAnswer> acceptRequest(String chat, String name) =>
+      _call({'op': 'accept_request', 'chat': chat, 'name': name});
+  Future<CoreAnswer> declineRequest(String chat) => _call({'op': 'decline_request', 'chat': chat});
+  Future<CoreAnswer> keyPackages(int n, {bool lastResort = false}) =>
+      _call({'op': 'key_packages', 'n': n, 'last_resort': lastResort});
+  Future<CoreAnswer> applyContactList(String accountKey, Object? list) =>
+      _call({'op': 'apply_contact_list', 'account_key': accountKey, 'device_list': list});
+
   /// Where the vault lives: %APPDATA%\Trair on Windows.
   static String dataDir() {
     final env = Platform.environment;
