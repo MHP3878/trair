@@ -635,7 +635,7 @@ class DemoBar extends StatelessWidget {
                 ),
                 Flexible(
                   child: Text(
-                    ' · Konto, Passwort und Sperre sind echt, Chats und Kontakte noch ausgedacht',
+                    ' · Echte Chats stehen unter „Echt verschlüsselt“, Communities sind noch ausgedacht',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 12, color: TrairColors.amberText),

@@ -230,7 +230,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
   Widget _chatRow(AppState state, ChatSummary c) {
     final backend = state.backend;
-    final active = c.id == _active;
+    final active = c.id == _active && _real == null && !_contactsOpen;
     final warn = backend.safetyNumberChanged(c.id);
     final msgs = backend.messages(c.id).where((m) => m.kind != MessageKind.system).toList();
     final last = msgs.isEmpty ? null : msgs.last;
