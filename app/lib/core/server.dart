@@ -134,12 +134,8 @@ class ServerApi {
   // ----- chats (M4) -----
 
   /// One-time key packages and the last-resort package of this device.
-  Future<ServerReply> uploadKeyPackages(List<Object?> packages, String? lastResort) => transport.send(
-    'POST',
-    '/v1/keypackages',
-    token: token,
-    body: {'packages': packages, 'last_resort': ?lastResort},
-  );
+  Future<ServerReply> uploadKeyPackages(List<Object?> packages, String? lastResort) =>
+      transport.send('POST', '/v1/keypackages', token: token, body: {'packages': packages, 'last_resort': ?lastResort});
 
   /// How many one-time key packages of this device are left.
   Future<ServerReply> keyPackageCount() => transport.send('GET', '/v1/keypackages', token: token);
@@ -179,7 +175,8 @@ class ServerApi {
   Future<ServerReply> fetchMessages(int wait) =>
       transport.send('GET', '/v1/messages?wait=$wait', token: token, wait: wait);
 
-  Future<ServerReply> ack(List<int> ids) => transport.send('POST', '/v1/messages/ack', token: token, body: {'ids': ids});
+  Future<ServerReply> ack(List<int> ids) =>
+      transport.send('POST', '/v1/messages/ack', token: token, body: {'ids': ids});
 }
 
 /// `user:device` ids as the server wants them.

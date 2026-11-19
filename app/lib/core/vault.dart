@@ -162,8 +162,7 @@ class TrairVault {
   Future<CoreAnswer> pendingCommits() => _call({'op': 'pending_commits'});
   Future<CoreAnswer> commitAnswer(String chat, bool accepted, String? taken) =>
       _call({'op': 'commit_answer', 'chat': chat, 'accepted': accepted, 'taken': ?taken});
-  Future<CoreAnswer> sendMessage(String chat, String text) =>
-      _call({'op': 'send_message', 'chat': chat, 'text': text});
+  Future<CoreAnswer> sendMessage(String chat, String text) => _call({'op': 'send_message', 'chat': chat, 'text': text});
   Future<CoreAnswer> receive(String body) => _call({'op': 'receive', 'body': body});
   Future<CoreAnswer> acceptRequest(String chat, String name) =>
       _call({'op': 'accept_request', 'chat': chat, 'name': name});

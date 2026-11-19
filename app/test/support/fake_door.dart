@@ -75,30 +75,53 @@ class FakeDoor implements CoreDoor {
         if (parts.length != 4 || parts[0] != 'trair1' || parts[1] == 'local-julian') return _fail('rejected');
         if (!_isContact(parts[1])) {
           final name = (r['name'] as String).trim();
-          contacts.add({'user': parts[1], 'name': name.isEmpty ? parts[1] : name, 'fingerprint': parts[2], 'confirmed': false});
+          contacts.add({
+            'user': parts[1],
+            'name': name.isEmpty ? parts[1] : name,
+            'fingerprint': parts[2],
+            'confirmed': false,
+          });
         }
         for (final c in chats.where((c) => c['peer'] == parts[1])) {
           c['state'] = 'active';
         }
         return {'ok': true, 'contact': contacts.firstWhere((c) => c['user'] == parts[1])};
       case 'contacts':
-        return {'ok': true, 'contacts': [for (final c in contacts) Map.of(c)]};
+        return {
+          'ok': true,
+          'contacts': [for (final c in contacts) Map.of(c)],
+        };
       case 'chats':
-        return {'ok': true, 'chats': [for (final c in chats) Map.of(c)]};
+        return {
+          'ok': true,
+          'chats': [for (final c in chats) Map.of(c)],
+        };
       case 'messages':
-        return {'ok': true, 'messages': [for (final m in messages[r['chat']] ?? const []) Map.of(m)]};
+        return {
+          'ok': true,
+          'messages': [for (final m in messages[r['chat']] ?? const <Map<String, Object?>>[]) Map.of(m)],
+        };
       case 'start_chat':
         final user = r['user'];
         if (!_isContact(user)) return _fail('rejected');
         final offers = (r['offers'] as List).cast<Map<String, Object?>>();
-        final theirs = [for (final o in offers) if ((o['device'] as String).startsWith('$user:')) o['device']];
+        final theirs = [
+          for (final o in offers)
+            if ((o['device'] as String).startsWith('$user:')) o['device'],
+        ];
         if (theirs.isEmpty) return _fail('bad_package');
         final id = 'c${chats.length + 1}';
         final name = contacts.firstWhere((c) => c['user'] == user)['name'];
         chats.add({'id': id, 'peer': user, 'name': name, 'state': 'active', 'last': 0});
         final commit = {
-          'chat': id, 'epoch': 0, 'commit': 'Y29tbWl0', 'to': <String>[], 'welcome': 'd2VsY29tZQ==',
-          'welcome_to': theirs, 'removed': <String>[], 'hash': 'h-$id',
+          'chat': id,
+          'epoch': 0,
+          'commit': 'Y29tbWl0',
+          'to': <String>[],
+          'welcome': 'd2VsY29tZQ==',
+          'welcome_to': theirs,
+          'removed': <String>[],
+          'hash': 'h-$id',
         };
         pending[id] = commit;
         return {'ok': true, 'chat': Map.of(chats.last), 'commit': commit};
@@ -129,14 +152,26 @@ class FakeDoor implements CoreDoor {
         }
         if (w['kind'] == 'chat') {
           final peer = w['peer'];
-          chats.add({'id': w['chat'], 'peer': peer, 'name': peer, 'state': _isContact(peer) ? 'active' : 'request', 'last': 0});
-          return {'ok': true, 'incoming': {'kind': 'chat', 'chat': Map.of(chats.last), 'update_keys': false}};
+          chats.add({
+            'id': w['chat'],
+            'peer': peer,
+            'name': peer,
+            'state': _isContact(peer) ? 'active' : 'request',
+            'last': 0,
+          });
+          return {
+            'ok': true,
+            'incoming': {'kind': 'chat', 'chat': Map.of(chats.last), 'update_keys': false},
+          };
         }
         final chat = _chat(w['chat']);
         if (chat == null) return _fail('unknown_chat');
         final m = {'id': ++_ids, 'chat': chat['id'], 'text': w['text'], 'outgoing': false, 'at': 0, 'missing': 0};
         (messages[chat['id'] as String] ??= []).add(m);
-        return {'ok': true, 'incoming': {'kind': 'message', 'message': m}};
+        return {
+          'ok': true,
+          'incoming': {'kind': 'message', 'message': m},
+        };
       case 'accept_request':
         final chat = _chat(r['chat']);
         if (chat == null || chat['state'] != 'request') return _fail('rejected');
@@ -150,7 +185,11 @@ class FakeDoor implements CoreDoor {
         messages.remove(r['chat']);
         return {'ok': true};
       case 'key_packages':
-        return {'ok': true, 'packages': List.filled(r['n'] as int, 'a2V5'), 'last_resort': r['last_resort'] == true ? 'bGFzdA==' : null};
+        return {
+          'ok': true,
+          'packages': List.filled(r['n'] as int, 'a2V5'),
+          'last_resort': r['last_resort'] == true ? 'bGFzdA==' : null,
+        };
       case 'apply_contact_list':
         return {'ok': true, 'withdrawn': <String>[]};
       case 'withdrawn_members':

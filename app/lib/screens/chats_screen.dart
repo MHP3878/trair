@@ -79,7 +79,9 @@ class _ChatsScreenState extends State<ChatsScreen> {
                   padding: const EdgeInsets.fromLTRB(0, 10, 10, 10),
                   child: _contactsOpen
                       ? _contactsPanel(state)
-                      : (_realChat(state) != null ? _realConversation(state, _realChat(state)!) : _conversation(state, chat)),
+                      : (_realChat(state) != null
+                            ? _realConversation(state, _realChat(state)!)
+                            : _conversation(state, chat)),
                 ),
               ),
             ],
@@ -323,8 +325,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
     child: Text(text, style: TrairText.small),
   );
 
-  RealChat? _realChat(AppState state) =>
-      _real == null ? null : state.realChats.where((c) => c.id == _real).firstOrNull;
+  RealChat? _realChat(AppState state) => _real == null ? null : state.realChats.where((c) => c.id == _real).firstOrNull;
 
   void _openReal(AppState state, String id) {
     setState(() {
@@ -437,7 +438,12 @@ class _ChatsScreenState extends State<ChatsScreen> {
             Row(
               children: [
                 Expanded(
-                  child: PillField(controller: _contactName, hint: 'Name (nur für dich)', height: 46, semanticLabel: 'Name'),
+                  child: PillField(
+                    controller: _contactName,
+                    hint: 'Name (nur für dich)',
+                    height: 46,
+                    semanticLabel: 'Name',
+                  ),
                 ),
                 const SizedBox(width: 10),
                 PillButton(
@@ -471,7 +477,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(c.name, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                          Text(c.fingerprint, style: const TextStyle(fontFamily: 'GeistMono', fontSize: 11, color: TrairColors.textMuted)),
+                          Text(
+                            c.fingerprint,
+                            style: const TextStyle(fontFamily: 'GeistMono', fontSize: 11, color: TrairColors.textMuted),
+                          ),
                         ],
                       ),
                     ),
@@ -490,7 +499,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
                 ),
               ),
             if (!online && state.contacts.isNotEmpty)
-              const Text('Chats starten geht, sobald der Server verbunden ist (Einstellungen → Server).', style: TrairText.small),
+              const Text(
+                'Chats starten geht, sobald der Server verbunden ist (Einstellungen → Server).',
+                style: TrairText.small,
+              ),
           ],
         ],
       ),

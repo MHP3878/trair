@@ -121,7 +121,12 @@ void main() {
       await file.copy(copy.path);
       final port = 20000 + (pid + 7) % 20000;
       final url = 'http://127.0.0.1:$port';
-      final server = await Process.start(serverBin!, ['--adresse', '127.0.0.1:$port', '--daten', '${tmp.path}/server.db']);
+      final server = await Process.start(serverBin!, [
+        '--adresse',
+        '127.0.0.1:$port',
+        '--daten',
+        '${tmp.path}/server.db',
+      ]);
       final log = StringBuffer();
       server.stdout.transform(const SystemEncoding().decoder).listen(log.write);
       server.stderr.transform(const SystemEncoding().decoder).listen(log.write);

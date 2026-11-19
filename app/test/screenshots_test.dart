@@ -198,7 +198,9 @@ void main() {
     await tester.enterText(find.byKey(const Key('real-composer')), 'Hallo Lena, das hier ist echt verschlüsselt.');
     await tester.tap(find.byTooltip('Senden'));
     await tester.pumpAndSettle();
-    server.deliver(FakeDoor.wire({'kind': 'message', 'chat': 'c1', 'text': 'Angekommen! Und der Server sieht nichts davon.'}));
+    server.deliver(
+      FakeDoor.wire({'kind': 'message', 'chat': 'c1', 'text': 'Angekommen! Und der Server sieht nichts davon.'}),
+    );
     server.deliver(FakeDoor.wire({'kind': 'chat', 'chat': 'x1', 'peer': 'local-unbekannt'}));
     await _shot(tester, '20-echter-chat');
   });
