@@ -56,6 +56,14 @@ dart format --output=none --set-exit-if-changed .
 2. Trair starten, Konto anlegen, Einstellungen → Server → Verbinden, dann Geräte → Gerät koppeln.
 3. Eine zweite Trair-Instanz mit eigenem Datenordner starten: in PowerShell `$env:TRAIR_DATA_DIR = "$env:TEMP\Trair-Zweitgeraet"; .\Trair.exe`. Dort „Ich habe schon ein Konto“ wählen und den Code eingeben.
 
+## Echt chatten ausprobieren (zwei Konten auf einem PC)
+
+1. `trair-server.exe` starten.
+2. Trair starten, Konto anlegen, Einstellungen → Server → Verbinden.
+3. Eine zweite Instanz mit eigenem Datenordner starten: `$env:TRAIR_DATA_DIR = "$env:TEMP\Trair-Bob"; .\Trair.exe`. Dort ein **neues** Konto anlegen (nicht koppeln) und ebenfalls verbinden.
+4. In beiden Fenstern oben auf „Neuer Chat“: den eigenen Kontaktcode kopieren und im anderen Fenster einfügen.
+5. „Chat starten“, schreiben. Die Nachrichten laufen verschlüsselt über den Server; er sieht nur Geheimtext.
+
 ## Lizenz
 
 Trair ist freie Software unter der GNU Affero General Public License, Version 3 oder neuer. Siehe `LICENSE` und `COPYING`.

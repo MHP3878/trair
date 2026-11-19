@@ -174,6 +174,35 @@ void main() {
     await _shot(tester, '18-neues-geraet');
   });
 
+  testWidgets('screenshots of contacts and a real chat', (tester) async {
+    final server = FakeServer();
+    final door = FakeDoor(password: _pw, profile: {'name': 'Julian', 'glow': 0xFFA18DFF})..chatsEnabled = true;
+    await _start(tester, const Size(1440, 900), door: door, server: server);
+    await _unlock(tester);
+    await tester.tap(find.text('Strenger Modus an'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Verbinden'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Verbinden'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Chats'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Neuer Chat'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'trair1:…'), 'trair1:local-lena:${'ff' * 16}:0000');
+    await tester.enterText(find.widgetWithText(TextField, 'Name (nur für dich)'), 'Lena');
+    await tester.tap(find.text('Hinzufügen'));
+    await _shot(tester, '19-kontakte');
+    await tester.tap(find.text('Chat starten'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('real-composer')), 'Hallo Lena, das hier ist echt verschlüsselt.');
+    await tester.tap(find.byTooltip('Senden'));
+    await tester.pumpAndSettle();
+    server.deliver(FakeDoor.wire({'kind': 'message', 'chat': 'c1', 'text': 'Angekommen! Und der Server sieht nichts davon.'}));
+    server.deliver(FakeDoor.wire({'kind': 'chat', 'chat': 'x1', 'peer': 'local-unbekannt'}));
+    await _shot(tester, '20-echter-chat');
+  });
+
   testWidgets('screenshot of a small window', (tester) async {
     await _start(tester, const Size(1024, 640));
     await _unlock(tester);

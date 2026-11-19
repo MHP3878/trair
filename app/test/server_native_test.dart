@@ -9,6 +9,7 @@
 // test is skipped.
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
@@ -106,6 +107,89 @@ void main() {
       expect(pc.devices, hasLength(1));
       await laptop.connect();
       expect(laptop.serverStatus, ServerStatus.failed);
+    },
+    skip: lib == null || serverBin == null ? 'TRAIR_FFI_LIB und TRAIR_SERVER_BIN fehlen' : false,
+    timeout: const Timeout(Duration(minutes: 3)),
+  );
+
+  test(
+    'two accounts exchange codes and chat through the real server, end to end encrypted',
+    () async {
+      final tmp = await Directory.systemTemp.createTemp('trair-chat-');
+      final file = File(lib!);
+      final copy = File('${tmp.path}/b_${file.uri.pathSegments.last}');
+      await file.copy(copy.path);
+      final port = 20000 + (pid + 7) % 20000;
+      final url = 'http://127.0.0.1:$port';
+      final server = await Process.start(serverBin!, ['--adresse', '127.0.0.1:$port', '--daten', '${tmp.path}/server.db']);
+      final log = StringBuffer();
+      server.stdout.transform(const SystemEncoding().decoder).listen(log.write);
+      server.stderr.transform(const SystemEncoding().decoder).listen(log.write);
+      addTearDown(() async {
+        server.kill();
+        await server.exitCode;
+        await tmp.delete(recursive: true);
+      });
+      final api = ServerApi(HttpTransport(Uri.parse(url)));
+      for (var i = 0; i < 100 && !(await api.health()).ok; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      expect((await api.health()).ok, isTrue, reason: 'server did not start: $log');
+
+      // Two people, each with their own vault and chat database.
+      final juliaVault = TrairVault(NativeDoor.load(lib));
+      final bobVault = TrairVault(NativeDoor.load(copy.path));
+      expect((await juliaVault.init('${tmp.path}/julian')).ok, isTrue);
+      expect((await bobVault.init('${tmp.path}/bob')).ok, isTrue);
+      final julian = AppState(DemoBackend(), juliaVault);
+      final bob = AppState(DemoBackend(), bobVault);
+      for (final (s, name) in [(julian, 'Julian'), (bob, 'Bob')]) {
+        final made = await s.createAccount(name: name, glowColor: TrairColors.accentLight, password: _randomWords());
+        expect(made.ok, isTrue, reason: '${made.raw}');
+        expect(s.chatsReady, isTrue, reason: 'the chat database opened');
+        s.serverUrl = url;
+        await s.connect();
+        expect(s.serverStatus, ServerStatus.connected, reason: '${s.serverMessage} | $log');
+        await s.refreshChats();
+      }
+      expect(julian.contactCode, startsWith('trair1:local-'));
+
+      // Codes exchanged; Julian starts the chat.
+      expect(await julian.addContact(bob.contactCode, 'Bob'), isTrue, reason: julian.chatMessage);
+      expect(await bob.addContact(julian.contactCode, 'Julian'), isTrue, reason: bob.chatMessage);
+      final bobUser = bob.contactCode.split(':')[1];
+      final chat = await julian.startChat(bobUser);
+      expect(chat, isNotNull, reason: julian.chatMessage);
+      Future<void> until(bool Function() done, String what) async {
+        for (var i = 0; i < 200 && !done(); i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+        expect(done(), isTrue, reason: what);
+      }
+
+      await until(() => bob.realChats.any((c) => c.id == chat), 'Bob gets the chat');
+      expect(bob.realChats.single.state, 'active', reason: 'Julian is a contact, not a request');
+      await bob.loadMessages(chat!);
+
+      expect(await julian.sendReal(chat, 'Hallo Bob, ganz echt'), isTrue, reason: julian.chatMessage);
+      await until(() => bob.realMessages[chat]?.any((m) => m.text == 'Hallo Bob, ganz echt') ?? false, 'Bob reads it');
+      await julian.loadMessages(chat);
+      expect(await bob.sendReal(chat, 'Angekommen!'), isTrue, reason: bob.chatMessage);
+      await until(() => julian.realMessages[chat]?.any((m) => m.text == 'Angekommen!') ?? false, 'Julian reads it');
+      expect(julian.realMessages[chat]!.first.outgoing, isTrue);
+
+      // The server only ever had ciphertext.
+      await julian.lock();
+      await bob.lock();
+      // The database and its write-ahead log.
+      final stored = [
+        for (final name in ['server.db', 'server.db-wal'])
+          if (File('${tmp.path}/$name').existsSync()) ...await File('${tmp.path}/$name').readAsBytes(),
+      ];
+      final text = latin1.decode(stored, allowInvalid: true);
+      for (final secret in ['Hallo Bob', 'Angekommen', 'Julian', 'Bob']) {
+        expect(text.contains(secret), isFalse, reason: '"$secret" is readable on the server');
+      }
     },
     skip: lib == null || serverBin == null ? 'TRAIR_FFI_LIB und TRAIR_SERVER_BIN fehlen' : false,
     timeout: const Timeout(Duration(minutes: 3)),

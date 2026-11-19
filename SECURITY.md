@@ -309,6 +309,31 @@ Known limits:
 - The server sees which devices get which ciphertext and when, and which
   account sent it (sealed sender: later).
 
+## Real chats in the app (M4, step 2b)
+
+Code: `app/lib/app_state.dart` (chats section), `app/lib/screens/
+chats_screen.dart`, `app/lib/core/server.dart`; tests: `app/test/
+widget_test.dart` (group "Echte Chats") and `app/test/server_native_test
+.dart` (two accounts chat through the real server with the real core).
+
+- The app only moves what the core made: codes, ciphertext, commits.
+  Texts it shows come from the encrypted chat database.
+- After connecting, the app uploads 20 one-time key packages when fewer
+  than 10 are left, and one
+  last-resort package on the server, sends waiting changes again, checks
+  contacts' device lists and removes withdrawn devices from chats.
+- Receiving: long poll; each message is processed and stored by the core
+  before the server is told to delete it. Messages the core could not
+  store (disk full, locked) stay on the server.
+- Real chats and demo chats are shown apart; demo chats stay marked
+  "nicht verschlüsselt".
+
+Known limits:
+
+- A message that was stored but could not be delivered (server away) is
+  not sent again by itself yet; the app says so.
+- A newly paired device sees new chats, not the existing ones.
+
 ## Rules for this repository
 
 No private keys, passwords, recovery keys, tokens or user data are ever
