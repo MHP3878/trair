@@ -947,7 +947,8 @@ void main() {
       await _openSettings(tester);
       await tester.ensureVisible(find.text('Notfall-PINs'));
       await tester.pumpAndSettle();
-      await tester.enterText(_field('Passwort').first, pw);
+      await tester.enterText(_field('Passwort eingeben'), pw);
+      await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(PillButton, 'Anzeigen'));
       await tester.pumpAndSettle();
     }
@@ -960,6 +961,15 @@ void main() {
 
     PillButton save(WidgetTester tester) => tester.widget<PillButton>(find.widgetWithText(PillButton, 'PIN speichern'));
 
+    /// Scroll to a button, tap it, let the screen settle.
+    Future<void> press(WidgetTester tester, String label) async {
+      final button = find.widgetWithText(PillButton, label);
+      await tester.ensureVisible(button);
+      await tester.pumpAndSettle();
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+    }
+
     testWidgets('the PINs stay hidden until the password; a PIN that only deletes leaves nothing', (tester) async {
       final door = await _start(tester);
       await _unlock(tester);
@@ -967,13 +977,15 @@ void main() {
       await tester.ensureVisible(find.text('Notfall-PINs'));
       await tester.pumpAndSettle();
       expect(find.text('Noch keine Notfall-PIN.'), findsNothing, reason: 'hidden at an open Trair');
-      await tester.enterText(_field('Passwort').first, 'falsch geraten');
+      await tester.enterText(_field('Passwort eingeben'), 'falsch geraten');
+      await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(PillButton, 'Anzeigen'));
       await tester.pumpAndSettle();
       expect(find.text('Passwort falsch.'), findsOneWidget);
       expect(find.text('Noch keine Notfall-PIN.'), findsNothing);
 
-      await tester.enterText(_field('Passwort').first, pw);
+      await tester.enterText(_field('Passwort eingeben'), pw);
+      await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(PillButton, 'Anzeigen'));
       await tester.pumpAndSettle();
       expect(find.text('Noch keine Notfall-PIN.'), findsOneWidget);
@@ -984,13 +996,11 @@ void main() {
       await tester.pumpAndSettle();
       expect(save(tester).onPressed, isNull, reason: 'the two differ');
       await setPin(tester, 'loesch-123');
-      await tester.tap(find.widgetWithText(PillButton, 'PIN speichern'));
-      await tester.pumpAndSettle();
+      await press(tester, 'PIN speichern');
       expect(door.notfall.single['after'], 'vanish');
       expect(find.text('Löscht alles'), findsOneWidget);
       expect(find.textContaining('Notfall-PIN gespeichert'), findsOneWidget);
-      await tester.tap(find.widgetWithText(PillButton, 'Verbergen'));
-      await tester.pumpAndSettle();
+      await press(tester, 'Verbergen');
       expect(find.text('Löscht alles'), findsNothing);
 
       // On the start screen the PIN looks like a typo, and everything goes.
@@ -1006,10 +1016,9 @@ void main() {
       final door = await _start(tester);
       await _unlock(tester);
       await openPins(tester);
-      await tester.tap(find.widgetWithText(PillButton, 'Konto bleibt, Passwort „falsch“'));
+      await press(tester, 'Konto bleibt, Passwort „falsch“');
       await setPin(tester, 'bleibt-123');
-      await tester.tap(find.widgetWithText(PillButton, 'PIN speichern'));
-      await tester.pumpAndSettle();
+      await press(tester, 'PIN speichern');
       expect(find.textContaining('jedes Passwort gilt als falsch'), findsOneWidget);
       await _ctrl(tester, LogicalKeyboardKey.keyL);
       await _type(tester, 'bleibt-123');
@@ -1030,16 +1039,14 @@ void main() {
       await _start(tester, door: door, server: server);
       await _unlock(tester);
       await openPins(tester);
-      await tester.tap(find.widgetWithText(PillButton, 'Erst schreiben, dann löschen'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(PillButton, 'Bob'));
+      await press(tester, 'Erst schreiben, dann löschen');
+      await press(tester, 'Bob');
       await tester.enterText(_field('Nachricht, zum Beispiel: Ich brauche Hilfe, ruf mich an.'), 'Hilfe, ruf mich an');
       await setPin(tester, 'hilfe-12');
       expect(save(tester).onPressed, isNull, reason: 'a PIN that opens the keys needs 12 characters');
       expect(find.textContaining('mindestens 12 Zeichen'), findsOneWidget);
       await setPin(tester, 'hilfe-hilfe-12');
-      await tester.tap(find.widgetWithText(PillButton, 'PIN speichern'));
-      await tester.pumpAndSettle();
+      await press(tester, 'PIN speichern');
       expect(door.notfall.single['chat'], 'c1');
       expect(find.text('Schreibt an Bob, dann löschen'), findsOneWidget);
 

@@ -1075,7 +1075,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         Expanded(
           child: PillField(
             controller: _pinPw,
-            hint: 'Passwort',
+            hint: 'Passwort eingeben',
             obscure: true,
             height: 44,
             semanticLabel: 'Passwort für Notfall-PINs',

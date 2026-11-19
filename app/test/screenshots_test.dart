@@ -297,7 +297,8 @@ void main() {
     await tester.pumpAndSettle();
     unawaited(Scrollable.ensureVisible(tester.element(find.text('Notfall-PINs')), alignment: 0.02));
     await tester.pumpAndSettle();
-    await tester.enterText(find.widgetWithText(TextField, 'Passwort').first, _pw);
+    await tester.enterText(find.widgetWithText(TextField, 'Passwort eingeben'), _pw);
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Anzeigen'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Erst schreiben, dann löschen'));
