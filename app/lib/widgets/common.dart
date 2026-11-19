@@ -67,8 +67,9 @@ class GlassPanel extends StatelessWidget {
   }
 }
 
-/// The Trair logo "Zylinder": a white lock cylinder with a T-shaped keyway
-/// on a violet tile. Same drawing as assets/branding/trair-app-icon.svg.
+/// The Trair logo "Neon-Schild": a glowing shield that is also a speech
+/// bubble, with a T and three typing dots. Same drawing as
+/// assets/branding/trair-app-icon.svg (tools/make_branding.py).
 class TrairLogo extends StatelessWidget {
   const TrairLogo({super.key, this.size = 32});
 
@@ -81,7 +82,7 @@ class TrairLogo extends StatelessWidget {
       image: true,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(size * 58 / 256),
+          borderRadius: BorderRadius.circular(size * 116 / 512),
           boxShadow: const [BoxShadow(color: Color(0x59000000), blurRadius: 8, offset: Offset(0, 2))],
         ),
         child: CustomPaint(size: Size.square(size), painter: const _LogoPainter()),
@@ -93,45 +94,121 @@ class TrairLogo extends StatelessWidget {
 class _LogoPainter extends CustomPainter {
   const _LogoPainter();
 
+  static const _full = Rect.fromLTWH(0, 0, 512, 512);
+  static const _neon = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [Color(0xFF5CC8FF), Color(0xFFA18DFF), Color(0xFFFF7AC6)],
+  );
+
+  static Path _shield() => Path()
+    ..moveTo(160, 100)
+    ..lineTo(352, 100)
+    ..quadraticBezierTo(410, 100, 410, 158)
+    ..lineTo(410, 262)
+    ..quadraticBezierTo(410, 352, 312, 398)
+    ..lineTo(210, 440)
+    ..quadraticBezierTo(216, 408, 196, 396)
+    ..quadraticBezierTo(102, 350, 102, 262)
+    ..lineTo(102, 158)
+    ..quadraticBezierTo(102, 100, 160, 100)
+    ..close();
+
+  static Path _t() {
+    final t = Path.combine(
+      PathOperation.union,
+      Path()..addRRect(RRect.fromLTRBR(176, 163, 336, 217, const Radius.circular(27))),
+      Path()..addRRect(RRect.fromLTRBR(229, 163, 283, 343, const Radius.circular(27))),
+    );
+    final dots = Path();
+    for (final x in [214.0, 256.0, 298.0]) {
+      dots.addOval(Rect.fromCircle(center: Offset(x, 190), radius: 9));
+    }
+    return Path.combine(PathOperation.difference, t, dots);
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
-    canvas.scale(size.width / 256);
-    final tile = RRect.fromLTRBR(0, 0, 256, 256, const Radius.circular(58));
-    canvas.drawRRect(
-      tile,
+    canvas.scale(size.width / 512);
+    final tile = RRect.fromRectAndRadius(_full, const Radius.circular(116));
+    canvas.save();
+    canvas.clipRRect(tile);
+    canvas.drawRect(
+      _full,
       Paint()
         ..shader = const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF8A6CFF), Color(0xFF5A3BE6)],
-        ).createShader(const Rect.fromLTWH(0, 0, 256, 256)),
+          colors: [Color(0xFF221B3D), Color(0xFF120F1E), Color(0xFF0A0910)],
+          stops: [0, 0.55, 1],
+        ).createShader(_full),
     );
-    canvas.drawRRect(
-      tile.deflate(1),
+    canvas.drawRect(
+      _full,
+      Paint()
+        ..shader = const RadialGradient(
+          center: Alignment(0, -0.1),
+          radius: 0.55,
+          colors: [Color(0x6B7C5CFF), Color(0x007C5CFF)],
+        ).createShader(_full),
+    );
+    final shield = _shield();
+    // Glow, then the neon tube, then its bright core.
+    canvas.drawPath(
+      shield,
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 2
-        ..color = const Color(0x29FFFFFF),
+        ..strokeWidth = 32
+        ..strokeJoin = StrokeJoin.round
+        ..shader = _neon.createShader(_full)
+        ..color = const Color(0xD9FFFFFF)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 16),
     );
-    final keyway = Path.combine(
-      PathOperation.union,
-      Path()..addRRect(RRect.fromLTRBR(82, 92, 174, 118, const Radius.circular(13))),
-      Path()..addRRect(RRect.fromLTRBR(115, 92, 141, 180, const Radius.circular(13))),
+    canvas.drawPath(shield, Paint()..color = const Color(0x09FFFFFF));
+    canvas.drawPath(
+      shield,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 20
+        ..strokeJoin = StrokeJoin.round
+        ..shader = _neon.createShader(_full),
     );
-    final disc = Path()..addOval(Rect.fromCircle(center: const Offset(128, 128), radius: 88));
-    canvas.drawPath(Path.combine(PathOperation.difference, disc, keyway), Paint()..color = Colors.white);
-    canvas.drawCircle(
-      const Offset(128, 128),
-      74,
+    canvas.drawPath(
+      shield,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 4.5
+        ..strokeJoin = StrokeJoin.round
+        ..color = const Color(0xA6FFFFFF),
+    );
+    final t = _t();
+    canvas.drawPath(
+      t,
+      Paint()
+        ..color = const Color(0xBFA18DFF)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
+    );
+    canvas.drawPath(
+      t,
+      Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Colors.white, Color(0xFFDCD4FF)],
+        ).createShader(const Rect.fromLTRB(176, 163, 336, 343)),
+    );
+    canvas.restore();
+    canvas.drawRRect(
+      tile.deflate(2),
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 3
-        ..color = const Color(0x2E5A3BE6),
+        ..color = const Color(0x17FFFFFF),
     );
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(_LogoPainter oldDelegate) => false;
 }
 
 /// Round avatar with initials on a tinted background.

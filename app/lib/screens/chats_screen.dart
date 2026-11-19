@@ -38,6 +38,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
   /// Selected real chat (M4); null shows the demo chat.
   String? _real;
   bool _contactsOpen = false;
+  int _keyMinutes = 60;
   final _code = TextEditingController();
   final _contactName = TextEditingController();
 
@@ -376,9 +377,12 @@ class _ChatsScreenState extends State<ChatsScreen> {
                         switch (c.state) {
                           'request' => 'Anfrage: kein Kontakt',
                           'left' => 'Dieses Gerät ist nicht mehr dabei',
+                          _ when c.ends != null => 'Verschwindet ${vanishesIn(c.ends!)}',
                           _ => 'Ende-zu-Ende verschlüsselt',
                         },
-                        style: TrairText.small,
+                        style: c.ends != null && c.state == 'active'
+                            ? const TextStyle(fontSize: 12, color: TrairColors.amber)
+                            : TrairText.small,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ],
@@ -397,6 +401,124 @@ class _ChatsScreenState extends State<ChatsScreen> {
     final parts = name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
     if (parts.isEmpty) return '?';
     return parts.take(2).map((p) => String.fromCharCode(p.runes.first).toUpperCase()).join();
+  }
+
+  static const _keyChoices = {10: '10 Min.', 60: '1 Std.', 360: '6 Std.', 1440: '1 Tag', 10080: '7 Tage'};
+
+  /// Make a friendship key: once, for the chosen time; or a key for a chat
+  /// that vanishes at the same time.
+  List<Widget> _friendKey(AppState state) {
+    final key = state.friendKey;
+    String two(int n) => n.toString().padLeft(2, '0');
+    String when(DateTime t) {
+      final now = DateTime.now();
+      final day = t.day == now.day && t.month == now.month ? 'heute' : '${two(t.day)}.${two(t.month)}.';
+      return '$day um ${two(t.hour)}:${two(t.minute)}';
+    }
+
+    return [
+      const FieldLabel('Freundschaftsschlüssel'),
+      const Text(
+        'Wer ihn rechtzeitig benutzt, ist sofort dein Kontakt, ohne Anfrage. Er gilt nur für eine Person; '
+        'weitergeleitet oder zu spät ist er wertlos.',
+        style: TrairText.muted,
+      ),
+      const SizedBox(height: 10),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          const Text('Gilt', style: TrairText.small),
+          for (final e in _keyChoices.entries)
+            IntrinsicWidth(
+              child: PillButton(
+                label: e.value,
+                height: 34,
+                kind: e.key == _keyMinutes ? PillKind.primary : PillKind.ghost,
+                onPressed: () => setState(() => _keyMinutes = e.key),
+              ),
+            ),
+        ],
+      ),
+      const SizedBox(height: 10),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          IntrinsicWidth(
+            child: PillButton(
+              label: 'Schlüssel erstellen',
+              icon: TrairIcons.userPlus,
+              height: 40,
+              onPressed: () => state.createFriendKey(_keyMinutes),
+            ),
+          ),
+          IntrinsicWidth(
+            child: PillButton(
+              label: 'Verschwindender Chat',
+              kind: PillKind.ghost,
+              height: 40,
+              onPressed: () => state.createFriendKey(_keyMinutes, vanishing: true),
+            ),
+          ),
+        ],
+      ),
+      if (key != null) ...[
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0x176E4FF6),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0x38A18DFF)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      key.vanishing
+                          ? 'Einmal nutzbar · der Chat verschwindet ${when(key.ends)}'
+                          : 'Einmal nutzbar · gilt bis ${when(key.ends)}',
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: TrairColors.accentPale),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: SelectableText(
+                            key.code,
+                            style: const TextStyle(fontFamily: 'GeistMono', fontSize: 12, color: TrairColors.text),
+                          ),
+                        ),
+                        RoundIconButton(
+                          icon: TrairIcons.copy,
+                          tooltip: 'Schlüssel kopieren',
+                          filled: false,
+                          onPressed: () => Clipboard.setData(ClipboardData(text: key.code)),
+                        ),
+                        RoundIconButton(
+                          icon: TrairIcons.x,
+                          tooltip: 'Schlüssel ausblenden',
+                          filled: false,
+                          onPressed: state.closeFriendKey,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 14),
+              QrBox(text: key.code, size: 112),
+            ],
+          ),
+        ),
+      ],
+    ];
   }
 
   Widget _contactsPanel(AppState state) {
@@ -474,7 +596,9 @@ class _ChatsScreenState extends State<ChatsScreen> {
                 QrBox(text: state.contactCode, size: 132),
               ],
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 22),
+            ..._friendKey(state),
+            const SizedBox(height: 22),
             const FieldLabel('Kontakt hinzufügen'),
             PillField(controller: _code, hint: 'trair1:…', mono: true, height: 46, semanticLabel: 'Kontaktcode'),
             const SizedBox(height: 10),
@@ -492,9 +616,16 @@ class _ChatsScreenState extends State<ChatsScreen> {
                 PillButton(
                   label: 'Hinzufügen',
                   onPressed: () async {
-                    if (await state.addContact(_code.text, _contactName.text)) {
+                    final code = _code.text.trim();
+                    if (await state.addContact(code, _contactName.text)) {
                       _code.clear();
                       _contactName.clear();
+                      // A friendship key: the chat starts right away.
+                      final parts = code.toLowerCase().split(':');
+                      if (parts.first == 'trair2' && parts.length > 1 && state.chatsOnline) {
+                        final id = await state.startChat(parts[1]);
+                        if (id != null && mounted) _openReal(state, id);
+                      }
                     }
                   },
                 ),
@@ -652,9 +783,15 @@ class _ChatsScreenState extends State<ChatsScreen> {
                                     ],
                                   ),
                                   Text(
-                                    chosen == null ? chat.peer : 'nennt sich „$chosen“ · ${chat.peer}',
+                                    [
+                                      if (chat.ends != null) 'Verschwindet ${vanishesIn(chat.ends!)}',
+                                      if (chosen != null) 'nennt sich „$chosen“',
+                                      chat.peer,
+                                    ].join(' · '),
                                     overflow: TextOverflow.ellipsis,
-                                    style: TrairText.small,
+                                    style: chat.ends != null
+                                        ? const TextStyle(fontSize: 12, color: TrairColors.amber)
+                                        : TrairText.small,
                                   ),
                                 ],
                               ),
@@ -666,6 +803,20 @@ class _ChatsScreenState extends State<ChatsScreen> {
                   ),
                 ),
                 const SizedBox(width: 12),
+                if (chat.state == 'active')
+                  PopupMenuButton<int>(
+                    tooltip: 'Chat verschwinden lassen',
+                    color: TrairColors.glassPopup,
+                    icon: const Icon(TrairIcons.ellipsis, size: 18, color: TrairColors.textSoft),
+                    onSelected: (m) => state.setChatEnd(chat.id, m == 0 ? null : m),
+                    itemBuilder: (_) => [
+                      const PopupMenuItem(enabled: false, child: Text('Verschwindet für beide nach …', style: TrairText.small)),
+                      for (final e in const {60: '1 Stunde', 1440: '1 Tag', 10080: '7 Tagen'}.entries)
+                        PopupMenuItem(value: e.key, child: Text(e.value)),
+                      if (chat.ends != null) const PopupMenuItem(value: 0, child: Text('Nicht verschwinden lassen')),
+                    ],
+                  ),
+                const SizedBox(width: 6),
                 SecurityCapsule(
                   text: chat.isRequest ? 'Anfrage · unbekannter Schlüssel' : 'Echt Ende-zu-Ende verschlüsselt',
                   tone: chat.isRequest ? CapsuleTone.warn : CapsuleTone.safe,
@@ -1126,4 +1277,13 @@ class _ChatsScreenState extends State<ChatsScreen> {
         );
     }
   }
+}
+
+/// "in 5 Min.", "in 3 Std.", "in 2 Tagen" until [ends] (seconds since 1970).
+String vanishesIn(int ends) {
+  final left = ends - DateTime.now().millisecondsSinceEpoch ~/ 1000;
+  if (left < 60) return 'gleich';
+  if (left < 3600) return 'in ${left ~/ 60} Min.';
+  if (left < 2 * 86400) return 'in ${left ~/ 3600} Std.';
+  return 'in ${left ~/ 86400} Tagen';
 }

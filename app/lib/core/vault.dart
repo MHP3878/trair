@@ -102,6 +102,23 @@ class TrairVault {
   /// tool). The core checks it first.
   Future<CoreAnswer> addBadge(Object? badge) => _call({'op': 'add_badge', 'badge': badge});
 
+  // -------------------------------------- friendship keys, vanishing chats
+
+  /// A friendship key: works once, for [minutes]. [vanishing]: the chat it
+  /// opens vanishes at the same time.
+  Future<CoreAnswer> createInvite(int minutes, {bool vanishing = false}) =>
+      _call({'op': 'create_invite', 'minutes': minutes, 'vanishing': vanishing});
+
+  /// After starting a chat: the token of a used friendship key, if any.
+  Future<CoreAnswer> inviteMessage(String chat) => _call({'op': 'invite_message', 'chat': chat});
+
+  /// Let a chat vanish after [minutes]; null: it stays.
+  Future<CoreAnswer> setChatEnd(String chat, int? minutes) =>
+      _call({'op': 'set_chat_end', 'chat': chat, 'minutes': minutes});
+
+  /// Delete what ran out (vanished chats, old keys).
+  Future<CoreAnswer> sweep() => _call({'op': 'sweep'});
+
   // ------------------------------------------------- profiles to contacts
 
   /// This account's profile, encrypted for every chat that lacks this

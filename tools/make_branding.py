@@ -9,13 +9,13 @@ Holen und entpacken (npm ist nur hierfuer noetig, die App braucht es nicht):
   npm pack lucide-static@1.75.0 && tar -xzf lucide-static-1.75.0.tgz
 
 Schreibt:
-  app/assets/branding/trair-app-icon.svg   App-Symbol (Logo D "Zylinder")
+  app/assets/branding/trair-app-icon.svg   App-Symbol (Logo "Neon-Schild")
   app/assets/branding/trair-mark.svg       nur das Zeichen, einfarbig
   app/assets/branding/app_icon.ico         Windows-Symbol fuer Trair.exe
   app/assets/fonts/Lucide.ttf              nur die Symbole, die die App nutzt
   app/assets/fonts/LUCIDE-LICENSE.txt      Lizenz der Symbole (ISC, Teile MIT)
 
-Braucht: pip install cairosvg pillow fonttools
+Braucht: rsvg-convert (librsvg), pip install pillow fonttools
 """
 import hashlib
 import io
@@ -62,28 +62,48 @@ ICONS = {
     "x": 0xE1B2,
 }
 
-# Logo D "Zylinder" auf einem 256er Raster: weisse Scheibe mit T-Schlitz.
-MARK = (
-    '<path fill="{c}" fill-rule="evenodd" d="M40 128A88 88 0 1 0 216 128A88 88 0 1 0 40 128Z '
-    'M95 92H161A13 13 0 0 1 161 118H141V167A13 13 0 0 1 115 167V118H95A13 13 0 0 1 95 92Z"/>'
-)
-APP_ICON = (
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">'
-    '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">'
-    '<stop offset="0" stop-color="#8A6CFF"/><stop offset="1" stop-color="#5A3BE6"/></linearGradient></defs>'
-    '<rect width="256" height="256" rx="58" fill="url(#g)"/>'
-    '<rect x="1" y="1" width="254" height="254" rx="57" fill="none" stroke="#fff" stroke-opacity=".16" stroke-width="2"/>'
-    + MARK.format(c="#fff")
-    + '<circle cx="128" cy="128" r="74" fill="none" stroke="#5A3BE6" stroke-opacity=".18" stroke-width="3"/>'
+# Logo "Neon-Schild" (Julians Wahl, Mischung aus Schildblase und Neon-T)
+# auf einem 512er Raster: leuchtender Schild, der zugleich Sprechblase ist,
+# darin ein T mit drei Tipp-Punkten. Muss zu TrairLogo in
+# app/lib/widgets/common.dart passen.
+APP_ICON = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><defs><linearGradient id="abg" x1="0" y1="0" x2="1" y2="1">
+ <stop offset="0" stop-color="#221b3d"/><stop offset="0.55" stop-color="#120f1e"/><stop offset="1" stop-color="#0a0910"/></linearGradient>
+<radialGradient id="ahalo" cx="0.5" cy="0.45" r="0.55">
+ <stop offset="0" stop-color="#7c5cff" stop-opacity="0.42"/><stop offset="1" stop-color="#7c5cff" stop-opacity="0"/></radialGradient>
+<linearGradient id="aneon" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5cc8ff"/><stop offset="0.5" stop-color="#a18dff"/><stop offset="1" stop-color="#ff7ac6"/></linearGradient>
+<linearGradient id="acyan" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8fe6ff"/><stop offset="1" stop-color="#2b8bff"/></linearGradient>
+<linearGradient id="avio" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#c3b3ff"/><stop offset="0.6" stop-color="#8a6cff"/><stop offset="1" stop-color="#ff7ac6"/></linearGradient>
+<linearGradient id="awhite" x1="0" y1="0" x2="0.4" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#dcd4ff"/></linearGradient>
+<linearGradient id="asolid" x1="0.15" y1="0" x2="0.85" y2="1"><stop offset="0" stop-color="#b9a6ff"/><stop offset="0.45" stop-color="#7c5cff"/><stop offset="1" stop-color="#4425d6"/></linearGradient>
+<filter id="ablur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="16"/></filter>
+<filter id="asoft" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="6"/></filter>
+<mask id="ad"><rect width="512" height="512" fill="#fff"/><g fill="#000"><circle cx="214" cy="190" r="9"/><circle cx="256" cy="190" r="9"/><circle cx="298" cy="190" r="9"/></g></mask></defs><rect width="512" height="512" rx="116" fill="url(#abg)"/>
+<rect x="2" y="2" width="508" height="508" rx="114" fill="none" stroke="#fff" stroke-opacity="0.09" stroke-width="3"/>
+<rect width="512" height="512" rx="116" fill="url(#ahalo)"/>
+<path d="M 160 100 H 352 Q 410 100 410 158 V 262 Q 410 352 312 398 L 210 440 Q 216 408 196 396 Q 102 350 102 262 V 158 Q 102 100 160 100 Z" fill="none" stroke="url(#aneon)" stroke-width="32" stroke-linejoin="round" opacity="0.85" filter="url(#ablur)"/>
+<path d="M 160 100 H 352 Q 410 100 410 158 V 262 Q 410 352 312 398 L 210 440 Q 216 408 196 396 Q 102 350 102 262 V 158 Q 102 100 160 100 Z" fill="#ffffff" fill-opacity="0.035" stroke="url(#aneon)" stroke-width="20" stroke-linejoin="round"/>
+<path d="M 160 100 H 352 Q 410 100 410 158 V 262 Q 410 352 312 398 L 210 440 Q 216 408 196 396 Q 102 350 102 262 V 158 Q 102 100 160 100 Z" fill="none" stroke="#fff" stroke-opacity="0.65" stroke-width="4.5" stroke-linejoin="round"/>
+<g fill="#a18dff" opacity="0.75" filter="url(#asoft)"><rect x="176" y="163" width="160" height="54" rx="27"/><rect x="229" y="163" width="54" height="180" rx="27"/></g>
+<g fill="url(#awhite)" mask="url(#ad)"><rect x="176" y="163" width="160" height="54" rx="27"/><rect x="229" y="163" width="54" height="180" rx="27"/></g></svg>
+"""
+# Einfarbig: Schild-Umriss und T, die Punkte ausgestanzt.
+SHIELD = ("M 160 100 H 352 Q 410 100 410 158 V 262 Q 410 352 312 398 L 210 440 Q 216 408 196 396 "
+          "Q 102 350 102 262 V 158 Q 102 100 160 100 Z")
+MARK_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">'
+    f'<path d="{SHIELD}" fill="none" stroke="#fff" stroke-width="22" stroke-linejoin="round"/>'
+    '<path fill="#fff" fill-rule="evenodd" d="M203 163H309A27 27 0 0 1 309 217H283V316A27 27 0 0 1 229 316V217H203'
+    'A27 27 0 0 1 203 163Z M214 181A9 9 0 1 0 214 199A9 9 0 1 0 214 181Z M256 181A9 9 0 1 0 256 199'
+    'A9 9 0 1 0 256 181Z M298 181A9 9 0 1 0 298 199A9 9 0 1 0 298 181Z"/>'
     "</svg>\n"
 )
-MARK_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">' + MARK.format(c="#fff") + "</svg>\n"
 
 ICO_SIZES = [16, 20, 24, 32, 40, 48, 64, 128, 256]
 
 
 def logo():
-    import cairosvg
+    import subprocess
+
     from PIL import Image
 
     BRANDING.mkdir(parents=True, exist_ok=True)
@@ -91,7 +111,9 @@ def logo():
     (BRANDING / "trair-mark.svg").write_text(MARK_SVG, encoding="utf-8")
     images = []
     for size in ICO_SIZES:
-        png = cairosvg.svg2png(bytestring=APP_ICON.encode(), output_width=size, output_height=size)
+        # rsvg-convert (librsvg) kann das Leuchten (Weichzeichner), cairosvg nicht.
+        png = subprocess.run(["rsvg-convert", "-w", str(size), "-h", str(size)],
+                             input=APP_ICON.encode(), capture_output=True, check=True).stdout
         images.append(Image.open(io.BytesIO(png)).convert("RGBA"))
     biggest = images[-1]
     biggest.save(BRANDING / "app_icon.ico", format="ICO",

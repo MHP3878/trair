@@ -131,6 +131,16 @@ class FakeDoor implements CoreDoor {
 
   // ----- profiles to contacts -----
 
+  // ----- friendship keys, vanishing chats -----
+
+  /// Keys made here: minutes and whether the chat vanishes.
+  final List<Map<String, Object?>> invites = [];
+
+  /// Accounts whose key was used here; the token goes into the first chat.
+  final Set<Object?> redeem = {};
+
+  static int get _now => DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
   /// Profiles of other accounts, as the core's `profiles` answers.
   final List<Map<String, Object?>> peerProfiles = [];
 
@@ -151,7 +161,11 @@ class FakeDoor implements CoreDoor {
         return {'ok': true, 'code': 'trair1:local-julian:${'a1' * 16}:beef'};
       case 'add_contact':
         final parts = (r['code'] as String).trim().split(':');
-        if (parts.length != 4 || parts[0] != 'trair1' || parts[1] == 'local-julian') return _fail('rejected');
+        final key = parts.length == 6 && parts[0] == 'trair2';
+        if (!(key || (parts.length == 4 && parts[0] == 'trair1')) || parts[1] == 'local-julian') {
+          return _fail('rejected');
+        }
+        if (key) redeem.add(parts[1]);
         if (!_isContact(parts[1])) {
           final name = (r['name'] as String).trim();
           contacts.add({
@@ -229,6 +243,15 @@ class FakeDoor implements CoreDoor {
         } on FormatException {
           return _fail('rejected');
         }
+        if (w['kind'] == 'ends') {
+          final chat = _chat(w['chat']);
+          if (chat == null) return _fail('unknown_chat');
+          chat['ends'] = w['ends'];
+          return {
+            'ok': true,
+            'incoming': {'kind': 'ends', 'chat': chat['id'], 'ends': chat['ends']},
+          };
+        }
         if (w['kind'] == 'profile') {
           final user = w['user'] as String;
           peerProfiles
@@ -261,6 +284,49 @@ class FakeDoor implements CoreDoor {
           'ok': true,
           'incoming': {'kind': 'message', 'message': m},
         };
+      case 'create_invite':
+        final minutes = (r['minutes'] as num).toInt();
+        if (minutes <= 0 || minutes > 30 * 24 * 60) return _fail('rejected');
+        final ends = _now + minutes * 60;
+        final v = r['vanishing'] == true;
+        invites.add({'minutes': minutes, 'vanishing': v});
+        return {
+          'ok': true,
+          'code': 'trair2:local-julian:${'a1' * 16}:${'0f' * 16}:${v ? 'v' : 'f'}$ends:beef',
+          'ends': ends,
+          'vanishing': v,
+        };
+      case 'invite_message':
+        final chat = _chat(r['chat']);
+        if (chat == null) return _fail('unknown_chat');
+        if (!redeem.remove(chat['peer'])) return {'ok': true};
+        return {
+          'ok': true,
+          'body': wire({'kind': 'invite', 'chat': chat['id']}),
+          'to': ['${chat['peer']}:d-peer'],
+        };
+      case 'set_chat_end':
+        final chat = _chat(r['chat']);
+        if (chat == null) return _fail('unknown_chat');
+        if (chat['state'] != 'active') return _fail('blocked');
+        final minutes = (r['minutes'] as num?)?.toInt();
+        chat['ends'] = minutes == null ? null : _now + minutes * 60;
+        return {
+          'ok': true,
+          'body': wire({'kind': 'ends', 'chat': chat['id'], 'ends': chat['ends']}),
+          'to': ['${chat['peer']}:d-peer'],
+          'ends': chat['ends'],
+        };
+      case 'sweep':
+        final gone = [
+          for (final c in chats)
+            if (c['ends'] is int && (c['ends'] as int) <= _now) c['id'],
+        ];
+        chats.removeWhere((c) => gone.contains(c['id']));
+        for (final id in gone) {
+          messages.remove(id);
+        }
+        return {'ok': true, 'deleted': gone};
       case 'share_profile':
         final p = (r['profile'] as Map).cast<String, Object?>();
         if ((p['name'] as String? ?? '').trim().isEmpty || (p['rev'] as num? ?? 0) <= 0) return _fail('rejected');
@@ -496,6 +562,10 @@ class FakeDoor implements CoreDoor {
           'key_packages' ||
           'apply_contact_list' ||
           'withdrawn_members' ||
+          'create_invite' ||
+          'invite_message' ||
+          'set_chat_end' ||
+          'sweep' ||
           'share_profile' ||
           'profile_sent' ||
           'profiles':

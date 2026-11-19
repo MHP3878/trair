@@ -1197,4 +1197,78 @@ void main() {
       expect(find.textContaining('nennt sich'), findsNothing);
     });
   });
+
+  group('Freundschaftsschlüssel und verschwindende Chats', () {
+    Future<(FakeDoor, FakeServer)> online(WidgetTester tester, {bool chat = false}) async {
+      final server = FakeServer();
+      final door = FakeDoor(password: pw, profile: {'name': 'Julian'})..chatsEnabled = true;
+      if (chat) {
+        door.contacts.add({'user': 'local-bob', 'name': 'Bob', 'fingerprint': 'ff' * 16, 'confirmed': false});
+        door.chats.add({'id': 'c1', 'peer': 'local-bob', 'name': 'Bob', 'state': 'active', 'last': 0});
+      }
+      await _start(tester, door: door, server: server);
+      await _unlock(tester);
+      await _openSettings(tester);
+      await tester.ensureVisible(find.widgetWithText(PillButton, 'Verbinden'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Verbinden'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Chats'));
+      await tester.pumpAndSettle();
+      return (door, server);
+    }
+
+    String kindOf(Map<String, Object?> sent) => FakeDoor.unwire(sent['body'] as String)['kind'] as String;
+
+    testWidgets('a key with a chosen time; using one starts the chat at once', (tester) async {
+      final (door, server) = await online(tester);
+      await tester.tap(find.byTooltip('Neuer Chat'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, '10 Min.'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Schlüssel erstellen'));
+      await tester.pumpAndSettle();
+      expect(door.invites.single, {'minutes': 10, 'vanishing': false});
+      expect(find.textContaining('Einmal nutzbar · gilt bis heute um'), findsOneWidget);
+      expect(find.textContaining('trair2:local-julian:'), findsOneWidget);
+
+      // Too late: refused before the core even sees it.
+      final past = DateTime.now().millisecondsSinceEpoch ~/ 1000 - 5;
+      await tester.enterText(_field('trair1:…'), 'trair2:local-bob:${'ff' * 16}:${'11' * 16}:f$past:0000');
+      await tester.tap(find.widgetWithText(PillButton, 'Hinzufügen'));
+      await tester.pumpAndSettle();
+      expect(find.text('Dieser Freundschaftsschlüssel ist abgelaufen.'), findsOneWidget);
+      expect(door.contacts, isEmpty);
+
+      final soon = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 600;
+      await tester.enterText(
+        find.byWidgetPredicate((w) => w is TextField && (w.controller?.text.startsWith('trair2:') ?? false)),
+        'trair2:local-bob:${'ff' * 16}:${'11' * 16}:f$soon:0000');
+      await tester.tap(find.widgetWithText(PillButton, 'Hinzufügen'));
+      await tester.pumpAndSettle();
+      expect(door.contacts.single['user'], 'local-bob');
+      expect(server.commits, hasLength(1), reason: 'the chat started by itself');
+      expect(server.sent.map(kindOf), contains('invite'), reason: 'the token went into the chat');
+      expect(find.text('Echt Ende-zu-Ende verschlüsselt'), findsWidgets);
+    });
+
+    testWidgets('a chat vanishes for both after the chosen time and then is gone', (tester) async {
+      final (door, server) = await online(tester, chat: true);
+      await tester.tap(find.text('Bob').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Chat verschwinden lassen'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('1 Tag'));
+      await tester.pumpAndSettle();
+      expect(kindOf(server.sent.last), 'ends', reason: 'Bob learns it too');
+      expect(find.textContaining('Verschwindet in 23 Std.'), findsWidgets);
+
+      // Time is up: the next sweep takes the chat away.
+      door.chats.single['ends'] = DateTime.now().millisecondsSinceEpoch ~/ 1000 - 1;
+      await tester.pump(const Duration(seconds: 31));
+      await tester.pumpAndSettle();
+      expect(door.chats, isEmpty);
+      expect(find.text('Bob'), findsNothing);
+    });
+  });
 }
