@@ -396,13 +396,46 @@ fn c02_forged_or_unsigned_texts_are_never_stored() {
         matches!(&poll_ok(&mut net, &mut ada)[..], [Incoming::Message(m)] if m.user == "mallory")
     );
 
-    // A history from someone who is no keeper is ignored.
-    let forged = json!({"history": [{"user": "olga", "device": "d-00000000", "text": "erfunden",
-        "sent": NOW, "sig": hex::encode(&real)}], "for": "ada"});
+    // A history from someone who is no keeper is ignored, even with a text
+    // of its own that is signed correctly (it would slip in as "old").
+    let late = sign(&mal.identity, "k1", "angeblich alt");
+    let forged = json!({"history": [
+        {"user": "olga", "device": "d-00000000", "text": "erfunden", "sent": NOW,
+            "sig": hex::encode(&real)},
+        {"user": "mallory", "device": mal.identity.id, "text": "angeblich alt", "sent": NOW,
+            "sig": hex::encode(&late)},
+    ], "for": "ada"});
     let b = mal.dev.encrypt_control(&group, &forged).unwrap();
     net.send(&mid, &to, &b);
     poll_ok(&mut net, &mut ada);
     assert_eq!(texts(&mut ada, &group), ["echt von mir"]);
+
+    // A member deletes only its own texts, whatever its Trair sends.
+    send(&mut net, &mut olga, &group, "von Olga");
+    poll_ok(&mut net, &mut ada);
+    let olgas = ada
+        .m()
+        .messages(&group, None, 50)
+        .unwrap()
+        .into_iter()
+        .find(|m| m.text == "von Olga")
+        .unwrap()
+        .id;
+    let olgas_sig = ada.m().channel_signature(olgas).unwrap().unwrap().sig;
+    let b = mal
+        .dev
+        .encrypt_control(&group, &json!({"delete": hex::encode(&olgas_sig)}))
+        .unwrap();
+    net.send(&mid, &to, &b);
+    poll_ok(&mut net, &mut ada);
+    assert_eq!(texts(&mut ada, &group), ["echt von mir", "von Olga"]);
+    let b = mal
+        .dev
+        .encrypt_control(&group, &json!({"delete": hex::encode(&real)}))
+        .unwrap();
+    net.send(&mid, &to, &b);
+    poll_ok(&mut net, &mut ada);
+    assert_eq!(texts(&mut ada, &group), ["von Olga"]);
 }
 
 #[test]

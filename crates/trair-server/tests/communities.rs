@@ -1223,6 +1223,22 @@ async fn k11_only_keepers_change_the_group_whatever_a_change_claims() {
         commit_as(&w, &max, &group, 3, &[]).await.0,
         StatusCode::FORBIDDEN
     );
+    // What is kept for later is the keepers as they were, not the claim:
+    // once the channel is deleted, Ada (claimed, but no keeper) still
+    // cannot change its group.
+    assert_eq!(
+        commit_as(&w, &olga, &group, 3, &["olga", "ada"]).await.0,
+        StatusCode::OK
+    );
+    olga.ok(
+        &w,
+        json!({"op": "delete_channel", "community": id, "channel": made["channel"]}),
+    )
+    .await;
+    assert_eq!(
+        commit_as(&w, &ada, &group, 4, &[]).await.0,
+        StatusCode::FORBIDDEN
+    );
     // Groups that are no channel keep following their own list.
     let other = "7b".repeat(16);
     assert_eq!(

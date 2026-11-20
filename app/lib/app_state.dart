@@ -1762,6 +1762,31 @@ class AppState extends ChangeNotifier {
     if (realMessages.containsKey(group)) await loadMessages(group);
   }
 
+  /// Before handing a community over: make the new owner a keeper of every
+  /// closed channel this Trair keeps. Otherwise, once the old owner's
+  /// rights are gone, nobody inside the group may change it any more.
+  Future<void> keepersBeforeTransfer(String community, String to) async {
+    final api = _api;
+    final info = communities.infos[community];
+    if (api == null || info == null || vault == null) return;
+    for (final ch in info.channels) {
+      final group = ch.group;
+      if (!ch.closed || group == null || channelChat(group) == null) continue;
+      final view = await vault!.groupInfo(group);
+      if (!view.ok) continue;
+      final members = GroupInfo.fromJson((view.raw['group'] as Map).cast<String, Object?>()).members;
+      if (!members.any((x) => x.user == to) || members.any((x) => x.user == to && x.isAdmin)) continue;
+      final want = {
+        for (final x in members)
+          if (x.isAdmin) x.user,
+        to,
+      }.toList()..sort();
+      final k = await vault!.setKeepers(group, want);
+      final commit = k.raw['commit'];
+      if (k.ok && commit is Map) await _pushCommit(api, commit.cast<String, Object?>());
+    }
+  }
+
   /// Delete a text of a closed channel for everyone (keepers: any; others:
   /// their own).
   Future<bool> deleteChannelMessage(String group, int id) async {

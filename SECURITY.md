@@ -504,7 +504,7 @@ server), `tuer.rs` (d26), `werkzeug.rs` (w06), `widget_test.dart` (group
 
 - **Open channels are readable on the server, on purpose.** Moderation
   needs it (planning decision 9); the app says so on every channel and
-  when founding. Closed, end-to-end encrypted channels follow in step 3b.
+  when founding. Closed channels are end-to-end encrypted (below).
   Direct chats and groups are untouched by this.
 - **The server cannot forge.** Every message carries a signature of the
   sender's device over community, channel, account, device, time and
@@ -551,6 +551,64 @@ server), `tuer.rs` (d26), `werkzeug.rs` (w06), `widget_test.dart` (group
 - **Team keys:** until the real public team key is in `TEAM_KEYS`, nobody
   has a team badge, so the team inbox is empty in the app; the team tool
   works without it.
+
+## Closed channels (M8, step 3b)
+
+Code: `crates/trair-core/src/channel_chats.rs`, `groups.rs`
+(`GroupKind::Channel`), `mls.rs` (signed texts inside the encryption),
+`proofs.rs` (`trair/closed-message/v1`), `crates/trair-server/src/
+communities.rs` (`channel_members`, evidence), `db.rs` (`commit`),
+`crates/trair-ffi/src/groups.rs`, `app/lib/app_state.dart`
+(`keepChannels`); tests: `kanaele.rs` (c01-c04, real MLS, with a forging
+device), `groups.rs` (unit), `proofs.rs` (unit), `tests/communities.rs`
+(k10-k12), `tests/server.rs` (s17), `tuer.rs` (d27), `widget_test.dart`
+(group "Geschlossene Kanäle"), `server_native_test.dart` (three apps,
+real server).
+
+- **A closed channel is an MLS group** bound to its community and
+  channel. The server never gets its texts: posting to or reading a closed
+  channel through the community API is refused (`closed_channel`).
+- **Keepers.** The MLS admins of the group are the channel's keepers: the
+  owner and everyone with the right to manage channels, as equals. The
+  server picks the group id when the channel is made and takes changes to
+  that group only from the keepers as the community's rights say *now*;
+  what a change claims about its committers does not count. A member who
+  loses the right can no longer change the group, also not with an older
+  client.
+- **Admission is automatic and visible** (Julian's choice). The Trair of
+  a keeper (whichever runs) lets in everyone the server lists as allowed
+  to read, removes who may no longer, and keeps the keepers in the group
+  up to date, after every change in the community. Every admission and
+  removal is a note in the channel. Strict mode: a keeper vouches for the
+  people it lets in (`allow`); a known contact or an own account under a
+  different key is still refused.
+- **Signed inside the encryption.** Every text carries a signature of
+  the sender's device over community, channel, account, device, time and
+  text, with its own context so it never passes for an open message (and
+  the other way round). Receivers keep a text only if the signature holds
+  against the sender's key in the MLS group; anything else is dropped.
+- **History for newcomers** (Julian's choice): a keeper's Trair sends the
+  last 50 texts, at most 256 KiB, to the newcomer's devices only. Each
+  text is checked against its author's device in the channel; a text a
+  keeper changed or invented is dropped. History from anyone but a keeper
+  is ignored.
+- **Deleting** a text for everyone: its author or a keeper, by its
+  signature.
+- **Reports** hand the moderators one text with its signature. The
+  server checks it against the author's device list (also withdrawn
+  devices) and stores the report only if it holds; a changed text is
+  refused. The reporter's dialog says that this one text leaves the
+  end-to-end encryption.
+- **What remains:** the server sees who is in which channel and when
+  something is sent, and could list an invented account as a reader; it
+  would show up as a note in the channel. Who may write is enforced by
+  the apps, not inside MLS: a modified client of a reader can write.
+  Before a community is handed over, the old owner's Trair makes the new
+  owner a keeper inside every closed channel. If the last keeper inside a
+  channel loses the right some other way (the only keeper who is an admin
+  is removed while no other keeper is in it), nobody can change that
+  channel any more; it has to be made again. History holds only texts of authors who are still in the
+  channel. At most 1000 members per channel.
 
 ## Emergency PINs
 

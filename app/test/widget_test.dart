@@ -1961,6 +1961,16 @@ void main() {
       await tester.tap(find.widgetWithText(PillButton, 'Entfernen'));
       await tester.pumpAndSettle();
       expect(door.channelOps, contains('remove:local-bob'));
+      // Handing the community over: Ada becomes a keeper inside the group
+      // first, so the channel never ends up without one.
+      await tester.tap(find.byKey(const ValueKey('member-local-ada')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('member-action-transfer')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Übergeben'));
+      await tester.pumpAndSettle();
+      expect(door.channelOps.last, 'keepers:local-ada');
+      expect(server.communities.communities[id]!['owner'], 'local-ada');
       // The channel never shows up among the chats.
       await tester.tap(find.byTooltip('Direktnachrichten'));
       await tester.pumpAndSettle();

@@ -484,6 +484,28 @@ void main() {
 
       // The forged report was refused: its text is nowhere on the server.
       expect((await serverBytes()).contains('Max hat was anderes gesagt'), isFalse);
+
+      // Olga hands the community to Carl. Carl becomes a keeper inside the
+      // group first; afterwards his Trair keeps the channel and takes
+      // Olga's keeper role away.
+      final carlUser = carl.ownUser;
+      final olgaUser = olga.ownUser;
+      await olga.keepersBeforeTransfer(id, carlUser);
+      expect(await o.transfer(carlUser), isTrue, reason: o.message);
+      Future<List<GroupMember>> membersSeenBy(AppState a) async {
+        final v = await a.vault!.groupInfo(group);
+        return GroupInfo.fromJson((v.raw['group'] as Map).cast<String, Object?>()).members;
+      }
+
+      var seen = <GroupMember>[];
+      for (var i = 0; i < 300; i++) {
+        seen = await membersSeenBy(olga);
+        if (seen.any((x) => x.user == carlUser && x.isAdmin) && !seen.any((x) => x.user == olgaUser && x.isAdmin)) {
+          break;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+      expect([for (final x in seen) if (x.isAdmin) x.user], [carlUser], reason: 'Carl keeps the channel now | $log');
       for (final a in apps) {
         await a.lock();
       }

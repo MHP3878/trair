@@ -1017,6 +1017,7 @@ class _RealCommunityScreenState extends State<RealCommunityScreen> {
           '$name wird Gründer und hat alle Rechte. Du bleibst Mitglied, aber ohne die Rechte des Gründers.',
           'Übergeben',
         )) {
+          await state.keepersBeforeTransfer(info.id, user);
           await c.transfer(user);
         }
       case 'report':
