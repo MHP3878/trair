@@ -287,7 +287,7 @@ void main() {
       }),
     );
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Deine Bots'));
+    await Scrollable.ensureVisible(tester.element(find.text('Bot-Code')), alignment: 0.18);
     await tester.pumpAndSettle();
     await _shot(tester, '35-einstellungen-bots');
     await tester.tap(find.text('Chats'));
@@ -298,7 +298,7 @@ void main() {
     await tester.tap(find.byTooltip('Senden'));
     await tester.pumpAndSettle();
     server.deliver(
-      FakeDoor.wire({'kind': 'message', 'chat': 'b1', 'text': 'Morgen in Köln: sonnig, bis 21 °C, kaum Wind. ☀️'}),
+      FakeDoor.wire({'kind': 'message', 'chat': 'b1', 'text': 'Morgen in Köln: sonnig, bis 21 °C, kaum Wind.'}),
     );
     await tester.pumpAndSettle();
     await _shot(tester, '34-bot-chat');
