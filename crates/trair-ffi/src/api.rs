@@ -61,7 +61,17 @@
 //! | `set_keepers`     | `chat`, `keepers`      | `commit` (null: nothing to change) |
 //! | `channel_history` | `chat`, `user`         | `body`, `to`, or `none`          |
 //! | `delete_channel_message` | `chat`, `id`    | `body`, `to`                     |
+//! | `bot_request`     |                        | `code` (`trairbot1:…`), `hash`   |
+//! | `vouch_bot`       | `code`                 | `cert`, `secret` (hex)           |
+//! | `check_bot`       | `user`, `owner_key`    | `valid`                          |
 //!
+//! Bots (M9): a bot hands the server `bot_request`'s `hash` and shows the
+//! code; its owner's Trair signs it with `vouch_bot` and hands certificate
+//! and secret to the server. `profiles`
+//! lists a bot's `bot: {owner, made, checked}`; `checked` is true when the
+//! owner is a contact and the certificate holds against the contact's key.
+//! Otherwise the app asks the server for the owner's key and calls
+//! `check_bot`.
 //! The community ops (M8) are described in `communities.rs`.
 //!
 //! The chat ops (M4) need an unlocked vault; their details are in
@@ -414,6 +424,15 @@ enum Request {
         account_key: String,
     },
     TeamBadge {},
+    #[serde(rename = "bot_request")]
+    BotCode {},
+    VouchBot {
+        code: String,
+    },
+    CheckBot {
+        user: String,
+        owner_key: String,
+    },
     CreateChannelGroup {
         group: String,
         name: String,
@@ -536,6 +555,22 @@ fn run(state: &mut State, req: Request) -> Value {
         Request::SignLogin { challenge } => sign_login(state, &challenge),
         Request::SignDeletion { now } => sign_deletion(state, now),
         Request::TeamBadge {} => team_badge(state),
+        Request::BotCode {} => match state.vault.as_ref() {
+            Some(v) => match trair_core::bots::request_code(v.account()) {
+                Ok((code, hash)) => json!({"ok": true, "code": code, "hash": hash}),
+                Err(_) => fail("internal"),
+            },
+            None => fail("locked"),
+        },
+        Request::VouchBot { code } => match state.vault.as_ref() {
+            Some(v) => match trair_core::bots::vouch(v.account(), &code, unix_now()) {
+                Ok((cert, secret)) => {
+                    json!({"ok": true, "cert": cert, "secret": hex::encode(secret)})
+                }
+                Err(_) => fail("rejected"),
+            },
+            None => fail("locked"),
+        },
         Request::SignOpenMessage {
             community,
             channel,
@@ -677,6 +712,7 @@ fn chat_op(state: &mut State, req: Request) -> Value {
         Request::AcceptOpenKey { user, account_key } => {
             communities::accept_open_key(m, &user, &account_key)
         }
+        Request::CheckBot { user, owner_key } => chats::check_bot(m, &user, &owner_key),
         Request::CreateChannelGroup {
             group,
             name,

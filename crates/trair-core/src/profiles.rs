@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::badges::MAX_BADGES;
+use crate::bots::BotCert;
 use crate::error::{CoreError, Result};
 
 /// Version of the profile inside a message.
@@ -56,6 +57,9 @@ pub struct Wire {
     /// Signed badges, as issued (checked when shown, they expire).
     #[serde(default)]
     pub badges: Vec<Value>,
+    /// For a bot: its owner's certificate (see [`crate::bots`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bot: Option<BotCert>,
 }
 
 /// A checked profile, ready to store or to send.
@@ -73,6 +77,9 @@ pub struct Checked {
     pub picture: Option<Vec<u8>>,
     /// See [`Wire::badges`].
     pub badges: Vec<Value>,
+    /// See [`Wire::bot`]. Only its shape is checked here; who sent it and
+    /// the owner's signature are checked where those are known.
+    pub bot: Option<BotCert>,
 }
 
 fn refused(why: &str) -> CoreError {
@@ -107,6 +114,15 @@ pub fn check(value: &Value) -> Result<Checked> {
     {
         return Err(refused("badges"));
     }
+    if let Some(b) = &w.bot
+        && (crate::account::validate_name(&b.bot).is_err()
+            || crate::account::validate_name(&b.owner).is_err()
+            || b.bot == b.owner
+            || b.bot_key.len() != 64
+            || b.sig.len() > 256)
+    {
+        return Err(refused("bot"));
+    }
     let picture = match &w.picture {
         None => None,
         Some(b64) => {
@@ -124,6 +140,7 @@ pub fn check(value: &Value) -> Result<Checked> {
         about,
         picture,
         badges: w.badges,
+        bot: w.bot,
     })
 }
 
@@ -138,6 +155,7 @@ impl Checked {
             about: self.about.clone(),
             picture: self.picture.as_ref().map(|p| STANDARD.encode(p)),
             badges: self.badges.clone(),
+            bot: self.bot.clone(),
         })
         .unwrap_or(Value::Null)
     }

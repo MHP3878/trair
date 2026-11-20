@@ -1386,6 +1386,16 @@ impl Messenger {
         only_contacts: bool,
     ) -> Result<Vec<ProfileOut>> {
         let checked = profiles::check(profile)?;
+        if let Some(b) = &checked.bot
+            && (b.bot != self.user
+                || hex::decode(&b.bot_key).map_or(true, |k| {
+                    crate::account::Fingerprint::of(&k).as_str() != self.device.acct().fp
+                }))
+        {
+            return Err(CoreError::Rejected(
+                "profile: bot certificate of another account".into(),
+            ));
+        }
         let wire = checked.to_wire();
         let mut out = Vec::new();
         for chat in self.chats()? {
@@ -1450,8 +1460,9 @@ impl Messenger {
             .store
             .conn()
             .prepare(
-                "SELECT user, rev, name, glow, about, picture, badges, account_key, at
-                 FROM profiles WHERE user = ?1",
+                "SELECT p.user, p.rev, p.name, p.glow, p.about, p.picture, p.badges,
+                        p.account_key, p.at, b.cert
+                 FROM profiles p LEFT JOIN bot_certs b ON b.user = p.user WHERE p.user = ?1",
             )
             .map_err(sql)?;
         let mut rows = st.query_map([user], row_profile).map_err(sql)?;
@@ -1467,8 +1478,9 @@ impl Messenger {
             .store
             .conn()
             .prepare(
-                "SELECT user, rev, name, glow, about, picture, badges, account_key, at
-                 FROM profiles ORDER BY user",
+                "SELECT p.user, p.rev, p.name, p.glow, p.about, p.picture, p.badges,
+                        p.account_key, p.at, b.cert
+                 FROM profiles p LEFT JOIN bot_certs b ON b.user = p.user ORDER BY p.user",
             )
             .map_err(sql)?;
         let rows = st.query_map([], row_profile).map_err(sql)?;
@@ -1797,7 +1809,13 @@ impl Messenger {
             _ => false,
         };
         let checked = if from_partner && user != self.user {
-            profiles::check(profile).ok()
+            profiles::check(profile).ok().filter(|c| {
+                // A bot certificate must be about this account and its key;
+                // a profile that claims someone else's is not taken.
+                c.bot.as_ref().is_none_or(|b| {
+                    b.bot == user && hex::decode(&b.bot_key).is_ok_and(|k| k == account_key)
+                })
+            })
         } else {
             None
         };
@@ -1813,6 +1831,12 @@ impl Messenger {
         };
         let badges =
             serde_json::to_string(&c.badges).map_err(|e| CoreError::Storage(e.to_string()))?;
+        let bot = match &c.bot {
+            Some(b) => {
+                Some(serde_json::to_string(b).map_err(|e| CoreError::Storage(e.to_string()))?)
+            }
+            None => None,
+        };
         let u = user.clone();
         self.save(move |tx| {
             mark(tx)?;
@@ -1835,6 +1859,15 @@ impl Messenger {
                 ],
             )
             .map_err(sql)?;
+            match &bot {
+                Some(b) => tx.execute(
+                    "INSERT INTO bot_certs (user, cert) VALUES (?1, ?2)
+                     ON CONFLICT (user) DO UPDATE SET cert = excluded.cert",
+                    params![u, b],
+                ),
+                None => tx.execute("DELETE FROM bot_certs WHERE user = ?1", [&u]),
+            }
+            .map_err(sql)?;
             Ok(())
         })?;
         Ok(Incoming::Profile { user })
@@ -1849,6 +1882,8 @@ fn row_profile(r: &rusqlite::Row) -> rusqlite::Result<Result<PeerProfile>> {
         Ok(b) => b,
         Err(e) => return Ok(Err(CoreError::Storage(e.to_string()))),
     };
+    let bot: Option<String> = r.get(9)?;
+    let bot = bot.and_then(|b| serde_json::from_str(&b).ok());
     Ok(Ok(PeerProfile {
         user: r.get(0)?,
         profile: profiles::Checked {
@@ -1858,6 +1893,7 @@ fn row_profile(r: &rusqlite::Row) -> rusqlite::Result<Result<PeerProfile>> {
             about: r.get(4)?,
             picture: r.get(5)?,
             badges,
+            bot,
         },
         account_key: r.get(7)?,
         at: to_u64(r.get(8)?),

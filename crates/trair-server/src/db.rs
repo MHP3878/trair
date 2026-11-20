@@ -130,6 +130,7 @@ impl Db {
             )?;
         }
         conn.execute_batch(crate::communities::SCHEMA)?;
+        conn.execute_batch(crate::bots::SCHEMA)?;
         // Communities from before closed channels.
         let has_grp: bool = conn.query_row(
             "SELECT COUNT(*) FROM pragma_table_info('c_channels') WHERE name = 'grp'",
@@ -166,11 +167,29 @@ impl Db {
         seq: u64,
         now: u64,
     ) -> DbResult<bool> {
-        let n = self.conn.execute(
+        self.insert_account_as(user, key, list, seq, now, false)
+    }
+
+    /// Store a new account, as a bot (see [`crate::bots`]) or not.
+    pub fn insert_account_as(
+        &self,
+        user: &str,
+        key: &str,
+        list: &str,
+        seq: u64,
+        now: u64,
+        bot: bool,
+    ) -> DbResult<bool> {
+        let tx = self.conn.unchecked_transaction()?;
+        let n = tx.execute(
             "INSERT OR IGNORE INTO accounts (user, account_key, device_list, list_seq, created, last_seen)
              VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
             params![user, key, list, seq as i64, now as i64],
         )?;
+        if n == 1 && bot {
+            tx.execute("INSERT INTO bots (user) VALUES (?1)", params![user])?;
+        }
+        tx.commit()?;
         Ok(n == 1)
     }
 
@@ -448,6 +467,7 @@ impl Db {
     pub fn delete_account_at(&self, user: &str, now: u64) -> DbResult<()> {
         let tx = self.conn.unchecked_transaction()?;
         crate::communities::forget_user(&tx, user, now)?;
+        crate::bots::forget(&tx, user)?;
         for table in ["sessions", "keypackages", "messages", "accounts"] {
             tx.execute(
                 &format!("DELETE FROM {table} WHERE user = ?1"),

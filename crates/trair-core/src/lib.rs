@@ -10,6 +10,7 @@
 
 pub mod account;
 pub mod badges;
+pub mod bots;
 pub mod channel_chats;
 pub mod chats;
 pub mod contacts;

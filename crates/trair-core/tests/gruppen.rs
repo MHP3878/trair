@@ -1076,3 +1076,120 @@ fn g14_a_member_cannot_get_someone_elses_device_removed() {
     };
     assert_eq!(p.removed, ["max:pc"]);
 }
+
+fn bot_profile(rev: u64, name: &str, cert: Option<&trair_core::bots::BotCert>) -> Value {
+    let mut p = serde_json::json!({"v": 1, "rev": rev, "name": name, "badges": []});
+    if let Some(c) = cert {
+        p["bot"] = serde_json::to_value(c).unwrap();
+    }
+    p
+}
+
+#[test]
+fn a_bot_shows_its_owner_and_nobody_borrows_its_certificate() {
+    use trair_core::bots::{request_code, verify, vouch};
+    let mut net = Net::default();
+    let mut olga = person("olga");
+    let mut bot = person("wetterbot");
+    let julian = Account::generate("julian").unwrap();
+    // Mallory: real keys, a modified Trair that sends what it likes.
+    let mal_account = Account::generate("mallory").unwrap();
+    let mal_identity = DeviceIdentity::generate().unwrap();
+    let mut mal = trair_core::Device::from_identity(&mal_account, &mal_identity).unwrap();
+    mal.set_strict(false);
+    net.register(&mut mal, 3);
+    befriend(&mut olga, &mut bot);
+    // Olga knows Mallory as a contact (she has her real code).
+    let mal_code = trair_core::ContactCode {
+        user: "mallory".into(),
+        fingerprint: mal_account.fingerprint(),
+    }
+    .text();
+    olga.m().add_contact(&mal_code, "Mallory", NOW).unwrap();
+    publish(&mut net, &mut bot, 3);
+    let mut offers = net.fetch("wetterbot");
+    offers.extend(net.fetch("mallory"));
+    let (chat, pending) = olga.m().create_group("Bots", None, &offers, NOW).unwrap();
+    assert!(commit(&mut net, &mut olga, &pending.unwrap()));
+    poll_ok(&mut net, &mut bot);
+    let mid = mal.id().to_string();
+    let _ = net
+        .inbox(&mid)
+        .iter()
+        .map(|b| mal.receive(b).unwrap())
+        .count();
+
+    let (code, _) = request_code(&bot.account).unwrap();
+    let (cert, _) = vouch(&julian, &code, NOW).unwrap();
+    // The bot shares its profile with Julian's certificate: Olga keeps it,
+    // and it holds against Julian's key.
+    let out = bot
+        .m()
+        .share_profile(&bot_profile(1, "Wetterbot", Some(&cert)), false)
+        .unwrap();
+    assert_eq!(out.len(), 1);
+    let id = bot.id();
+    net.send(&id, &out[0].to, &out[0].bytes);
+    let got = poll_ok(&mut net, &mut olga);
+    assert!(matches!(&got[..], [Incoming::Profile { user }] if user == "wetterbot"));
+    let stored = olga.m().profile("wetterbot").unwrap().unwrap();
+    assert_eq!(stored.profile.bot.as_ref(), Some(&cert));
+    verify(
+        &cert,
+        julian.public_key(),
+        Some("wetterbot"),
+        Some(&stored.account_key),
+    )
+    .unwrap();
+    assert!(chat.id.len() == 32);
+
+    // The bot's Trair does not send someone else's certificate.
+    let robo = Account::generate("robo").unwrap();
+    let (robo_cert, _) = vouch(&julian, &request_code(&robo).unwrap().0, NOW).unwrap();
+    assert!(
+        bot.m()
+            .share_profile(&bot_profile(2, "Wetterbot", Some(&robo_cert)), false)
+            .is_err()
+    );
+    // Mallory sends the bot's certificate, or one about herself with the
+    // bot's key: Olga keeps neither profile.
+    let to = mal.recipients(&chat.id).unwrap();
+    let b = mal
+        .encrypt_profile(&chat.id, &bot_profile(5, "Wetterbot", Some(&cert)))
+        .unwrap();
+    net.send(&mid, &to, &b);
+    let mut mine = cert.clone();
+    mine.bot = "mallory".into();
+    let b = mal
+        .encrypt_profile(&chat.id, &bot_profile(6, "Mallory", Some(&mine)))
+        .unwrap();
+    net.send(&mid, &to, &b);
+    let got = poll_ok(&mut net, &mut olga);
+    assert!(got.iter().all(|g| matches!(g, Incoming::Other)), "{got:?}");
+    assert!(olga.m().profile("mallory").unwrap().is_none());
+    // Without a certificate Mallory is just a person.
+    let b = mal
+        .encrypt_profile(&chat.id, &bot_profile(7, "Mallory", None))
+        .unwrap();
+    net.send(&mid, &to, &b);
+    poll_ok(&mut net, &mut olga);
+    let m = olga.m().profile("mallory").unwrap().unwrap();
+    assert!(m.profile.bot.is_none());
+
+    // A newer profile without a certificate: no longer shown as a bot.
+    let out = bot
+        .m()
+        .share_profile(&bot_profile(3, "Wetterbot", None), false)
+        .unwrap();
+    net.send(&id, &out[0].to, &out[0].bytes);
+    poll_ok(&mut net, &mut olga);
+    assert!(
+        olga.m()
+            .profile("wetterbot")
+            .unwrap()
+            .unwrap()
+            .profile
+            .bot
+            .is_none()
+    );
+}

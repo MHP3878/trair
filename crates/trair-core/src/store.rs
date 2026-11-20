@@ -84,6 +84,11 @@ CREATE TABLE IF NOT EXISTS profiles (
     account_key BLOB NOT NULL,
     at INTEGER NOT NULL
 ) WITHOUT ROWID;
+-- Bots (M9): the owner's certificate a bot's profile came with.
+CREATE TABLE IF NOT EXISTS bot_certs (
+    user TEXT PRIMARY KEY,
+    cert TEXT NOT NULL
+) WITHOUT ROWID;
 -- Which version of this account's own profile each chat already has.
 CREATE TABLE IF NOT EXISTS profile_sent (
     chat TEXT PRIMARY KEY,

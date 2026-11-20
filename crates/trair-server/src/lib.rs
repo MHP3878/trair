@@ -16,6 +16,7 @@
 //! packages, pairing messages) is base64. Errors are
 //! `{"ok": false, "error": "<code>"}` with a fitting HTTP status.
 
+mod bots;
 mod communities;
 mod db;
 
@@ -268,6 +269,8 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/v1/messages/ack", post(ack))
         .route("/v1/commits", post(commit))
         .route("/v1/community", post(communities::op))
+        .route("/v1/bots/vouch", post(bots::vouch))
+        .route("/v1/bots/request", post(bots::ask))
         .route("/v1/communities/sync", get(communities::sync))
         .route("/v1/pairing", post(open_pairing))
         .route(
@@ -385,6 +388,9 @@ struct Register {
     user: String,
     account_key: String,
     device_list: SignedDeviceList,
+    /// A bot (run by `trair-bot`): it writes only once its owner vouched.
+    #[serde(default)]
+    bot: bool,
 }
 
 /// Register an account: its public key and its first device list, signed
@@ -413,7 +419,7 @@ async fn register(
     let text = serde_json::to_string(&r.device_list).map_err(internal)?;
     let created = s
         .db()
-        .insert_account(&r.user, &hex::encode(&key), &text, seq, s.now())
+        .insert_account_as(&r.user, &hex::encode(&key), &text, seq, s.now(), r.bot)
         .map_err(internal)?;
     if !created {
         return Err(ApiError(StatusCode::CONFLICT, "user_taken"));
@@ -440,11 +446,13 @@ async fn account(
     Path(user): Path<String>,
 ) -> ApiResult {
     let (key, list, _) = load_account(&s, &user)?;
+    let bot = bots::info(&s.db().conn, &user).map_err(internal)?;
     Ok(Json(json!({
         "ok": true,
         "user": user,
         "account_key": hex::encode(key),
         "device_list": list,
+        "bot": bot,
     })))
 }
 
@@ -694,7 +702,8 @@ struct SendMessage {
 }
 
 /// Queue an encrypted message for devices. The sender is not stored.
-async fn send(State(s): State<Arc<Server>>, _me: Session, Json(r): Json<SendMessage>) -> ApiResult {
+async fn send(State(s): State<Arc<Server>>, me: Session, Json(r): Json<SendMessage>) -> ApiResult {
+    bots::may_write(&s, &me.user)?;
     if r.to.is_empty() || r.to.len() > MAX_RECIPIENTS {
         return Err(bad("recipients"));
     }
@@ -762,6 +771,7 @@ async fn commit(
     me: Session,
     Json(r): Json<CommitRequest>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
+    bots::may_write(&s, &me.user)?;
     if !is_group_id(&r.group) {
         return Err(bad("group"));
     }
