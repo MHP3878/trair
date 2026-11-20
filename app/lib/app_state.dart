@@ -54,6 +54,8 @@ class RealChat {
     this.kind = 'direct',
     this.role,
     this.members = 0,
+    this.channelCommunity,
+    this.channelId,
   });
 
   factory RealChat.fromJson(Map<String, Object?> j) => RealChat(
@@ -66,9 +68,17 @@ class RealChat {
     kind: j['kind'] as String? ?? 'direct',
     role: j['role'] as String?,
     members: (j['members'] as num?)?.toInt() ?? 0,
+    channelCommunity: (j['channel'] as Map?)?['community'] as String?,
+    channelId: (j['channel'] as Map?)?['channel'] as String?,
   );
 
-  /// direct, group, or join (this account waits for an admin).
+  /// For a closed community channel: which one.
+  final String? channelCommunity;
+  final String? channelId;
+
+  bool get isChannel => kind == 'channel';
+
+  /// direct, group, join (this account waits for an admin) or channel.
   final String kind;
 
   /// In a group: owner, admin, member or guest.
@@ -255,6 +265,9 @@ class RealMessage {
     required this.at,
     this.missing = 0,
     this.user = '-',
+    this.from = '',
+    this.sent,
+    this.sig,
   });
 
   factory RealMessage.fromJson(Map<String, Object?> j) => RealMessage(
@@ -264,7 +277,27 @@ class RealMessage {
     at: (j['at'] as num?)?.toInt() ?? 0,
     missing: (j['missing'] as num?)?.toInt() ?? 0,
     user: j['user'] as String? ?? '-',
+    from: j['from'] as String? ?? '',
+    sent: (j['sent'] as num?)?.toInt(),
+    sig: j['sig'] as String?,
   );
+
+  /// The sending device (`user:device`).
+  final String from;
+
+  /// In a closed channel: when the device wrote it and its signature
+  /// (checked by the core when it arrived).
+  final int? sent;
+  final String? sig;
+
+  /// What a report hands the moderators: the text and its signature.
+  Map<String, Object?> get evidence => {
+    'user': user,
+    'device': from.contains(':') ? from.substring(from.indexOf(':') + 1) : from,
+    'text': text,
+    'sent': sent,
+    'sig': sig,
+  };
 
   final int id;
   final String text;
@@ -322,6 +355,7 @@ class AppState extends ChangeNotifier {
     onGone: (_) {
       if (screen == TrairScreen.community) go(TrairScreen.chats);
     },
+    onInfo: () => unawaited(keepChannels()),
   );
 
   /// Show a real community, or the demo community with null.
@@ -1624,6 +1658,149 @@ class AppState extends ChangeNotifier {
       }
       if (groupsTouched.isNotEmpty) await _tidyGroups(api, only: groupsTouched);
     }
+  }
+
+  // ------------------------------------------- closed channels (M8, 3b)
+
+  bool _keeping = false;
+  bool _keepAgain = false;
+
+  /// The chat of a closed channel on this device, if it was let in.
+  RealChat? channelChat(String? group) =>
+      group == null ? null : realChats.where((c) => c.id == group && c.state == 'active').firstOrNull;
+
+  /// As a keeper: make the MLS group of a closed channel, let in whoever
+  /// the community lets read it (with the last texts), remove who may no
+  /// longer, and make the keepers keepers inside. Runs after every change
+  /// of a community; one run at a time.
+  Future<void> keepChannels() async {
+    final api = _api;
+    if (api == null || vault == null || !chatsReady) return;
+    if (_keeping) {
+      _keepAgain = true;
+      return;
+    }
+    _keeping = true;
+    try {
+      do {
+        _keepAgain = false;
+        for (final info in communities.infos.values.toList()) {
+          if (!info.can(Perm.manageChannels)) continue;
+          for (final ch in info.channels.where((c) => c.closed && c.group != null)) {
+            if (!identical(api, _api)) return;
+            await _keepChannel(api, info, ch);
+          }
+        }
+      } while (_keepAgain && identical(api, _api));
+    } finally {
+      _keeping = false;
+    }
+  }
+
+  Future<void> _keepChannel(ServerApi api, CommunityInfo info, CChannel ch) async {
+    final group = ch.group!;
+    final m = await communities.channelMembers(info.id, ch.id);
+    if (!m.ok) return;
+    final readers = (m.body['readers'] as List? ?? const []).cast<String>();
+    final keepers = (m.body['keepers'] as List? ?? const []).cast<String>();
+    final me = ownUser;
+    if (channelChat(group) == null) {
+      // Another keeper made it: wait for the welcome.
+      if (m.body['started'] == true) return;
+      final offers = [
+        for (final u in readers) ...await api.claim(u),
+        if (!readers.contains(me)) ...await api.claim(me),
+      ];
+      final made = await vault!.createChannelGroup(group, ch.name, info.id, ch.id, offers);
+      final commit = made.raw['commit'];
+      if (made.ok && commit is Map) await _pushCommit(api, commit.cast<String, Object?>());
+      await refreshChats();
+      if (made.ok) _keepAgain = true;
+      return;
+    }
+    final view = await vault!.groupInfo(group);
+    if (!view.ok) return;
+    final members = GroupInfo.fromJson((view.raw['group'] as Map).cast<String, Object?>()).members;
+    final inside = {for (final x in members) x.user};
+    final add = [
+      for (final u in readers)
+        if (!inside.contains(u)) u,
+    ];
+    if (add.isNotEmpty) {
+      final offers = [for (final u in add) ...await api.claim(u)];
+      if (offers.isNotEmpty) {
+        final a = await vault!.addToChannel(group, offers);
+        final commit = a.raw['commit'];
+        if (a.ok && commit is Map && await _pushCommit(api, commit.cast<String, Object?>())) {
+          for (final u in add) {
+            final h = await vault!.channelHistory(group, u);
+            if (h.ok && h.raw['none'] != true) await api.sendMessage(h.raw['to'], h.raw['body'] as String);
+          }
+          inside.addAll(add);
+        }
+      }
+    }
+    for (final u in inside.toList()) {
+      if (u == me || readers.contains(u)) continue;
+      final r = await vault!.channelRemove(group, u);
+      final commit = r.raw['commit'];
+      if (r.ok && commit is Map && await _pushCommit(api, commit.cast<String, Object?>())) inside.remove(u);
+    }
+    final want = [
+      for (final u in keepers)
+        if (inside.contains(u) || u == me) u,
+    ]..sort();
+    final now = [
+      for (final x in members)
+        if (x.isAdmin && inside.contains(x.user)) x.user,
+    ]..sort();
+    if (want.join(',') != now.join(',')) {
+      final k = await vault!.setKeepers(group, want);
+      final commit = k.raw['commit'];
+      if (k.ok && commit is Map) await _pushCommit(api, commit.cast<String, Object?>());
+    }
+    if (realMessages.containsKey(group)) await loadMessages(group);
+  }
+
+  /// Before handing a community over: make the new owner a keeper of every
+  /// closed channel this Trair keeps. Otherwise, once the old owner's
+  /// rights are gone, nobody inside the group may change it any more.
+  Future<void> keepersBeforeTransfer(String community, String to) async {
+    final api = _api;
+    final info = communities.infos[community];
+    if (api == null || info == null || vault == null) return;
+    for (final ch in info.channels) {
+      final group = ch.group;
+      if (!ch.closed || group == null || channelChat(group) == null) continue;
+      final view = await vault!.groupInfo(group);
+      if (!view.ok) continue;
+      final members = GroupInfo.fromJson((view.raw['group'] as Map).cast<String, Object?>()).members;
+      if (!members.any((x) => x.user == to) || members.any((x) => x.user == to && x.isAdmin)) continue;
+      final want = {
+        for (final x in members)
+          if (x.isAdmin) x.user,
+        to,
+      }.toList()..sort();
+      final k = await vault!.setKeepers(group, want);
+      final commit = k.raw['commit'];
+      if (k.ok && commit is Map) await _pushCommit(api, commit.cast<String, Object?>());
+    }
+  }
+
+  /// Delete a text of a closed channel for everyone (keepers: any; others:
+  /// their own).
+  Future<bool> deleteChannelMessage(String group, int id) async {
+    final api = _api;
+    if (api == null) return false;
+    final d = await vault!.deleteChannelMessage(group, id);
+    if (!d.ok) {
+      chatMessage = _chatError(d);
+      notifyListeners();
+      return false;
+    }
+    await api.sendMessage(d.raw['to'], d.raw['body'] as String);
+    await loadMessages(group);
+    return true;
   }
 
   /// Pair a new device: get a channel, show the code, wait for the new

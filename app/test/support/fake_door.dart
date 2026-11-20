@@ -229,7 +229,21 @@ class FakeDoor implements CoreDoor {
         final chat = _chat(r['chat']);
         if (chat == null) return _fail('unknown_chat');
         if (chat['state'] != 'active') return _fail('blocked');
-        final m = {'id': ++_ids, 'chat': chat['id'], 'text': r['text'], 'outgoing': true, 'at': 0, 'missing': 0};
+        final m = {
+          'id': ++_ids,
+          'chat': chat['id'],
+          'text': r['text'],
+          'outgoing': true,
+          'at': 0,
+          'missing': 0,
+          if (chat['kind'] == 'channel') ...{
+            'user': me,
+            'from': '$me:$thisId',
+            'sent': _now,
+            'device': thisId,
+            'sig': 'sig-${r['text']}',
+          },
+        };
         (messages[chat['id'] as String] ??= []).add(m);
         return {
           'ok': true,
@@ -464,6 +478,85 @@ class FakeDoor implements CoreDoor {
     final chatId = r['chat'] as String? ?? '';
     final g = groups[chatId];
     switch (op) {
+      // ----- closed channels (M8, 3b) -----
+      case 'create_channel_group':
+        final id = r['group'] as String;
+        if (id.length != 32 || groups.containsKey(id)) return _fail('rejected');
+        final offers = (r['offers'] as List).cast<Map<String, Object?>>();
+        final users = {
+          for (final o in offers)
+            if (!(o['device'] as String).startsWith('$me:')) (o['device'] as String).split(':').first,
+        };
+        final channel = {'community': r['community'], 'channel': r['channel']};
+        groups[id] = {
+          'name': r['name'],
+          'owner': me,
+          'admins': <String>[],
+          'guests': <String, int>{},
+          'members': [me, ...users],
+          'ends': null,
+          'changed': <String>[],
+          'epoch': 0,
+          'channel': channel,
+        };
+        chats.add({'id': id, 'peer': '', 'kind': 'channel', 'state': 'active', 'last': 0, 'channel': channel});
+        _syncChat(id);
+        _note(id, {'event': 'created', 'by': me});
+        final made = users.isEmpty
+            ? <String, Object?>{'ok': true, 'commit': null}
+            : _groupCommit(id, welcomeTo: [for (final u in users) '$u:d-peer']);
+        channelOps.add('create:$id:${users.join(',')}');
+        return {...made, 'chat': Map.of(_chat(id)!)};
+      case 'add_to_channel':
+        if (g == null || g['channel'] == null) return _fail('rejected');
+        final offers = (r['offers'] as List).cast<Map<String, Object?>>();
+        final users = {for (final o in offers) (o['device'] as String).split(':').first}..removeAll(_members(chatId));
+        (g['members'] as List).addAll(users);
+        _note(chatId, {'event': 'added', 'by': me, 'users': users.toList()});
+        _syncChat(chatId);
+        channelOps.add('add:${users.join(',')}');
+        return _groupCommit(chatId, welcomeTo: [for (final u in users) '$u:d-peer']);
+      case 'channel_remove':
+        if (g == null || g['channel'] == null || !_members(chatId).contains(r['user'])) return _fail('rejected');
+        (g['members'] as List).remove(r['user']);
+        (g['admins'] as List).remove(r['user']);
+        _syncChat(chatId);
+        channelOps.add('remove:${r['user']}');
+        return _groupCommit(chatId, removed: ['${r['user']}:d-peer']);
+      case 'set_keepers':
+        if (g == null || g['channel'] == null) return _fail('rejected');
+        final want = (r['keepers'] as List).cast<String>().where((u) => u != g['owner']).toList()..sort();
+        final now = _admins(chatId).toList()..sort();
+        if (want.join(',') == now.join(',')) return {'ok': true, 'commit': null};
+        g['admins'] = want;
+        _syncChat(chatId);
+        channelOps.add('keepers:${want.join(',')}');
+        return _groupCommit(chatId);
+      case 'channel_history':
+        if (g == null || g['channel'] == null) return _fail('rejected');
+        if (!_members(chatId).contains(r['user'])) return {'ok': true, 'none': true};
+        channelOps.add('history:${r['user']}');
+        return {
+          'ok': true,
+          'body': wire({'kind': 'history', 'chat': chatId}),
+          'to': ['${r['user']}:d-peer'],
+        };
+      case 'delete_channel_message':
+        if (g == null || g['channel'] == null) return _fail('rejected');
+        final list = messages[chatId] ?? const <Map<String, Object?>>[];
+        final m = list.where((m) => m['id'] == r['id']).firstOrNull;
+        if (m == null) return _fail('rejected');
+        if (m['outgoing'] != true && !_isAdmin(chatId)) return _fail('not_allowed');
+        list.remove(m);
+        channelOps.add('delete:${m['text']}');
+        return {
+          'ok': true,
+          'body': wire({'kind': 'delete', 'chat': chatId}),
+          'to': [
+            for (final u in _members(chatId))
+              if (u != me) '$u:d-peer',
+          ],
+        };
       case 'create_group':
         final name = (r['name'] as String).trim();
         if (name.isEmpty) return _fail('rejected');
@@ -724,7 +817,16 @@ class FakeDoor implements CoreDoor {
           'changed': <String>[],
           'epoch': 1,
         };
-        chats.add({'id': id, 'peer': '', 'kind': 'group', 'state': _isContact(by) ? 'active' : 'request', 'last': 0});
+        final channel = w['channel'];
+        chats.add({
+          'id': id,
+          'peer': '',
+          'kind': channel == null ? 'group' : 'channel',
+          'state': channel != null || _isContact(by) ? 'active' : 'request',
+          'last': 0,
+          'channel': ?channel,
+        });
+        if (channel != null) groups[id]!['channel'] = channel;
         _syncChat(id);
         _note(id, {'event': 'joined', 'by': by});
         return {
@@ -745,10 +847,12 @@ class FakeDoor implements CoreDoor {
           'id': ++_ids,
           'chat': chat,
           'user': w['user'],
+          'from': '${w['user']}:d-peer',
           'text': w['text'],
           'outgoing': false,
           'at': _now,
           'missing': 0,
+          if (groups[chat]?['channel'] != null) ...{'sent': _now, 'device': 'd-peer', 'sig': 'sig-${w['text']}'},
         };
         (messages[chat] ??= []).add(m);
         return {
@@ -975,7 +1079,13 @@ class FakeDoor implements CoreDoor {
           'join_requests' ||
           'admit' ||
           'close_join' ||
-          'deny_join':
+          'deny_join' ||
+          'create_channel_group' ||
+          'add_to_channel' ||
+          'channel_remove' ||
+          'set_keepers' ||
+          'channel_history' ||
+          'delete_channel_message':
         return _chatOp(op, r);
       case 'notfall_list' ||
           'notfall_add' ||
@@ -1007,6 +1117,9 @@ class FakeDoor implements CoreDoor {
     }
     return _fail('bad_request');
   }
+
+  /// What happened to closed channels, in order (`create:…`, `add:…`).
+  final List<String> channelOps = [];
 
   /// What the signature check says per author (default: known).
   final Map<String, String> openChecks = {};

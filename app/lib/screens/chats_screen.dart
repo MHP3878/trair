@@ -232,8 +232,9 @@ class _ChatsScreenState extends State<ChatsScreen> {
             children: [
               if (state.chatsReady) ...[
                 _sectionLabel('Echt verschlüsselt'),
-                for (final c in state.realChats) _realRow(state, c),
-                if (state.realChats.isEmpty)
+                // Closed community channels live in their community.
+                for (final c in state.realChats.where((c) => !c.isChannel)) _realRow(state, c),
+                if (!state.realChats.any((c) => !c.isChannel))
                   const Padding(
                     padding: EdgeInsets.fromLTRB(12, 2, 12, 8),
                     child: Text('Noch keine. Oben auf „Neuer Chat“.', style: TrairText.small),

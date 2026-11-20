@@ -151,6 +151,11 @@ pub enum Event {
         text: String,
         /// How many earlier messages from this sender never arrived.
         missing: u64,
+        /// In a closed channel: when it was written and the device
+        /// signature (not yet checked).
+        signed: Option<(u64, Vec<u8>)>,
+        /// The sender device's public signing key (its MLS leaf).
+        key: Vec<u8>,
     },
     /// A profile from another member (name, picture, badges), not yet
     /// checked. `account_key` is the sender's, from its certificate.
@@ -208,6 +213,18 @@ struct Payload {
     /// the chat vanishes). Not counted either.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     control: Option<serde_json::Value>,
+    /// In a closed channel: when the device wrote the text and its
+    /// signature over it (see [`crate::proofs::sign_closed_message`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    signed: Option<SignedText>,
+}
+
+/// The device signature a text of a closed channel carries.
+#[derive(Serialize, Deserialize)]
+struct SignedText {
+    sent: u64,
+    /// Hex.
+    sig: String,
 }
 
 /// What a device keeps besides the OpenMLS key-value store: which groups
@@ -557,7 +574,7 @@ impl Device {
     /// Create a Trair group (or join chat) with its state, with only this
     /// device in it.
     pub fn create_trair_group(&mut self, group: &str, state: &GroupState) -> Result<()> {
-        if !state.is_admin(&self.acct()) && state.kind == groups::GroupKind::Group {
+        if !state.is_admin(&self.acct()) && state.kind != groups::GroupKind::Join {
             return Err(CoreError::NotAllowed(
                 "the creator must own the group".into(),
             ));
@@ -1043,8 +1060,61 @@ impl Device {
                 text: text.to_string(),
                 profile: None,
                 control: None,
+                signed: None,
             },
         )
+    }
+
+    /// Encrypt a text of a closed channel with its device signature.
+    pub fn encrypt_signed(
+        &mut self,
+        group: &str,
+        text: &str,
+        sent: u64,
+        sig: &[u8],
+    ) -> Result<Vec<u8>> {
+        self.check_send(group)?;
+        let seq = {
+            let s = self.seq_out.entry(group.to_string()).or_insert(0);
+            *s += 1;
+            *s
+        };
+        self.seal(
+            group,
+            &Payload {
+                seq,
+                text: text.to_string(),
+                profile: None,
+                control: None,
+                signed: Some(SignedText {
+                    sent,
+                    sig: hex::encode(sig),
+                }),
+            },
+        )
+    }
+
+    /// This device as a [`DeviceIdentity`] (to sign as this device).
+    pub(crate) fn identity(&self) -> crate::devices::DeviceIdentity {
+        crate::devices::DeviceIdentity {
+            id: self
+                .id
+                .split_once(':')
+                .map_or(self.id.as_str(), |(_, d)| d)
+                .to_string(),
+            keys: self.keys.clone(),
+        }
+    }
+
+    /// The public signing key of a member device (`user:device`).
+    pub fn member_key(&self, group: &str, device: &str) -> Result<Option<Vec<u8>>> {
+        let g = self.group(group)?;
+        Ok(g.members()
+            .find(|m| {
+                DeviceCertificate::check(m.credential.serialized_content(), &m.signature_key)
+                    .is_ok_and(|c| c.id == device)
+            })
+            .map(|m| m.signature_key.clone()))
     }
 
     /// Encrypt this account's profile for a group. Same checks as a text.
@@ -1057,6 +1127,7 @@ impl Device {
                 text: String::new(),
                 profile: Some(profile.clone()),
                 control: None,
+                signed: None,
             },
         )
     }
@@ -1071,6 +1142,7 @@ impl Device {
                 text: String::new(),
                 profile: None,
                 control: Some(control.clone()),
+                signed: None,
             },
         )
     }
@@ -1098,6 +1170,7 @@ impl Device {
                 text: String::new(),
                 profile: None,
                 control: Some(control.clone()),
+                signed: None,
             },
         )
     }
@@ -1258,6 +1331,15 @@ impl Device {
         let processed = g
             .process_message(provider, pm)
             .map_err(|e| CoreError::Rejected(format!("{e:?}")))?;
+        let sender_key: Vec<u8> = match processed.sender() {
+            Sender::Member(i) => self
+                .group(&group)?
+                .members()
+                .find(|m| m.index == *i)
+                .map(|m| m.signature_key.clone())
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        };
         let (sender, sender_index) = match processed.sender() {
             Sender::Member(i) => (
                 before
@@ -1296,11 +1378,21 @@ impl Device {
                     .insert((group.clone(), sender.clone()), p.seq)
                     .unwrap_or(0);
                 let missing = p.seq.saturating_sub(last + 1);
+                let signed = match p.signed {
+                    Some(s) => Some((
+                        s.sent,
+                        hex::decode(&s.sig)
+                            .map_err(|_| CoreError::Rejected("bad signature".into()))?,
+                    )),
+                    None => None,
+                };
                 Ok(Event::Message {
                     group,
                     from: sender,
                     text: p.text,
                     missing,
+                    signed,
+                    key: sender_key,
                 })
             }
             ProcessedMessageContent::StagedCommitMessage(sc) => {

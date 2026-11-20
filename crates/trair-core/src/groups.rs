@@ -22,6 +22,13 @@
 //!
 //! A join chat ([`GroupKind::Join`]) is a short two-account chat that only
 //! carries the token of a group invitation key to an admin.
+//!
+//! A closed channel of a community ([`GroupKind::Channel`], M8 step 3b) is
+//! a group whose admins are the community's keepers (who may manage
+//! channels). Keepers are equals: any of them adds and removes members and
+//! keepers, renames or closes the channel. Who is a keeper is decided by
+//! the community's roles on the server, which takes changes of the group
+//! only from keepers; the group state only follows.
 
 use std::collections::BTreeMap;
 
@@ -72,6 +79,18 @@ pub enum GroupKind {
     Group,
     /// A join chat: brings an invitation key's token to an admin.
     Join,
+    /// A closed channel of a community.
+    Channel,
+}
+
+/// Which community channel a [`GroupKind::Channel`] group is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChannelRef {
+    /// Community id on the server.
+    pub community: String,
+    /// Channel id in the community.
+    pub channel: String,
 }
 
 /// The state of a group, as all members hold it.
@@ -99,6 +118,9 @@ pub struct GroupState {
     /// The owner closed the group: everyone deletes it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub closed: bool,
+    /// For a closed channel: which one. It never changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<ChannelRef>,
 }
 
 /// Someone's role in a group.
@@ -161,6 +183,26 @@ impl GroupState {
             ends,
             guests: Vec::new(),
             closed: false,
+            channel: None,
+        })
+    }
+
+    /// A closed channel made by the keeper `keeper`.
+    pub fn new_channel(name: &str, keeper: Acct, channel: ChannelRef) -> Result<Self> {
+        let name = clean_group_name(name);
+        if name.is_empty() || channel.community.is_empty() || channel.channel.is_empty() {
+            return Err(CoreError::Rejected("a channel needs a name".into()));
+        }
+        Ok(GroupState {
+            v: 1,
+            kind: GroupKind::Channel,
+            name,
+            owner: keeper,
+            admins: Vec::new(),
+            ends: None,
+            guests: Vec::new(),
+            closed: false,
+            channel: Some(channel),
         })
     }
 
@@ -175,6 +217,7 @@ impl GroupState {
             ends: None,
             guests: Vec::new(),
             closed: false,
+            channel: None,
         }
     }
 
@@ -226,7 +269,7 @@ impl GroupState {
     /// (for a join chat: both sides).
     pub fn committers(&self, members: &Accounts) -> Vec<String> {
         let mut out: Vec<String> = match self.kind {
-            GroupKind::Group => std::iter::once(&self.owner)
+            GroupKind::Group | GroupKind::Channel => std::iter::once(&self.owner)
                 .chain(&self.admins)
                 .map(|a| a.user.clone())
                 .collect(),
@@ -267,6 +310,14 @@ impl GroupState {
         if self.name.is_empty() {
             return Err(CoreError::Rejected("a group needs a name".into()));
         }
+        if (self.kind == GroupKind::Channel) != self.channel.is_some() {
+            return Err(CoreError::Rejected("bad channel".into()));
+        }
+        if self.kind == GroupKind::Channel && (self.ends.is_some() || !self.guests.is_empty()) {
+            return Err(CoreError::Rejected(
+                "a channel has no end and no guests".into(),
+            ));
+        }
         if self.closed {
             return Ok(());
         }
@@ -303,7 +354,7 @@ pub fn check_welcome(state: &GroupState, by: &Acct, members: &Accounts) -> Resul
         return Err(CoreError::Rejected("the group is closed".into()));
     }
     let ok = match state.kind {
-        GroupKind::Group => state.is_admin(by),
+        GroupKind::Group | GroupKind::Channel => state.is_admin(by),
         GroupKind::Join => GroupState::holds(members, by),
     };
     if ok {
@@ -336,7 +387,12 @@ pub fn check_change(
     if old.closed {
         return Err(refuse("the group is closed"));
     }
-    let is_owner = old.owner == *committer;
+    if new.channel != old.channel {
+        return Err(refuse("a channel stays the same channel"));
+    }
+    // In a channel all keepers are equals.
+    let is_owner = old.owner == *committer
+        || (old.kind == GroupKind::Channel && old.admins.contains(committer));
     if !is_owner && !old.admins.contains(committer) {
         return Err(refuse(format!(
             "{} is not an admin of this group",
@@ -399,6 +455,75 @@ mod tests {
     }
 
     const ALL: &[&str] = &["olga", "ada", "max", "gus"];
+
+    fn channel() -> GroupState {
+        let mut s = GroupState::new_channel(
+            "team",
+            acct("olga"),
+            ChannelRef {
+                community: "k1".into(),
+                channel: "c1".into(),
+            },
+        )
+        .unwrap();
+        s.admins.push(acct("ada"));
+        s
+    }
+
+    #[test]
+    fn in_a_channel_all_keepers_are_equals_and_members_are_not() {
+        let old = channel();
+        let all = members(&["olga", "ada", "max"]);
+        assert_eq!(GroupState::parse(&old.to_bytes()).unwrap(), old);
+        // A keeper who did not make the channel removes its maker, names a
+        // keeper, renames and closes.
+        let mut new = old.clone();
+        new.owner = acct("ada");
+        new.admins = vec![acct("max")];
+        check_change(
+            &old,
+            &new,
+            &acct("ada"),
+            &["olga".into()],
+            &members(&["ada", "max"]),
+        )
+        .unwrap();
+        let mut renamed = old.clone();
+        renamed.name = "intern".into();
+        check_change(&old, &renamed, &acct("ada"), &[], &all).unwrap();
+        let mut closed = old.clone();
+        closed.closed = true;
+        check_change(&old, &closed, &acct("ada"), &[], &all).unwrap();
+        // A member changes nothing, and the channel stays the same channel.
+        let mut grab = old.clone();
+        grab.admins.push(acct("max"));
+        assert!(check_change(&old, &grab, &acct("max"), &[], &all).is_err());
+        let mut moved = old.clone();
+        moved.channel = Some(ChannelRef {
+            community: "k1".into(),
+            channel: "c2".into(),
+        });
+        assert!(check_change(&old, &moved, &acct("olga"), &[], &all).is_err());
+        let mut plain = old.clone();
+        plain.kind = GroupKind::Group;
+        plain.channel = None;
+        assert!(check_change(&old, &plain, &acct("olga"), &[], &all).is_err());
+        // A welcome only from a keeper; no ends, no guests, no group
+        // without its channel.
+        check_welcome(&old, &acct("ada"), &all).unwrap();
+        assert!(check_welcome(&old, &acct("max"), &all).is_err());
+        let mut ending = old.clone();
+        ending.ends = Some(5);
+        assert!(ending.check_shape(&all).is_err());
+        let mut lost = old.clone();
+        lost.channel = None;
+        assert!(lost.check_shape(&all).is_err());
+        let mut group_with_channel = group();
+        group_with_channel.channel = old.channel.clone();
+        assert!(group_with_channel.check_shape(&members(ALL)).is_err());
+        // The server is told the keepers.
+        assert_eq!(old.committers(&all), ["ada", "olga"]);
+    }
 
     #[test]
     fn names_are_cleaned_and_the_state_reads_back() {

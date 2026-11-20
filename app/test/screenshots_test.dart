@@ -445,6 +445,7 @@ void main() {
       reason: 'Werbung',
       text: 'Kauft hier Follower, billig!!!',
     );
+    c.closedChannel(id, 'orga', readRoles: [2]);
     final other = c.found('Schach-AG', owner: 'local-olga');
     c.addMember(other, FakeCommunities.me);
     c.setRules(other, '1. Fair spielen\n2. Keine Hilfe von Programmen');
@@ -467,6 +468,27 @@ void main() {
     await tester.tap(find.byTooltip('Senden'));
     await tester.pumpAndSettle();
     await _shot(tester, '28-community-kanal');
+    // The closed channel: this Trair (a keeper) made its group.
+    await tester.tap(find.byKey(const ValueKey('channel-orga')));
+    await tester.pumpAndSettle();
+    final orga = ((c.communities[id]!['channels'] as List).last as Map)['group'] as String;
+    server.deliver(
+      FakeDoor.wire({
+        'kind': 'group_message',
+        'chat': orga,
+        'user': 'local-lena',
+        'text': 'Budget für die Deko: 300 €',
+      }),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('channel-composer')), 'Passt, ich frag beim Getränkemarkt.');
+    await tester.tap(find.byTooltip('Senden'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Geschlossen · Ende-zu-Ende'));
+    await tester.pumpAndSettle();
+    await _shot(tester, '33-geschlossener-kanal');
+    await tester.tap(find.text('Geschlossen · Ende-zu-Ende'));
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Community-Einstellungen'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('tab-roles')));

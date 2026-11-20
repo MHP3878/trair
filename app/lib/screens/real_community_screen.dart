@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 The Trair contributors
 
+import 'dart:convert';
+
 import 'package:material_ui/material_ui.dart';
 
 import '../app_state.dart';
@@ -13,7 +15,7 @@ import '../widgets/profile_popup.dart';
 import '../widgets/trair_icons.dart';
 import 'community_dialogs.dart';
 import 'community_settings.dart';
-import 'group_panel.dart' show confirmAction, initialsOf, whenText;
+import 'group_panel.dart' show confirmAction, groupNoteText, initialsOf, whenText;
 
 /// A real community (M8): channels on the left, the open channel in the
 /// middle, members on the right. Everything a button does is decided again
@@ -242,7 +244,14 @@ class _RealCommunityScreenState extends State<RealCommunityScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             child: Row(
               children: [
-                const Icon(TrairIcons.hash, size: 16, color: TrairColors.amber, semanticLabel: 'offen'),
+                ch.closed
+                    ? const Icon(
+                        TrairIcons.lock,
+                        size: 16,
+                        color: TrairColors.accentLight,
+                        semanticLabel: 'geschlossen',
+                      )
+                    : const Icon(TrairIcons.hash, size: 16, color: TrairColors.amber, semanticLabel: 'offen'),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
@@ -273,6 +282,7 @@ class _RealCommunityScreenState extends State<RealCommunityScreen> {
   // ------------------------------------------------------------ channel
 
   Widget _channel(AppState state, CommunityInfo info, CChannel channel) {
+    if (channel.closed) return _closedChannel(state, info, channel);
     final c = state.communities;
     final messages = c.messagesOf(info.id, channel.id);
 
@@ -409,6 +419,280 @@ class _RealCommunityScreenState extends State<RealCommunityScreen> {
                 ),
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Chats whose texts were asked for once (closed channels).
+  final Set<String> _asked = {};
+
+  /// A closed channel: texts come from the core, end-to-end encrypted and
+  /// signed; keepers' devices let people in.
+  Widget _closedChannel(AppState state, CommunityInfo info, CChannel channel) {
+    final chat = state.channelChat(channel.group);
+    if (chat != null && !state.realMessages.containsKey(chat.id) && _asked.add(chat.id)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => state.loadMessages(chat.id));
+    }
+    final messages = chat == null ? const <RealMessage>[] : (state.realMessages[chat.id] ?? const <RealMessage>[]);
+
+    Future<void> send() async {
+      final text = _draft.text.trim();
+      if (text.isEmpty || chat == null) return;
+      if (await state.sendReal(chat.id, text)) _draft.clear();
+    }
+
+    final mustAccept = !info.rulesOk && info.rules.isNotEmpty;
+    final keeper = info.can(Perm.manageChannels);
+    return GlassPanel(
+      child: Stack(
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                decoration: const BoxDecoration(
+                  border: Border(bottom: BorderSide(color: TrairColors.borderSoft)),
+                ),
+                padding: const EdgeInsets.fromLTRB(22, 12, 16, 10),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(TrairIcons.lock, size: 16, color: TrairColors.accentLight),
+                              const SizedBox(width: 6),
+                              Flexible(child: Text(channel.name, style: TrairText.heading)),
+                            ],
+                          ),
+                          if (channel.topic.isNotEmpty) Text(channel.topic, style: TrairText.small),
+                        ],
+                      ),
+                    ),
+                    SecurityCapsule(
+                      text: 'Geschlossen · Ende-zu-Ende',
+                      tone: CapsuleTone.safe,
+                      open: _info,
+                      onTap: () => setState(() => _info = !_info),
+                    ),
+                    Expanded(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          RoundIconButton(
+                            icon: TrairIcons.scrollText,
+                            tooltip: 'Regeln',
+                            filled: false,
+                            onPressed: () => showRules(context, state, info),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              AnimatedSize(
+                duration: const Duration(milliseconds: 250),
+                child: _info
+                    ? Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                        child: Center(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 460),
+                            child: const GlassPanel(
+                              lite: true,
+                              radius: 22,
+                              color: TrairColors.glassPopup,
+                              padding: EdgeInsets.all(16),
+                              child: Text(
+                                'Dieser Kanal ist geschlossen: Nur wer drin ist, hat die Schlüssel. Der Server und '
+                                'die Moderation sehen nichts – außer einem Text, den jemand meldet. Wer mit seiner '
+                                'Rolle lesen darf, wird vom Trair eines Hüters (wer Kanäle verwalten darf) '
+                                'aufgenommen und bekommt die letzten 50 Nachrichten. Jede Aufnahme steht hier im Verlauf.',
+                                style: TextStyle(fontSize: 13.5, height: 1.5, color: TrairColors.textSoft),
+                              ),
+                            ),
+                          ),
+                        ),
+                      )
+                    : const SizedBox(width: double.infinity),
+              ),
+              Expanded(
+                child: chat == null
+                    ? const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(40),
+                          child: Text(
+                            'Noch nicht drin. Das Trair eines Hüters nimmt dich auf, sobald es läuft.',
+                            textAlign: TextAlign.center,
+                            style: TrairText.muted,
+                          ),
+                        ),
+                      )
+                    : messages.isEmpty
+                    ? const Center(child: Text('Noch keine Nachrichten.', style: TrairText.muted))
+                    : ListView(
+                        padding: const EdgeInsets.fromLTRB(26, 8, 26, 130),
+                        children: [
+                          for (final m in messages)
+                            if (m.isNote)
+                              _channelNote(state, m)
+                            else
+                              _closedMessage(state, info, chat.id, channel, m, keeper),
+                        ],
+                      ),
+              ),
+            ],
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 18,
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 680),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (final text in [state.communities.message, state.chatMessage])
+                        if (text.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8, left: 12),
+                            child: Text(text, style: const TextStyle(fontSize: 13, color: TrairColors.amber)),
+                          ),
+                      if (chat == null)
+                        _bar('Warte auf Aufnahme durch einen Hüter.', null)
+                      else if (mustAccept)
+                        _bar(
+                          'Bevor du schreibst: Regeln lesen und akzeptieren.',
+                          PillButton(
+                            label: 'Regeln lesen',
+                            height: 38,
+                            onPressed: () => showRules(context, state, info),
+                          ),
+                        )
+                      else if (!channel.canWrite)
+                        _bar('In diesem Kanal schreibt nur die Moderation.', null)
+                      else
+                        _composer(channel, send),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _channelNote(AppState state, RealMessage m) => Padding(
+    padding: const EdgeInsets.only(bottom: 12),
+    child: Center(
+      child: Text(
+        channelNoteText(m.text, (u) => u == state.communities.me ? 'Du' : _nameOf(state, u)),
+        style: const TextStyle(fontSize: 12.5, color: TrairColors.textMuted),
+      ),
+    ),
+  );
+
+  Widget _closedMessage(
+    AppState state,
+    CommunityInfo info,
+    String group,
+    CChannel channel,
+    RealMessage m,
+    bool keeper,
+  ) {
+    final color = _colorOf(info, m.user);
+    final name = _nameOf(state, m.user);
+    final own = m.outgoing;
+    return Padding(
+      key: ValueKey('closed-${m.id}'),
+      padding: const EdgeInsets.only(bottom: 18),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            customBorder: const CircleBorder(),
+            onTap: () => _memberMenu(state, info, m.user),
+            child: Avatar(initials: initialsOf(name), color: color, size: 38),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      name,
+                      style: TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w600,
+                        color: color,
+                        shadows: glowShadows(color, strength: 20),
+                      ),
+                    ),
+                    const Tooltip(
+                      message: 'Ende-zu-Ende verschlüsselt · Unterschrift beim Empfang geprüft',
+                      child: Icon(TrairIcons.lock, size: 13, color: TrairColors.mint),
+                    ),
+                    Text(
+                      whenText(m.sent ?? m.at),
+                      style: const TextStyle(fontSize: 12, color: TrairColors.placeholder),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 3),
+                Text(m.text, style: TrairText.body.copyWith(color: const Color(0xFFE3E1EC))),
+              ],
+            ),
+          ),
+          PopupMenuButton<String>(
+            tooltip: 'Mehr',
+            color: TrairColors.glassPopup,
+            icon: const Icon(TrairIcons.ellipsis, size: 16, color: TrairColors.textMuted),
+            onSelected: (v) async {
+              if (v == 'delete') {
+                if (await confirmAction(
+                  context,
+                  'Nachricht löschen?',
+                  'Sie verschwindet bei allen im Kanal.',
+                  'Löschen',
+                )) {
+                  await state.deleteChannelMessage(group, m.id);
+                }
+              } else if (v == 'report') {
+                final reason = await askText(
+                  context,
+                  title: 'Nachricht melden',
+                  text:
+                      'Der Kanal ist verschlüsselt: Mit der Meldung gibst du diesen einen Text an die Moderation '
+                      'von „${info.name}“ weiter. Die Unterschrift zeigt, dass er wirklich so geschrieben wurde.',
+                  hint: 'Warum?',
+                  yes: 'Melden',
+                  kind: PillKind.danger,
+                );
+                if (reason != null) await state.communities.reportClosed(channel.id, m.evidence, reason);
+              } else if (v == 'copy') {
+                await copySensitive(m.text);
+              }
+            },
+            itemBuilder: (_) => [
+              const PopupMenuItem(value: 'copy', child: Text('Text kopieren')),
+              if (!own && m.sig != null) const PopupMenuItem(value: 'report', child: Text('Melden')),
+              if ((own || keeper) && m.sig != null) const PopupMenuItem(value: 'delete', child: Text('Löschen')),
+            ],
           ),
         ],
       ),
@@ -746,6 +1030,7 @@ class _RealCommunityScreenState extends State<RealCommunityScreen> {
           '$name wird Gründer und hat alle Rechte. Du bleibst Mitglied, aber ohne die Rechte des Gründers.',
           'Übergeben',
         )) {
+          await state.keepersBeforeTransfer(info.id, user);
           await c.transfer(user);
         }
       case 'report':
@@ -807,6 +1092,36 @@ class _RealCommunityScreenState extends State<RealCommunityScreen> {
       await state.communities.setRoles(user, [...keep, ...chosen.where((id) => roles.any((r) => r.id == id))]);
     }
   }
+}
+
+/// A note in a closed channel's history, as a sentence.
+String channelNoteText(String text, String Function(String user) name) {
+  Map<String, Object?> j;
+  try {
+    j = (jsonDecode(text) as Map).cast<String, Object?>();
+  } on Object {
+    return text;
+  }
+  final users = [for (final u in (j['users'] as List? ?? const []).cast<String>()) name(u)];
+  final who = users.join(', ');
+  final by = name(j['by'] as String? ?? '');
+  switch (j['event']) {
+    case 'created':
+      return by == 'Du' ? 'Du hast den Kanal angelegt' : '$by hat den Kanal angelegt';
+    case 'joined':
+      return '$by hat dich aufgenommen';
+    case 'added':
+      return '$by hat $who aufgenommen';
+    case 'removed':
+      return users.length == 1 && users.single == 'Du' ? '$by hat dich entfernt' : '$by hat $who entfernt';
+    case 'history':
+      return '$by hat dir die letzten ${j['count']} Nachrichten gegeben';
+    case 'admin':
+      return '$who ${users.length > 1 ? 'sind' : 'ist'} jetzt Hüter';
+    case 'not_admin':
+      return '$who ${users.length > 1 ? 'sind' : 'ist'} kein Hüter mehr';
+  }
+  return groupNoteText(text, name).replaceAll('Gruppe', 'Kanal');
 }
 
 class _Tag extends StatelessWidget {

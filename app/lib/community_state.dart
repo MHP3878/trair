@@ -74,6 +74,8 @@ class CChannel {
     required this.readRoles,
     required this.writeRoles,
     required this.canWrite,
+    this.closed = false,
+    this.group,
   });
 
   factory CChannel.fromJson(Map<String, Object?> j) => CChannel(
@@ -85,6 +87,8 @@ class CChannel {
     readRoles: (j['read_roles'] as List?)?.map((e) => (e as num).toInt()).toList(),
     writeRoles: (j['write_roles'] as List?)?.map((e) => (e as num).toInt()).toList(),
     canWrite: j['can_write'] == true,
+    closed: j['closed'] == true,
+    group: j['group'] as String?,
   );
 
   final String id;
@@ -99,6 +103,10 @@ class CChannel {
 
   /// This account may write here now (rights and accepted rules).
   final bool canWrite;
+
+  /// End-to-end encrypted: an MLS group (`group`), kept by the keepers.
+  final bool closed;
+  final String? group;
 
   /// Everyone reads, only some write (announcements, rules).
   bool get readOnly => writeRoles != null && !writeRoles!.contains(0);
@@ -414,9 +422,12 @@ String communityErrorText(String code) => switch (code) {
 /// connection to the server. Lives inside the app state; [_notify] makes
 /// the screens redraw.
 class Communities {
-  Communities(this._notify, {this.onGone});
+  Communities(this._notify, {this.onGone, this.onInfo});
 
   final void Function() _notify;
+
+  /// A community's state was loaded (keepers then tend closed channels).
+  final void Function()? onInfo;
 
   /// The open community is gone (kicked, banned, deleted).
   final void Function(String name)? onGone;
@@ -473,6 +484,11 @@ class Communities {
     final start = await api.communitySync(-1, 0);
     if (start.ok) _seq = (start.body['seq'] as num?)?.toInt() ?? 0;
     await refreshList();
+    // Every community, so keepers tend closed channels also of those not
+    // open on screen.
+    for (final c in list) {
+      await loadInfo(c.id);
+    }
     final badge = await vault.teamBadge();
     _teamBadge = badge.ok ? badge.raw['badge'] : null;
     if (run == _run) unawaited(_syncLoop(api, run));
@@ -543,6 +559,7 @@ class Communities {
       return;
     }
     _notify();
+    if (r.ok) onInfo?.call();
   }
 
   Future<void> openChannel(String id, String channel) async {
@@ -552,6 +569,8 @@ class Communities {
   }
 
   Future<void> loadMessages(String id, String channel) async {
+    // Closed channels are read from the core, not the server.
+    if (infos[id]?.channels.where((c) => c.id == channel).firstOrNull?.closed ?? false) return;
     final r = await _op({'op': 'messages', 'community': id, 'channel': channel, 'limit': 100});
     if (!r.ok) return _notify();
     final list = [
@@ -767,15 +786,26 @@ class Communities {
 
   Future<bool> deleteRole(int role) => _change({'op': 'delete_role', 'role': role});
 
-  Future<bool> createChannel(String name, String category, {String topic = '', List<int>? read, List<int>? write}) =>
-      _change({
-        'op': 'create_channel',
-        'name': name,
-        'category': category,
-        'topic': topic,
-        'read_roles': read,
-        'write_roles': write,
-      });
+  Future<bool> createChannel(
+    String name,
+    String category, {
+    String topic = '',
+    List<int>? read,
+    List<int>? write,
+    bool closed = false,
+  }) => _change({
+    'op': 'create_channel',
+    'name': name,
+    'category': category,
+    'topic': topic,
+    'read_roles': read,
+    'write_roles': write,
+    if (closed) 'closed': true,
+  });
+
+  /// Who may read a closed channel and who keeps it, from the server.
+  Future<ServerReply> channelMembers(String community, String channel) =>
+      _op({'op': 'channel_members', 'community': community, 'channel': channel});
 
   Future<bool> editChannel(
     CChannel ch, {
@@ -881,6 +911,17 @@ class Communities {
     if (id == null) return false;
     final r = await _op({'op': 'report', 'community': id, 'message': messageId, 'reason': reason});
     if (r.ok) message = 'Gemeldet. Die Moderation der Community sieht es jetzt.';
+    _notify();
+    return r.ok;
+  }
+
+  /// Report a text of a closed channel to the moderators: the reporter
+  /// hands it over with its device signature, which the server checks.
+  Future<bool> reportClosed(String channel, Map<String, Object?> evidence, String reason) async {
+    final id = active;
+    if (id == null) return false;
+    final r = await _op({'op': 'report', 'community': id, 'channel': channel, 'reason': reason, 'evidence': evidence});
+    if (r.ok) message = 'Gemeldet. Die Moderation der Community sieht den Text und dass er echt ist.';
     _notify();
     return r.ok;
   }
@@ -1006,11 +1047,16 @@ class Communities {
             if (active == id && reports != null) reload.add('reports');
         }
       }
-      if (listChanged) await refreshList();
+      if (listChanged) {
+        await refreshList();
+        for (final c in list) {
+          if (!infos.containsKey(c.id)) reload.add(c.id);
+        }
+      }
       for (final id in reload) {
         if (id == 'reports') {
           await loadReports();
-        } else if (infos.containsKey(id)) {
+        } else if (infos.containsKey(id) || list.any((c) => c.id == id)) {
           await loadInfo(id);
         }
       }

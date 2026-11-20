@@ -55,6 +55,12 @@
 //! | `check_open_messages` | `community`, `channel`, `messages`, `authors` | `results` |
 //! | `accept_open_key` | `user`, `account_key`    |                                  |
 //! | `team_badge`      |                        | `badge` (signed, public); error `none` |
+//! | `create_channel_group` | `group`, `name`, `community`, `channel`, `offers` | `chat`, `commit` |
+//! | `add_to_channel`  | `chat`, `offers`       | `commit`                         |
+//! | `channel_remove`  | `chat`, `user`         | `commit`                         |
+//! | `set_keepers`     | `chat`, `keepers`      | `commit` (null: nothing to change) |
+//! | `channel_history` | `chat`, `user`         | `body`, `to`, or `none`          |
+//! | `delete_channel_message` | `chat`, `id`    | `body`, `to`                     |
 //!
 //! The community ops (M8) are described in `communities.rs`.
 //!
@@ -408,6 +414,33 @@ enum Request {
         account_key: String,
     },
     TeamBadge {},
+    CreateChannelGroup {
+        group: String,
+        name: String,
+        community: String,
+        channel: String,
+        offers: Vec<Offer>,
+    },
+    AddToChannel {
+        chat: String,
+        offers: Vec<Offer>,
+    },
+    ChannelRemove {
+        chat: String,
+        user: String,
+    },
+    SetKeepers {
+        chat: String,
+        keepers: Vec<String>,
+    },
+    ChannelHistory {
+        chat: String,
+        user: String,
+    },
+    DeleteChannelMessage {
+        chat: String,
+        id: i64,
+    },
 }
 
 #[derive(Default)]
@@ -644,6 +677,18 @@ fn chat_op(state: &mut State, req: Request) -> Value {
         Request::AcceptOpenKey { user, account_key } => {
             communities::accept_open_key(m, &user, &account_key)
         }
+        Request::CreateChannelGroup {
+            group,
+            name,
+            community,
+            channel,
+            offers,
+        } => groups::create_channel_group(m, &group, &name, &community, &channel, offers),
+        Request::AddToChannel { chat, offers } => groups::add_to_channel(m, &chat, offers),
+        Request::ChannelRemove { chat, user } => groups::channel_remove(m, &chat, &user),
+        Request::SetKeepers { chat, keepers } => groups::set_keepers(m, &chat, &keepers),
+        Request::ChannelHistory { chat, user } => groups::channel_history(m, &chat, &user),
+        Request::DeleteChannelMessage { chat, id } => groups::delete_channel_message(m, &chat, id),
         _ => fail("bad_request"),
     }
 }

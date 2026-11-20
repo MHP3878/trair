@@ -106,9 +106,16 @@ pub struct OpenMessage<'a> {
 }
 
 const OPEN_MESSAGE: &[u8] = b"trair/open-message/v1\0";
+/// Messages of closed channels sign with another context: one can never
+/// pass for the other.
+const CLOSED_MESSAGE: &[u8] = b"trair/closed-message/v1\0";
 
 fn open_bytes(m: &OpenMessage) -> Vec<u8> {
-    let mut b = OPEN_MESSAGE.to_vec();
+    channel_bytes(OPEN_MESSAGE, m)
+}
+
+fn channel_bytes(context: &[u8], m: &OpenMessage) -> Vec<u8> {
+    let mut b = context.to_vec();
     for part in [m.community, m.channel, m.user, m.device, m.text] {
         b.extend_from_slice(&(part.len() as u64).to_le_bytes());
         b.extend_from_slice(part.as_bytes());
@@ -135,6 +142,25 @@ pub fn verify_open_message(device: &DeviceEntry, m: &OpenMessage, signature: &[u
     verify(&key, &open_bytes(m), signature)
 }
 
+/// Sign a message of a closed (end-to-end encrypted) channel. It travels
+/// inside the MLS message, so moderators can check a report and newcomers
+/// the history a keeper hands them.
+pub fn sign_closed_message(device: &DeviceIdentity, m: &OpenMessage) -> Result<Vec<u8>> {
+    if m.device != device.id {
+        return Err(CoreError::Rejected("not this device".into()));
+    }
+    device
+        .keys
+        .sign(&channel_bytes(CLOSED_MESSAGE, m))
+        .map_err(internal)
+}
+
+/// Check a message of a closed channel against the sending device's public
+/// key (from its MLS leaf or its account's verified device list).
+pub fn verify_closed_message(device_key: &[u8], m: &OpenMessage, signature: &[u8]) -> Result<()> {
+    verify(device_key, &channel_bytes(CLOSED_MESSAGE, m), signature)
+}
+
 fn verify(key: &[u8], message: &[u8], signature: &[u8]) -> Result<()> {
     OpenMlsRustCrypto::default()
         .crypto()
@@ -145,6 +171,41 @@ fn verify(key: &[u8], message: &[u8], signature: &[u8]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn closed_and_open_signatures_never_stand_in_for_each_other() {
+        let device = DeviceIdentity::generate().unwrap();
+        let entry = device.entry();
+        let key = hex::decode(&entry.key).unwrap();
+        let m = OpenMessage {
+            community: "c1",
+            channel: "team",
+            user: "olga",
+            device: &device.id,
+            sent: 1_800_000_000,
+            text: "geheim",
+        };
+        let closed = sign_closed_message(&device, &m).unwrap();
+        verify_closed_message(&key, &m, &closed).unwrap();
+        assert!(verify_open_message(&entry, &m, &closed).is_err());
+        let open = sign_open_message(&device, &m).unwrap();
+        assert!(verify_closed_message(&key, &m, &open).is_err());
+        let other = OpenMessage {
+            text: "anders",
+            ..m.clone()
+        };
+        assert!(verify_closed_message(&key, &other, &closed).is_err());
+        let stranger = DeviceIdentity::generate().unwrap();
+        let wrong = OpenMessage {
+            device: &stranger.id,
+            ..m.clone()
+        };
+        assert!(sign_closed_message(&device, &wrong).is_err());
+        assert!(
+            verify_closed_message(&hex::decode(stranger.entry().key).unwrap(), &m, &closed)
+                .is_err()
+        );
+    }
 
     #[test]
     fn open_messages_are_bound_to_device_and_every_field() {

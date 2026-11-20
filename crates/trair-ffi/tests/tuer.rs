@@ -1867,3 +1867,169 @@ fn d26_open_messages_are_signed_here_and_checked_against_pinned_keys() {
     assert_eq!(r["results"], json!(["bad"]));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn d27_a_closed_channel_through_the_door_signed_with_history_and_deletion() {
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let dir = fresh_dir();
+    call(json!({"op": "init", "dir": dir}));
+    call(json!({"op": "create", "password": PW, "profile": {}}));
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    // Bob is no contact: the keeper (this door) vouches for him.
+    let mut bob = Bob::new();
+    let group = "c1".repeat(16);
+    assert_eq!(
+        error(&call(
+            json!({"op": "create_channel_group", "group": "kurz", "name": "team",
+            "community": "k1", "channel": "c1", "offers": []})
+        )),
+        "rejected"
+    );
+    let made = call(
+        json!({"op": "create_channel_group", "group": group, "name": "team",
+        "community": "k1", "channel": "c1", "offers": bob.offer()}),
+    );
+    assert_eq!(made["ok"], true, "{made}");
+    assert_eq!(made["chat"]["kind"], "channel");
+    assert_eq!(made["chat"]["id"], group.as_str());
+    let ok = call(json!({"op": "commit_answer", "chat": group, "accepted": true, "taken": null}));
+    assert_eq!(ok["applied"], true, "{ok}");
+    match bob
+        .m
+        .receive(&unb64(&made["commit"]["welcome"]), t)
+        .unwrap()
+    {
+        trair_core::Incoming::Chat { chat: c, .. } => {
+            assert_eq!(c.kind, trair_core::ChatKind::Channel)
+        }
+        other => panic!("{other:?}"),
+    }
+    let listed = call(json!({"op": "chats"}));
+    let c = listed["chats"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == group.as_str())
+        .unwrap()
+        .clone();
+    assert_eq!(c["channel"], json!({"community": "k1", "channel": "c1"}));
+    assert_eq!(c["role"], "owner");
+    assert_eq!(c["name"], "team");
+
+    // Bob writes: the door stores it with his device signature.
+    let (bytes, _) = bob.m.send(&group, "Hallo aus dem Kanal", t).unwrap();
+    let got = call(json!({"op": "receive", "body": b64(&bytes)}));
+    assert_eq!(got["incoming"]["kind"], "message", "{got}");
+    let msgs = call(json!({"op": "messages", "chat": group}));
+    let m = msgs["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["text"] == "Hallo aus dem Kanal")
+        .unwrap()
+        .clone();
+    assert_eq!(m["user"], "local-bob");
+    assert_eq!(m["sent"], t);
+    let key = hex::decode(&bob.list.list.devices[0].key).unwrap();
+    let signed = trair_core::proofs::OpenMessage {
+        community: "k1",
+        channel: "c1",
+        user: "local-bob",
+        device: m["device"].as_str().unwrap(),
+        sent: t,
+        text: "Hallo aus dem Kanal",
+    };
+    trair_core::proofs::verify_closed_message(
+        &key,
+        &signed,
+        &hex::decode(m["sig"].as_str().unwrap()).unwrap(),
+    )
+    .unwrap();
+    // The door writes, signed by this device; Bob gets it.
+    let sent = call(json!({"op": "send_message", "chat": group, "text": "Willkommen"}));
+    assert_eq!(sent["ok"], true, "{sent}");
+    let got = bob.m.receive(&unb64(&sent["body"]), t).unwrap();
+    assert!(
+        matches!(got, trair_core::Incoming::Message(ref m) if m.text == "Willkommen"),
+        "{got:?}"
+    );
+
+    // Carl joins and gets the history, only for him.
+    let mut carl = Bob::named("local-carl");
+    let added = call(json!({"op": "add_to_channel", "chat": group, "offers": carl.offer()}));
+    assert_eq!(added["ok"], true, "{added}");
+    call(json!({"op": "commit_answer", "chat": group, "accepted": true, "taken": null}));
+    bob.m
+        .receive(&unb64(&added["commit"]["commit"]), t)
+        .unwrap();
+    carl.m
+        .receive(&unb64(&added["commit"]["welcome"]), t)
+        .unwrap();
+    assert_eq!(
+        call(json!({"op": "channel_history", "chat": group, "user": "local-nobody"}))["none"],
+        true
+    );
+    let h = call(json!({"op": "channel_history", "chat": group, "user": "local-carl"}));
+    assert_eq!(h["to"].as_array().unwrap().len(), 1, "{h}");
+    assert!(h["to"][0].as_str().unwrap().starts_with("local-carl:"));
+    carl.m.receive(&unb64(&h["body"]), t).unwrap();
+    let texts: Vec<String> = carl
+        .m
+        .messages(&group, None, 50)
+        .unwrap()
+        .into_iter()
+        .filter(|m| !m.user.is_empty())
+        .map(|m| m.text)
+        .collect();
+    assert_eq!(texts, ["Hallo aus dem Kanal", "Willkommen"]);
+
+    // Bob becomes a keeper; then the door deletes his text and removes Carl.
+    let me = call(json!({"op": "server_identity"}))["user"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let k = call(json!({"op": "set_keepers", "chat": group, "keepers": [me, "local-bob"]}));
+    assert!(k["commit"].is_object(), "{k}");
+    call(json!({"op": "commit_answer", "chat": group, "accepted": true, "taken": null}));
+    bob.m.receive(&unb64(&k["commit"]["commit"]), t).unwrap();
+    carl.m.receive(&unb64(&k["commit"]["commit"]), t).unwrap();
+    assert_eq!(
+        bob.m.group_view(&group).unwrap().me,
+        trair_core::Role::Admin
+    );
+    let del = call(json!({"op": "delete_channel_message", "chat": group, "id": m["id"]}));
+    assert_eq!(del["ok"], true, "{del}");
+    bob.m.receive(&unb64(&del["body"]), t).unwrap();
+    let left: Vec<String> = bob
+        .m
+        .messages(&group, None, 50)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.text)
+        .collect();
+    assert!(
+        !left.contains(&"Hallo aus dem Kanal".to_string()),
+        "{left:?}"
+    );
+    let gone = call(json!({"op": "messages", "chat": group}));
+    assert!(
+        !gone["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["text"] == "Hallo aus dem Kanal")
+    );
+    let removed = call(json!({"op": "channel_remove", "chat": group, "user": "local-carl"}));
+    assert_eq!(removed["ok"], true, "{removed}");
+    assert_eq!(
+        error(&call(
+            json!({"op": "channel_remove", "chat": group, "user": "local-carl"})
+        )),
+        "rejected",
+        "one change at a time"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

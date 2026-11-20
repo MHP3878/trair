@@ -161,6 +161,14 @@ CREATE TABLE IF NOT EXISTS group_pins (
     fp TEXT NOT NULL,
     PRIMARY KEY (chat, user)
 ) WITHOUT ROWID;
+-- Device signatures of the texts of closed channels (M8, step 3b).
+CREATE TABLE IF NOT EXISTS channel_sigs (
+    message INTEGER PRIMARY KEY,
+    chat TEXT NOT NULL,
+    sent INTEGER NOT NULL,
+    sig TEXT NOT NULL,
+    UNIQUE (chat, sig)
+);
 -- Account keys of community authors as first seen (open channels).
 CREATE TABLE IF NOT EXISTS open_pins (
     user TEXT PRIMARY KEY,

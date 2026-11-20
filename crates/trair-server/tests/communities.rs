@@ -1014,3 +1014,279 @@ async fn k09_an_owner_who_deletes_the_account_leaves_a_successor() {
             .is_empty()
     );
 }
+
+// ------------------------------------------------------------ step 3b
+
+/// A change of an MLS group as the app hands it to the server (the server
+/// does not look inside).
+async fn commit_as(
+    w: &World,
+    p: &Person,
+    group: &str,
+    epoch: u64,
+    claim: &[&str],
+) -> (StatusCode, Value) {
+    use base64::Engine;
+    // The app always names someone; an empty claim names the sender.
+    let claim: Vec<&str> = if claim.is_empty() {
+        vec![p.user()]
+    } else {
+        claim.to_vec()
+    };
+    let body = json!({"group": group, "epoch": epoch,
+        "commit": base64::engine::general_purpose::STANDARD.encode(format!("change {epoch} by {}", p.user())),
+        "to": [], "committers": claim});
+    w.call("POST", "/v1/commits", Some(&p.token), Some(body))
+        .await
+}
+
+fn closed_signed(p: &Person, community: &str, channel: &str, text: &str, sent: u64) -> Value {
+    let m = OpenMessage {
+        community,
+        channel,
+        user: p.user(),
+        device: &p.device.id,
+        sent,
+        text,
+    };
+    let sig = trair_core::proofs::sign_closed_message(&p.device, &m).unwrap();
+    json!({"user": p.user(), "device": p.device.id, "text": text, "sent": sent, "sig": hex::encode(sig)})
+}
+
+#[tokio::test]
+async fn k10_a_closed_channel_has_a_group_and_the_server_never_holds_its_texts() {
+    let w = World::new();
+    let olga = Person::new(&w, "olga").await;
+    let ada = Person::new(&w, "ada").await;
+    let max = Person::new(&w, "max").await;
+    let id = community(&w, &olga, &[&ada, &max]).await;
+    olga.ok(
+        &w,
+        json!({"op": "set_roles", "community": id, "user": "ada", "roles": [2]}),
+    )
+    .await;
+    let made = olga
+        .ok(
+            &w,
+            json!({"op": "create_channel", "community": id, "name": "team", "category": "Intern",
+            "read_roles": [2], "write_roles": null, "closed": true}),
+        )
+        .await;
+    let ch = made["channel"].as_str().unwrap().to_string();
+    let group = made["group"].as_str().unwrap().to_string();
+    assert_eq!(group.len(), 32);
+    assert!(group.bytes().all(|b| b.is_ascii_hexdigit()));
+    let open = olga
+        .ok(
+            &w,
+            json!({"op": "create_channel", "community": id, "name": "offen", "category": "x",
+            "read_roles": null, "write_roles": null}),
+        )
+        .await;
+    assert!(open["group"].is_null());
+    let i = info(&w, &ada, &id).await;
+    let team = i["channels"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == ch.as_str())
+        .unwrap()
+        .clone();
+    assert_eq!(
+        (team["closed"].as_bool(), team["group"].as_str()),
+        (Some(true), Some(group.as_str()))
+    );
+    assert!(
+        !info(&w, &max, &id).await["channels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["id"] == ch.as_str()),
+        "Max may not read it, so he does not see it"
+    );
+    // Nothing of it goes through the community API.
+    ada.refused(
+        &w,
+        ada.signed(&id, &ch, "geheim", w.now()),
+        "closed_channel",
+    )
+    .await;
+    ada.refused(
+        &w,
+        json!({"op": "messages", "community": id, "channel": ch}),
+        "closed_channel",
+    )
+    .await;
+    // Who may read it, and who keeps it.
+    let m = ada
+        .ok(
+            &w,
+            json!({"op": "channel_members", "community": id, "channel": ch}),
+        )
+        .await;
+    assert_eq!(m["readers"], json!(["ada", "olga"]));
+    assert_eq!(m["keepers"], json!(["olga"]));
+    assert_eq!(m["group"], group.as_str());
+    assert_eq!(m["started"], false, "no keeper made the group yet");
+    max.refused(
+        &w,
+        json!({"op": "channel_members", "community": id, "channel": ch}),
+        "not_allowed",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn k11_only_keepers_change_the_group_whatever_a_change_claims() {
+    let w = World::new();
+    let olga = Person::new(&w, "olga").await;
+    let ada = Person::new(&w, "ada").await;
+    let max = Person::new(&w, "max").await;
+    let id = community(&w, &olga, &[&ada, &max]).await;
+    let made = olga
+        .ok(
+            &w,
+            json!({"op": "create_channel", "community": id, "name": "team", "category": "Intern",
+            "read_roles": null, "write_roles": null, "closed": true}),
+        )
+        .await;
+    let group = made["group"].as_str().unwrap().to_string();
+    // Max is no keeper: not even the first change, not with a claim.
+    assert_eq!(
+        commit_as(&w, &max, &group, 0, &["max"]).await.0,
+        StatusCode::FORBIDDEN
+    );
+    // Olga is; her claim that Max may change it counts for nothing.
+    assert_eq!(
+        commit_as(&w, &olga, &group, 0, &["max", "olga"]).await.0,
+        StatusCode::OK
+    );
+    let (status, body) = commit_as(&w, &max, &group, 1, &["max"]).await;
+    assert_eq!(
+        (status, body["error"].as_str()),
+        (StatusCode::FORBIDDEN, Some("not_allowed"))
+    );
+    // A role that may manage channels makes Ada a keeper; taking it back
+    // ends it at once.
+    let keeper_role = olga
+        .ok(&w, json!({"op": "create_role", "community": id, "name": "Hüter", "color": 0, "perms": perm::MANAGE_CHANNELS}))
+        .await["role"]
+        .as_i64()
+        .unwrap();
+    assert_eq!(
+        commit_as(&w, &ada, &group, 1, &[]).await.0,
+        StatusCode::FORBIDDEN
+    );
+    olga.ok(
+        &w,
+        json!({"op": "set_roles", "community": id, "user": "ada", "roles": [keeper_role]}),
+    )
+    .await;
+    let m = ada
+        .ok(
+            &w,
+            json!({"op": "channel_members", "community": id, "channel": made["channel"]}),
+        )
+        .await;
+    assert_eq!(m["keepers"], json!(["ada", "olga"]));
+    assert_eq!(m["started"], true, "Olga's first change was taken");
+    assert_eq!(commit_as(&w, &ada, &group, 1, &[]).await.0, StatusCode::OK);
+    olga.ok(
+        &w,
+        json!({"op": "set_roles", "community": id, "user": "ada", "roles": []}),
+    )
+    .await;
+    assert_eq!(
+        commit_as(&w, &ada, &group, 2, &[]).await.0,
+        StatusCode::FORBIDDEN
+    );
+    // An admin role keeps (it has every right), a moderator does not.
+    olga.ok(
+        &w,
+        json!({"op": "set_roles", "community": id, "user": "max", "roles": [2]}),
+    )
+    .await;
+    assert_eq!(
+        commit_as(&w, &max, &group, 2, &[]).await.0,
+        StatusCode::FORBIDDEN
+    );
+    olga.ok(
+        &w,
+        json!({"op": "set_roles", "community": id, "user": "max", "roles": [1]}),
+    )
+    .await;
+    assert_eq!(commit_as(&w, &max, &group, 2, &[]).await.0, StatusCode::OK);
+    // Kicked: no keeper any more.
+    olga.ok(&w, json!({"op": "kick", "community": id, "user": "max"}))
+        .await;
+    assert_eq!(
+        commit_as(&w, &max, &group, 3, &[]).await.0,
+        StatusCode::FORBIDDEN
+    );
+    // What is kept for later is the keepers as they were, not the claim:
+    // once the channel is deleted, Ada (claimed, but no keeper) still
+    // cannot change its group.
+    assert_eq!(
+        commit_as(&w, &olga, &group, 3, &["olga", "ada"]).await.0,
+        StatusCode::OK
+    );
+    olga.ok(
+        &w,
+        json!({"op": "delete_channel", "community": id, "channel": made["channel"]}),
+    )
+    .await;
+    assert_eq!(
+        commit_as(&w, &ada, &group, 4, &[]).await.0,
+        StatusCode::FORBIDDEN
+    );
+    // Groups that are no channel keep following their own list.
+    let other = "7b".repeat(16);
+    assert_eq!(
+        commit_as(&w, &ada, &other, 0, &["ada"]).await.0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        commit_as(&w, &max, &other, 1, &["max"]).await.0,
+        StatusCode::FORBIDDEN
+    );
+}
+
+#[tokio::test]
+async fn k12_reports_from_a_closed_channel_carry_a_checked_signature() {
+    let w = World::new();
+    let olga = Person::new(&w, "olga").await;
+    let ada = Person::new(&w, "ada").await;
+    let max = Person::new(&w, "max").await;
+    let id = community(&w, &olga, &[&ada, &max]).await;
+    let made = olga
+        .ok(
+            &w,
+            json!({"op": "create_channel", "community": id, "name": "team", "category": "Intern",
+            "read_roles": null, "write_roles": null, "closed": true}),
+        )
+        .await;
+    let ch = made["channel"].as_str().unwrap().to_string();
+    let text = closed_signed(&ada, &id, &ch, "Max ist ein Idiot", START);
+    let report = |e: Value| json!({"op": "report", "community": id, "channel": ch, "reason": "beleidigend", "evidence": e});
+    max.ok(&w, report(text.clone())).await;
+    let r = olga.ok(&w, json!({"op": "reports", "community": id})).await;
+    assert_eq!(r["reports"][0]["target"], "ada");
+    assert_eq!(r["reports"][0]["snapshot"]["text"], "Max ist ein Idiot");
+    assert_eq!(r["reports"][0]["snapshot"]["signed"], true);
+    assert_eq!(r["reports"][0]["snapshot"]["channel"], "team");
+    // Words changed, another channel, someone else's device: refused.
+    let mut changed = text.clone();
+    changed["text"] = json!("Max ist ein Genie");
+    max.refused(&w, report(changed), "bad_signature").await;
+    let elsewhere = closed_signed(&ada, &id, "anders", "Max ist ein Idiot", START);
+    max.refused(&w, report(elsewhere), "bad_signature").await;
+    let mut borrowed = text.clone();
+    borrowed["user"] = json!("olga");
+    max.refused(&w, report(borrowed), "bad_evidence").await;
+    max.refused(&w, report(json!({"user": "ada"})), "bad_evidence")
+        .await;
+    // An open-channel signature is no closed one.
+    let open = ada.signed(&id, &ch, "offen", START);
+    let as_evidence = json!({"user": "ada", "device": ada.device.id, "text": "offen", "sent": START, "sig": open["sig"]});
+    max.refused(&w, report(as_evidence), "bad_signature").await;
+}

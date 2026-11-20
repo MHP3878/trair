@@ -130,6 +130,21 @@ impl Db {
             )?;
         }
         conn.execute_batch(crate::communities::SCHEMA)?;
+        // Communities from before closed channels.
+        let has_grp: bool = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('c_channels') WHERE name = 'grp'",
+            [],
+            |r| r.get::<_, i64>(0).map(|n| n > 0),
+        )?;
+        if !has_grp {
+            conn.execute_batch(
+                "ALTER TABLE c_channels ADD COLUMN closed INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE c_channels ADD COLUMN grp TEXT;",
+            )?;
+        }
+        conn.execute_batch(
+            "CREATE UNIQUE INDEX IF NOT EXISTS c_channels_grp ON c_channels (grp) WHERE grp IS NOT NULL;",
+        )?;
         // Databases from before groups lack the committers column.
         let has_committers: bool = conn.query_row(
             "SELECT COUNT(*) FROM pragma_table_info('groups') WHERE name = 'committers'",
@@ -368,7 +383,14 @@ impl Db {
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .optional()?;
-        if let Some((_, _, Some(list))) = &known {
+        // A closed channel's group: the community's keepers, as they are
+        // now, decide; what the change claims does not count.
+        let keepers = crate::communities::keepers_of_group(&tx, group)?;
+        if let Some(k) = &keepers {
+            if !k.iter().any(|u| u == by) {
+                return Ok(CommitOutcome::NotAllowed);
+            }
+        } else if let Some((_, _, Some(list))) = &known {
             let allowed: Vec<String> = serde_json::from_str(list).unwrap_or_default();
             if !allowed.iter().any(|u| u == by) {
                 return Ok(CommitOutcome::NotAllowed);
@@ -382,7 +404,10 @@ impl Db {
                 taken,
             });
         }
-        let list = committers.map(|c| serde_json::to_string(c).unwrap_or_default());
+        let list = match &keepers {
+            Some(k) => Some(serde_json::to_string(k).unwrap_or_default()),
+            None => committers.map(|c| serde_json::to_string(c).unwrap_or_default()),
+        };
         tx.execute(
             "INSERT INTO groups (id, next_epoch, last_hash, updated, committers)
              VALUES (?1, ?2, ?3, ?4, ?5)

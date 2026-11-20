@@ -296,6 +296,33 @@ class TrairVault {
   /// The own team badge as signed (public), for the team inbox.
   Future<CoreAnswer> teamBadge() => _call({'op': 'team_badge'});
 
+  // ----- closed channels (M8, step 3b) -----
+
+  Future<CoreAnswer> createChannelGroup(
+    String group,
+    String name,
+    String community,
+    String channel,
+    List<Object?> offers,
+  ) => _call({
+    'op': 'create_channel_group',
+    'group': group,
+    'name': name,
+    'community': community,
+    'channel': channel,
+    'offers': offers,
+  });
+  Future<CoreAnswer> addToChannel(String chat, List<Object?> offers) =>
+      _call({'op': 'add_to_channel', 'chat': chat, 'offers': offers});
+  Future<CoreAnswer> channelRemove(String chat, String user) =>
+      _call({'op': 'channel_remove', 'chat': chat, 'user': user});
+  Future<CoreAnswer> setKeepers(String chat, List<String> keepers) =>
+      _call({'op': 'set_keepers', 'chat': chat, 'keepers': keepers});
+  Future<CoreAnswer> channelHistory(String chat, String user) =>
+      _call({'op': 'channel_history', 'chat': chat, 'user': user});
+  Future<CoreAnswer> deleteChannelMessage(String chat, int id) =>
+      _call({'op': 'delete_channel_message', 'chat': chat, 'id': id});
+
   /// Where the vault lives: %APPDATA%\Trair on Windows.
   static String dataDir() {
     final env = Platform.environment;

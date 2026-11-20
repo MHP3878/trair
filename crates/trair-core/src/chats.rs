@@ -97,6 +97,8 @@ pub enum ChatKind {
     Join,
     /// An admin's side of someone's join request (not shown).
     Admit,
+    /// A closed channel of a community (see [`crate::channel_chats`]).
+    Channel,
 }
 
 impl ChatKind {
@@ -106,7 +108,13 @@ impl ChatKind {
             ChatKind::Group => "g",
             ChatKind::Join => "j",
             ChatKind::Admit => "a",
+            ChatKind::Channel => "c",
         }
+    }
+
+    /// A group or a closed channel: an MLS group with a Trair state.
+    pub fn is_group(self) -> bool {
+        matches!(self, ChatKind::Group | ChatKind::Channel)
     }
 
     fn parse(s: &str) -> Result<Self> {
@@ -115,6 +123,7 @@ impl ChatKind {
             "g" => Ok(ChatKind::Group),
             "j" => Ok(ChatKind::Join),
             "a" => Ok(ChatKind::Admit),
+            "c" => Ok(ChatKind::Channel),
             other => Err(CoreError::Storage(format!("unknown chat kind {other}"))),
         }
     }
@@ -126,6 +135,7 @@ impl ChatKind {
             ChatKind::Group => "group",
             ChatKind::Join => "join",
             ChatKind::Admit => "admit",
+            ChatKind::Channel => "channel",
         }
     }
 }
@@ -831,7 +841,7 @@ impl Messenger {
     /// last-resort key package).
     pub fn update_keys(&mut self, chat: &str) -> Result<PendingCommit> {
         let c = self.chat(chat)?;
-        if c.kind == ChatKind::Group && !self.is_group_admin(chat)? {
+        if c.kind.is_group() && !self.is_group_admin(chat)? {
             return Err(CoreError::NotAllowed(
                 "only admins change a group; use propose_update".into(),
             ));
@@ -931,6 +941,10 @@ impl Messenger {
         match c.kind {
             ChatKind::Direct => {}
             ChatKind::Group => self.check_group_keys(chat)?,
+            ChatKind::Channel => {
+                self.check_group_keys(chat)?;
+                return self.send_channel(chat, text, now);
+            }
             ChatKind::Join | ChatKind::Admit => {
                 return Err(CoreError::Rejected("nothing to write here".into()));
             }
@@ -1015,7 +1029,13 @@ impl Messenger {
                 from,
                 text,
                 missing,
+                signed,
+                key,
             } => {
+                if self.chat(&group).is_ok_and(|c| c.kind == ChatKind::Channel) {
+                    return self
+                        .channel_text(&group, &from, text, missing, signed, &key, now, mark);
+                }
                 let user = user_of(&from).to_string();
                 let outgoing = user == self.user;
                 if !self.may_write(&group, &user, now)? {
@@ -1938,6 +1958,7 @@ pub(crate) fn purge(tx: &Transaction, chat: &str) -> Result<()> {
         "join_requests",
         "group_leaving",
         "group_pins",
+        "channel_sigs",
     ] {
         tx.execute(&format!("DELETE FROM {table} WHERE chat = ?1"), [chat])
             .map_err(sql)?;

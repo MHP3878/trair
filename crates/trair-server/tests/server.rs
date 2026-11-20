@@ -1477,3 +1477,40 @@ fn s16_a_database_from_before_groups_gets_the_committers_column() {
     drop(db);
     Db::open(&path).unwrap();
 }
+
+#[test]
+fn s17_communities_from_before_closed_channels_get_the_new_columns() {
+    let dir = TempDir::new();
+    let path = dir.0.join("old.db");
+    {
+        let c = rusqlite::Connection::open(&path).unwrap();
+        // The table as step 3a made it, with one open channel.
+        c.execute_batch(
+            "CREATE TABLE c_channels (community TEXT NOT NULL, id TEXT NOT NULL, category TEXT NOT NULL,
+                 name TEXT NOT NULL, topic TEXT NOT NULL, position INTEGER NOT NULL, read_roles TEXT,
+                 write_roles TEXT, PRIMARY KEY (community, id));
+             INSERT INTO c_channels VALUES ('k1', 'allgemein', 'Allgemein', 'allgemein', '', 1, NULL, NULL);",
+        )
+        .unwrap();
+    }
+    let db = Db::open(&path).unwrap();
+    let tables = db.tables().unwrap();
+    assert!(
+        tables.contains(&"c_channels.closed".to_string()),
+        "{tables:?}"
+    );
+    assert!(tables.contains(&"c_channels.grp".to_string()));
+    drop(db);
+    let c = rusqlite::Connection::open(&path).unwrap();
+    let (closed, grp): (i64, Option<String>) = c
+        .query_row(
+            "SELECT closed, grp FROM c_channels WHERE id = 'allgemein'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((closed, grp), (0, None), "old channels stay open");
+    drop(c);
+    // Opening again does not try to add them twice.
+    Db::open(&path).unwrap();
+}
