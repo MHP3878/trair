@@ -1808,8 +1808,11 @@ fn d26_open_messages_are_signed_here_and_checked_against_pinned_keys() {
         check(json!([from_eve2.clone()]), eve2_keys.clone()),
         ["changed"]
     );
+    // No team badge, no team inbox (and nothing while locked).
+    assert_eq!(error(&call(json!({"op": "team_badge"}))), "none");
     // The pin survives locking.
     call(json!({"op": "lock"}));
+    assert_eq!(error(&call(json!({"op": "team_badge"}))), "locked");
     assert_eq!(
         error(&call(
             json!({"op": "check_open_messages", "community": "c1", "channel": "allgemein", "messages": [], "authors": {}})

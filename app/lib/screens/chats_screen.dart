@@ -15,6 +15,7 @@ import '../widgets/common.dart';
 import '../widgets/profile_popup.dart';
 import '../widgets/qr.dart';
 import '../widgets/trair_icons.dart';
+import 'community_dialogs.dart';
 import 'group_panel.dart';
 
 enum _Filter { all, direct, group }
@@ -1264,7 +1265,30 @@ class _ChatsScreenState extends State<ChatsScreen> {
                     child: InkWell(
                       borderRadius: BorderRadius.circular(16),
                       // The card shows what they sent; nothing from strangers.
-                      onTap: p == null ? null : () => showProfileCard(context, ProfileView.peer(chat, p)),
+                      onTap: p == null
+                          ? null
+                          : () => showProfileCard(
+                              context,
+                              ProfileView.peer(chat, p),
+                              onReport: state.communities.online && !chat.isGroup
+                                  ? () => showTeamReport(
+                                      context,
+                                      state,
+                                      user: chat.peer,
+                                      name: chat.name,
+                                      chatMessages: [
+                                        for (final m in (state.realMessages[chat.id] ?? const <RealMessage>[])
+                                            .where((m) => !m.isNote && m.text.isNotEmpty)
+                                            .toList()
+                                            .reversed
+                                            .take(20)
+                                            .toList()
+                                            .reversed)
+                                          {'from': m.outgoing ? 'ich' : chat.peer, 'text': m.text, 'at': m.at},
+                                      ],
+                                    )
+                                  : null,
+                            ),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(vertical: 2),
                         child: Row(

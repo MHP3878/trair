@@ -68,6 +68,14 @@ ICONS = {
     "users": 0xE1A4,
     "pencil": 0xE1F9,
     "x": 0xE1B2,
+    # Communities (M8)
+    "ban": 0xE051,
+    "door-open": 0xE3D6,
+    "flag": 0xE0D1,
+    "hash": 0xE0EF,
+    "scroll-text": 0xE45F,
+    "settings": 0xE154,
+    "shield-alert": 0xE1FE,
 }
 
 # Logo "Neon-Schild" (Julians Wahl, Mischung aus Schildblase und Neon-T)

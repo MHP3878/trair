@@ -21,6 +21,7 @@ import 'package:trair_app/screens/chats_screen.dart';
 import 'package:trair_app/screens/lock_screen.dart';
 import 'package:trair_app/widgets/common.dart';
 
+import 'support/fake_communities.dart';
 import 'support/fake_door.dart';
 import 'support/fake_server.dart';
 import 'support/multi_door.dart';
@@ -419,6 +420,62 @@ void main() {
     await tester.ensureVisible(find.textContaining('trair3:'));
     await tester.pumpAndSettle();
     await _shot(tester, '27-gruppe-einladen');
+  });
+
+  testWidgets('screenshots of a community with channels, roles, rules and reports', (tester) async {
+    final server = FakeServer();
+    final c = server.communities;
+    final id = c.found('Abi 2026');
+    for (final (user, roles) in const [
+      ('local-lena', [2]),
+      ('local-malik', <int>[]),
+      ('local-aylin', <int>[]),
+    ]) {
+      c.addMember(id, user, roles: roles);
+    }
+    c.communities[id]!['rules'] = '1. Freundlich bleiben\n2. Kein Spam, keine Werbung\n3. Fotos nur mit Erlaubnis';
+    c.communities[id]!['rules_rev'] = 1;
+    c.postAs(id, 'allgemein', 'local-lena', 'Wer bringt die Musikbox zum Abiball mit?');
+    c.postAs(id, 'allgemein', 'local-malik', 'Ich! Und Snacks.');
+    c.postAs(id, 'allgemein', 'local-aylin', 'Kauft hier Follower, billig!!!');
+    c.addReport(id, reporter: 'local-lena', target: 'local-aylin', reason: 'Werbung', text: 'Kauft hier Follower, billig!!!');
+    final other = c.found('Schach-AG', owner: 'local-olga');
+    c.addMember(other, FakeCommunities.me);
+    c.setRules(other, '1. Fair spielen\n2. Keine Hilfe von Programmen');
+    final door = FakeDoor(password: _pw, profile: {'name': 'Julian', 'glow': 0xFFA18DFF})..chatsEnabled = true;
+    for (final (user, name) in const [('local-lena', 'Lena'), ('local-malik', 'Malik'), ('local-aylin', 'Aylin')]) {
+      door.contacts.add({'user': user, 'name': name, 'fingerprint': 'ff' * 16, 'confirmed': false});
+    }
+    door.openChecks['local-aylin'] = 'new';
+    await _start(tester, const Size(1440, 900), door: door, server: server);
+    await _unlock(tester);
+    await tester.tap(find.text('Strenger Modus an'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Verbinden'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Verbinden'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Abi 2026'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('channel-composer')), 'Perfekt, dann bis Samstag!');
+    await tester.tap(find.byTooltip('Senden'));
+    await tester.pumpAndSettle();
+    await _shot(tester, '28-community-kanal');
+    await tester.tap(find.byTooltip('Community-Einstellungen'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('tab-roles')));
+    await tester.pumpAndSettle();
+    await _shot(tester, '29-community-rollen');
+    await tester.tap(find.byKey(const ValueKey('tab-reports')));
+    await tester.pumpAndSettle();
+    await _shot(tester, '30-community-meldungen');
+    await tester.tap(find.byTooltip('Schach-AG'));
+    await tester.pumpAndSettle();
+    await _shot(tester, '31-community-regeln-zuerst');
+    await tester.tap(find.byTooltip('Community gründen oder beitreten'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, 'Theater-AG');
+    await _shot(tester, '32-community-gruenden');
   });
 
   testWidgets('screenshot of a small window', (tester) async {

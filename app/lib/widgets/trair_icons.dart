@@ -46,4 +46,13 @@ abstract final class TrairIcons {
   static const userPlus = IconData(0xE1A2, fontFamily: _font);
   static const users = IconData(0xE1A4, fontFamily: _font);
   static const x = IconData(0xE1B2, fontFamily: _font);
+
+  // Communities (M8)
+  static const ban = IconData(0xE051, fontFamily: _font);
+  static const doorOpen = IconData(0xE3D6, fontFamily: _font);
+  static const flag = IconData(0xE0D1, fontFamily: _font);
+  static const hash = IconData(0xE0EF, fontFamily: _font);
+  static const scrollText = IconData(0xE45F, fontFamily: _font);
+  static const settings = IconData(0xE154, fontFamily: _font);
+  static const shieldAlert = IconData(0xE1FE, fontFamily: _font);
 }

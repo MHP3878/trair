@@ -4,6 +4,8 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../app_state.dart';
+import '../screens/community_dialogs.dart';
+import '../screens/group_panel.dart' show initialsOf;
 import '../theme.dart';
 import 'common.dart';
 import 'trair_icons.dart';
@@ -35,10 +37,28 @@ class ServerRail extends StatelessWidget {
             height: 2,
             decoration: BoxDecoration(color: TrairColors.border, borderRadius: BorderRadius.circular(1)),
           ),
+          for (final c in state.communities.list)
+            RailItem(
+              key: ValueKey('rail-${c.id}'),
+              tooltip: c.name,
+              selected: state.screen == TrairScreen.community && state.communities.active == c.id,
+              onTap: () => state.openCommunity(c.id),
+              builder: (on) => _Disc(
+                color: on ? TrairColors.accent : TrairColors.glassLite,
+                child: Text(
+                  initialsOf(c.name),
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: on ? Colors.white : TrairColors.accentPale,
+                  ),
+                ),
+              ),
+            ),
           RailItem(
             tooltip: community.name,
-            selected: state.screen == TrairScreen.community,
-            onTap: () => state.go(TrairScreen.community),
+            selected: state.screen == TrairScreen.community && state.communities.active == null,
+            onTap: () => state.openCommunity(null),
             builder: (on) => _Disc(
               color: on ? TrairColors.accent : TrairColors.glassLite,
               child: Text(
@@ -54,13 +74,20 @@ class ServerRail extends StatelessWidget {
           RailItem(
             tooltip: 'Community gründen oder beitreten',
             selected: false,
-            onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text(
-                  'Eigene Communities kommen mit den echten Gruppen. „Trair Beta“ ist bis dahin eine Demo.',
-                ),
-              ),
-            ),
+            onTap: () {
+              if (!state.communities.online) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Communities laufen über den Server. Erst verbinden: Einstellungen → Server. '
+                      '„Trair Beta“ ist eine Demo.',
+                    ),
+                  ),
+                );
+                return;
+              }
+              showNewCommunity(context, state);
+            },
             builder: (on) => _Disc(
               color: on ? TrairColors.mint : TrairColors.glassLite,
               child: Icon(TrairIcons.plus, size: 22, color: on ? TrairColors.amberDark : TrairColors.mint),

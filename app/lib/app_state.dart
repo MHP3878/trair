@@ -11,6 +11,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/widgets.dart';
 
 import 'backend/backend.dart';
+import 'community_state.dart';
 import 'core/accounts.dart';
 import 'core/server.dart';
 import 'core/vault.dart';
@@ -314,6 +315,20 @@ class AppState extends ChangeNotifier {
 
   /// The accounts on this computer (one folder each).
   final Accounts accounts;
+
+  /// Real communities (M8), once connected to the server.
+  late final Communities communities = Communities(
+    notifyListeners,
+    onGone: (_) {
+      if (screen == TrairScreen.community) go(TrairScreen.chats);
+    },
+  );
+
+  /// Show a real community, or the demo community with null.
+  Future<void> openCommunity(String? id) async {
+    go(TrairScreen.community);
+    await communities.open(id);
+  }
   final Future<Uint8List?> Function()? _pickPictureFile;
 
   /// What the start screen lists; [account] is the one chosen there.
@@ -824,6 +839,7 @@ class AppState extends ChangeNotifier {
 
   void _forgetServer() {
     _api = null;
+    communities.detach();
     _receiveRun++;
     _pairingRun++;
     pairing = null;
@@ -833,6 +849,7 @@ class AppState extends ChangeNotifier {
 
   void _serverFailed(String message) {
     _api = null;
+    communities.detach();
     serverStatus = ServerStatus.failed;
     serverMessage = message;
     notifyListeners();
@@ -884,6 +901,7 @@ class AppState extends ChangeNotifier {
     _api = api;
     await _pushDeviceList();
     if (chatsReady) await _chatsOnline(api);
+    unawaited(communities.attach(api, vault!, user));
     serverStatus = ServerStatus.connected;
     serverMessage = 'Verbunden mit ${uri.host}:${uri.port}';
     if (chatsReady) unawaited(_shareProfile());

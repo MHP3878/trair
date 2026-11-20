@@ -984,9 +984,35 @@ class FakeDoor implements CoreDoor {
           'notfall_sign_deletion' ||
           'notfall_finish':
         return _notfallOp(op, r);
+      // ----- communities (M8) -----
+      case 'sign_open_message':
+        if (!unlocked) return _fail('locked');
+        return {'ok': true, 'signature': 'sig-${r['text']}', 'device': thisId, 'user': 'local-julian'};
+      case 'check_open_messages':
+        if (!unlocked) return _fail('locked');
+        return {
+          'ok': true,
+          'results': [
+            for (final m in (r['messages'] as List).cast<Map<String, Object?>>())
+              openChecks[m['user']] ?? (m['user'] == 'local-julian' ? 'own' : 'known'),
+          ],
+        };
+      case 'accept_open_key':
+        if (!unlocked) return _fail('locked');
+        openChecks.remove(r['user']);
+        return {'ok': true};
+      case 'team_badge':
+        if (!unlocked) return _fail('locked');
+        return teamBadge == null ? _fail('none') : {'ok': true, 'badge': teamBadge};
     }
     return _fail('bad_request');
   }
+
+  /// What the signature check says per author (default: known).
+  final Map<String, String> openChecks = {};
+
+  /// A valid team badge of this account, as signed (null: none).
+  Map<String, Object?>? teamBadge;
 
   Map<String, Object?> _open() => {
     'ok': true,

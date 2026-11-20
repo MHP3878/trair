@@ -54,6 +54,7 @@
 //! | `sign_open_message` | `community`, `channel`, `text`, `sent` | `signature`, `device`, `user` |
 //! | `check_open_messages` | `community`, `channel`, `messages`, `authors` | `results` |
 //! | `accept_open_key` | `user`, `account_key`    |                                  |
+//! | `team_badge`      |                        | `badge` (signed, public); error `none` |
 //!
 //! The community ops (M8) are described in `communities.rs`.
 //!
@@ -406,6 +407,7 @@ enum Request {
         user: String,
         account_key: String,
     },
+    TeamBadge {},
 }
 
 #[derive(Default)]
@@ -500,6 +502,7 @@ fn run(state: &mut State, req: Request) -> Value {
         Request::ServerIdentity {} => server_identity(state),
         Request::SignLogin { challenge } => sign_login(state, &challenge),
         Request::SignDeletion { now } => sign_deletion(state, now),
+        Request::TeamBadge {} => team_badge(state),
         Request::SignOpenMessage {
             community,
             channel,
@@ -1282,6 +1285,24 @@ fn add_badge(state: &mut State, badge: Value) -> Value {
         answer["badges"] = own_badges(vault);
     }
     answer
+}
+
+/// The own team badge, as signed by the team key, for the server's team
+/// inbox. Public: it only proves what the profile shows anyway.
+fn team_badge(state: &State) -> Value {
+    let Some(vault) = state.vault.as_ref() else {
+        return fail("locked");
+    };
+    let now = unix_now();
+    vault
+        .badges()
+        .iter()
+        .find(|b| {
+            badges::verify(b, vault.account().public_key(), now, badges::TEAM_KEYS)
+                .is_ok_and(|v| v.kind == badges::BadgeKind::Team)
+        })
+        .and_then(|b| serde_json::to_value(b).ok())
+        .map_or_else(|| fail("none"), |b| json!({"ok": true, "badge": b}))
 }
 
 fn unix_now() -> u64 {

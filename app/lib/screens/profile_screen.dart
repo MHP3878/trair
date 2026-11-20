@@ -11,6 +11,7 @@ import '../widgets/badges.dart';
 import '../widgets/common.dart';
 import '../widgets/profile_popup.dart';
 import '../widgets/trair_icons.dart';
+import 'team_inbox.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -152,6 +153,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           const SizedBox(height: 14),
                           _privacyCard(state),
                           const SizedBox(height: 14),
+                          if (state.communities.hasTeamBadge) ...[
+                            const TeamInbox(),
+                            const SizedBox(height: 14),
+                          ],
                           _accountCard(state),
                         ],
                       ),
