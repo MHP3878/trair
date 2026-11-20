@@ -375,6 +375,122 @@ void main() {
     skip: lib == null || serverBin == null ? 'TRAIR_FFI_LIB und TRAIR_SERVER_BIN fehlen' : false,
     timeout: const Timeout(Duration(minutes: 3)),
   );
+
+  test(
+    'a closed channel through the real server: keepers let people in, the server never reads it',
+    () async {
+      final tmp = await Directory.systemTemp.createTemp('trair-closed-');
+      final file = File(lib!);
+      final copies = [
+        for (final p in ['b', 'c'])
+          await file.copy('${tmp.path}/${p}_${file.uri.pathSegments.last}'),
+      ];
+      final port = 20000 + (pid + 19) % 20000;
+      final url = 'http://127.0.0.1:$port';
+      final server = await Process.start(serverBin!, [
+        '--adresse',
+        '127.0.0.1:$port',
+        '--daten',
+        '${tmp.path}/server.db',
+      ]);
+      final log = StringBuffer();
+      server.stdout.transform(const SystemEncoding().decoder).listen(log.write);
+      server.stderr.transform(const SystemEncoding().decoder).listen(log.write);
+      addTearDown(() async {
+        server.kill();
+        await server.exitCode;
+        await tmp.delete(recursive: true);
+      });
+      final api = ServerApi(HttpTransport(Uri.parse(url)));
+      for (var i = 0; i < 100 && !(await api.health()).ok; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      expect((await api.health()).ok, isTrue, reason: 'server did not start: $log');
+
+      final apps = <AppState>[];
+      for (final (name, path) in [('olga', lib), ('max', copies[0].path), ('carl', copies[1].path)]) {
+        final v = TrairVault(NativeDoor.load(path));
+        expect((await v.init('${tmp.path}/$name')).ok, isTrue);
+        final s = AppState(DemoBackend(), v, accountsBase: '${tmp.path}/$name');
+        final made = await s.createAccount(name: name, glowColor: TrairColors.accentLight, password: _randomWords());
+        expect(made.ok, isTrue, reason: '${made.raw}');
+        s.serverUrl = url;
+        await s.connect();
+        expect(s.serverStatus, ServerStatus.connected, reason: '${s.serverMessage} | $log');
+        await s.refreshChats();
+        apps.add(s);
+      }
+      final [olga, max, carl] = apps;
+      Future<void> until(bool Function() done, String what) async {
+        for (var i = 0; i < 300 && !done(); i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+        expect(done(), isTrue, reason: '$what | ${olga.communities.message} | ${olga.chatMessage} | $log');
+      }
+
+      await until(() => apps.every((a) => a.communities.online), 'all follow their communities');
+      final o = olga.communities;
+      final id = (await o.create('Abi 2026'))!;
+      final code = (await o.createInvite(60, null))!;
+      expect(await max.communities.join(code), id);
+
+      // Olga makes a closed channel; her Trair makes its group with Max.
+      expect(await o.createChannel('team', 'Intern', closed: true), isTrue, reason: o.message);
+      final ch = o.current!.channels.firstWhere((c) => c.name == 'team');
+      expect(ch.closed, isTrue);
+      final group = ch.group!;
+      await until(() => max.channelChat(group) != null, 'Max is let in');
+      expect(olga.channelChat(group), isNotNull);
+
+      // Max writes; Olga reads it. The server never has the text.
+      await olga.loadMessages(group);
+      expect(await max.sendReal(group, 'Nur für uns, ganz geheim'), isTrue, reason: max.chatMessage);
+      await until(
+        () => olga.realMessages[group]?.any((m) => m.text == 'Nur für uns, ganz geheim') ?? false,
+        'Olga reads it',
+      );
+      final fromMax = olga.realMessages[group]!.firstWhere((m) => m.text == 'Nur für uns, ganz geheim');
+      expect(fromMax.sig, isNotNull);
+      expect(fromMax.sent, isNotNull);
+      Future<String> serverBytes() async => latin1.decode([
+        for (final name in ['server.db', 'server.db-wal'])
+          if (File('${tmp.path}/$name').existsSync()) ...await File('${tmp.path}/$name').readAsBytes(),
+      ], allowInvalid: true);
+      expect((await serverBytes()).contains('ganz geheim'), isFalse, reason: 'the server never had the text');
+
+      // Carl joins the community: Olga's Trair lets him in and hands him
+      // the texts so far, which his core checks.
+      expect(await carl.communities.join(code), id);
+      await until(() => carl.channelChat(group) != null, 'Carl is let in');
+      await carl.loadMessages(group);
+      await until(() {
+        unawaited(carl.loadMessages(group));
+        return carl.realMessages[group]?.any((m) => m.text == 'Nur für uns, ganz geheim') ?? false;
+      }, 'Carl gets the history');
+
+      // Carl reports Max's text: the server checks its signature.
+      final carlsCopy = carl.realMessages[group]!.firstWhere((m) => m.text == 'Nur für uns, ganz geheim');
+      await carl.communities.open(id);
+      expect(await carl.communities.reportClosed(ch.id, carlsCopy.evidence, 'Test'), isTrue, reason: carl.communities.message);
+      await o.loadReports();
+      expect(o.reports!.single.quoted, 'Nur für uns, ganz geheim');
+      final forged = Map.of(carlsCopy.evidence)..['text'] = 'Max hat was anderes gesagt';
+      expect(await carl.communities.reportClosed(ch.id, forged, 'Fälschung'), isFalse);
+
+      // Max is removed from the community: Olga's Trair takes him out.
+      final maxUser = max.ownUser;
+      expect(await o.kick(maxUser, 'Test'), isTrue);
+      await until(() => max.realChats.any((c) => c.id == group && c.state == 'left'), 'Max is out of the channel');
+
+      // The forged report was refused: its text is nowhere on the server.
+      expect((await serverBytes()).contains('Max hat was anderes gesagt'), isFalse);
+      for (final a in apps) {
+        await a.lock();
+      }
+    },
+    skip: lib == null || serverBin == null ? 'TRAIR_FFI_LIB und TRAIR_SERVER_BIN fehlen' : false,
+    timeout: const Timeout(Duration(minutes: 4)),
+  );
 }
 
 String _randomWords() {
