@@ -2440,8 +2440,10 @@ dependencies = [
  "getrandom 0.4.3",
  "hex",
  "rpassword",
+ "rusqlite",
  "serde_json",
  "trair-core",
+ "trair-server",
  "zeroize",
 ]
 

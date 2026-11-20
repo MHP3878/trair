@@ -16,6 +16,7 @@
 //! packages, pairing messages) is base64. Errors are
 //! `{"ok": false, "error": "<code>"}` with a fitting HTTP status.
 
+mod communities;
 mod db;
 
 use std::collections::HashMap;
@@ -39,6 +40,7 @@ use trair_core::SignedDeviceList;
 use trair_core::account::validate_name;
 use trair_core::proofs::{CHALLENGE_LEN, verify_account_deletion, verify_login};
 
+pub use communities::{INVITE_PREFIX, perm};
 pub use db::{Cleaned, CommitOutcome, Db};
 
 /// How long a session token works (12 hours).
@@ -106,6 +108,9 @@ struct Memory {
     waiters: HashMap<(String, String), Arc<Notify>>,
     slots: HashMap<u16, Slot>,
     limits: HashMap<(&'static str, IpAddr), Vec<u64>>,
+    /// Per account: rate limits and the community long poll.
+    user_limits: HashMap<(&'static str, String), Vec<u64>>,
+    community_waiters: HashMap<String, Arc<Notify>>,
 }
 
 /// The running server.
@@ -113,16 +118,62 @@ pub struct Server {
     db: Mutex<Db>,
     memory: Mutex<Memory>,
     clock: Clock,
+    /// Public team keys (hex) whose badges open the team's reports.
+    team_keys: Vec<String>,
 }
 
 impl Server {
     /// A server with the given database and clock.
     pub fn new(db: Db, clock: Clock) -> Arc<Server> {
+        Self::with_team_keys(
+            db,
+            clock,
+            trair_core::badges::TEAM_KEYS
+                .iter()
+                .map(|k| (*k).to_string())
+                .collect(),
+        )
+    }
+
+    /// A server that takes team badges of other keys (tests).
+    pub fn with_team_keys(db: Db, clock: Clock, team_keys: Vec<String>) -> Arc<Server> {
         Arc::new(Server {
             db: Mutex::new(db),
             memory: Mutex::new(Memory::default()),
             clock,
+            team_keys,
         })
+    }
+
+    /// At most `n` times per `window` seconds for one account.
+    fn allow_user(&self, what: &'static str, user: &str, n: usize, window: u64) -> bool {
+        let now = self.now();
+        let mut m = self.memory();
+        let times = m.user_limits.entry((what, user.to_string())).or_default();
+        times.retain(|t| now < t + window);
+        if times.len() >= n {
+            return false;
+        }
+        times.push(now);
+        true
+    }
+
+    fn community_waiter(&self, user: &str) -> Arc<Notify> {
+        self.memory()
+            .community_waiters
+            .entry(user.to_string())
+            .or_default()
+            .clone()
+    }
+
+    /// Wake the community long polls of these accounts.
+    fn notify_users<'a>(&self, users: impl IntoIterator<Item = &'a String>) {
+        let m = self.memory();
+        for u in users {
+            if let Some(n) = m.community_waiters.get(u) {
+                n.notify_waiters();
+            }
+        }
     }
 
     fn now(&self) -> u64 {
@@ -147,6 +198,10 @@ impl Server {
                 .retain(|_, (_, _, at)| now < *at + CHALLENGE_LIFETIME);
             m.slots.retain(|_, s| now < s.created + PAIRING_LIFETIME);
             m.limits.retain(|_, times| {
+                times.retain(|t| now < t + 3600);
+                !times.is_empty()
+            });
+            m.user_limits.retain(|_, times| {
                 times.retain(|t| now < t + 3600);
                 !times.is_empty()
             });
@@ -212,6 +267,8 @@ pub fn router(server: Arc<Server>) -> Router {
         .route("/v1/messages", post(send).get(fetch))
         .route("/v1/messages/ack", post(ack))
         .route("/v1/commits", post(commit))
+        .route("/v1/community", post(communities::op))
+        .route("/v1/communities/sync", get(communities::sync))
         .route("/v1/pairing", post(open_pairing))
         .route(
             "/v1/pairing/{channel}/host",
@@ -412,7 +469,9 @@ async fn delete_account(
     let signature = hex::decode(&r.signature).map_err(|_| bad("bad_signature"))?;
     verify_account_deletion(&key, &me.user, r.now, &signature)
         .map_err(|_| ApiError(StatusCode::FORBIDDEN, "bad_signature"))?;
-    s.db().delete_account(&me.user).map_err(internal)?;
+    s.db()
+        .delete_account_at(&me.user, s.now())
+        .map_err(internal)?;
     Ok(Json(json!({"ok": true})))
 }
 
