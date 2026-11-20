@@ -33,11 +33,15 @@ class ProfileView {
     this.picture,
     this.chosenName,
     this.showTrust = true,
+    this.botLine,
+    this.botOk = false,
   });
 
   /// A real chat partner: your name for them is the big one, the name they
   /// chose stands below it. Everything else is what they sent.
-  factory ProfileView.peer(RealChat chat, PeerProfile p) => ProfileView(
+  factory ProfileView.peer(RealChat chat, PeerProfile p, {String? botLine, bool botOk = false}) => ProfileView(
+    botLine: botLine,
+    botOk: botOk,
     name: chat.name,
     color: p.glow ?? TrairColors.accentLight,
     about: p.about,
@@ -97,6 +101,12 @@ class ProfileView {
 
   /// Trust levels exist only in the demo so far.
   final bool showTrust;
+
+  /// For a bot: whose it is (see [AppState.botLine]).
+  final String? botLine;
+
+  /// The owner's certificate holds.
+  final bool botOk;
 }
 
 /// Open the profile card of [view] above everything else. With
@@ -257,6 +267,21 @@ class ProfilePopup extends StatelessWidget {
                     if (v.chosenName != null) ...[
                       const SizedBox(height: 2),
                       Text('nennt sich „${v.chosenName}“', style: TrairText.small),
+                    ],
+                    if (v.botLine != null) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          BotChip(ok: v.botOk),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              v.botLine!,
+                              style: TextStyle(fontSize: 13, color: v.botOk ? TrairColors.textSoft : TrairColors.amber),
+                            ),
+                          ),
+                        ],
+                      ),
                     ],
                     if (v.nameWarning) ...[const SizedBox(height: 10), const _NameWarning()],
                     const SizedBox(height: 14),

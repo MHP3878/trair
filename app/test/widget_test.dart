@@ -2026,4 +2026,125 @@ void main() {
       expect(door.channelOps, isEmpty);
     });
   });
+
+  group('Bots', () {
+    final botCode = 'trairbot1:local-wetter:${'f3' * 32}:${'5e' * 16}';
+
+    Future<(FakeDoor, FakeServer)> online(WidgetTester tester, {void Function(FakeDoor, FakeServer)? setup}) async {
+      final server = FakeServer();
+      final door = FakeDoor(password: pw, profile: {'name': 'Julian'})..chatsEnabled = true;
+      door.contacts.add({'user': 'local-bob', 'name': 'Bob', 'fingerprint': 'ff' * 16, 'confirmed': false});
+      door.chats.add({'id': 'c1', 'peer': 'local-bob', 'name': 'Bob', 'state': 'active', 'last': 0});
+      setup?.call(door, server);
+      await _start(tester, door: door, server: server);
+      await _unlock(tester);
+      await _openSettings(tester);
+      await tester.ensureVisible(find.widgetWithText(PillButton, 'Verbinden'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Verbinden'));
+      await tester.pumpAndSettle();
+      return (door, server);
+    }
+
+    Map<String, Object?> botProfile(String name, String owner, {int rev = 5}) => {
+      'rev': rev,
+      'name': name,
+      'about': 'Sagt das Wetter an.',
+      'badges': const <Object?>[],
+      'name_warning': false,
+      'bot': {'owner': owner, 'made': 1},
+    };
+
+    testWidgets('the owner vouches with the code: the bot becomes a contact; mistakes are said', (tester) async {
+      final (door, server) = await online(tester);
+      Future<void> vouch(String code, {String name = ''}) async {
+        await tester.ensureVisible(find.byKey(const ValueKey('bot-code')));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.descendant(of: find.byKey(const ValueKey('bot-code')), matching: find.byType(TextField)),
+          code,
+        );
+        await tester.enterText(
+          find.descendant(of: find.byKey(const ValueKey('bot-name')), matching: find.byType(TextField)),
+          name,
+        );
+        await Scrollable.ensureVisible(
+          tester.element(find.widgetWithText(PillButton, 'Bot bestätigen')),
+          alignment: 0.5,
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.widgetWithText(PillButton, 'Bot bestätigen'));
+        await tester.pumpAndSettle();
+      }
+
+      expect(find.textContaining('Mit seinem Code bestätigst du'), findsOneWidget);
+      await vouch('trair1:local-bob:${'ff' * 16}:beef');
+      expect(find.textContaining('kein gültiger Bot-Code'), findsOneWidget);
+      expect(server.vouched, isEmpty);
+      server.vouchError = 'bad_secret';
+      await vouch(botCode);
+      expect(find.textContaining('Dieser Code gilt nicht mehr'), findsOneWidget);
+      expect(door.contacts.where((c) => c['user'] == 'local-wetter'), isEmpty);
+
+      await vouch(botCode, name: 'Wetter');
+      expect(find.text('Bestätigt. Der Bot steht jetzt in deinen Kontakten.'), findsOneWidget);
+      expect(server.vouched.single['secret'], '5e' * 16);
+      expect((server.vouched.single['cert'] as Map)['owner'], 'local-julian');
+      expect(door.contacts.firstWhere((c) => c['user'] == 'local-wetter')['name'], 'Wetter');
+
+      // Its profile arrives: it is listed as the own bot.
+      door.chats.add({'id': 'b1', 'peer': 'local-wetter', 'name': 'Wetter', 'state': 'active', 'last': 0});
+      server.deliver(
+        FakeDoor.wire({'kind': 'profile', 'user': 'local-wetter', 'profile': botProfile('Wetterbot', 'local-julian')}),
+      );
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Deine Bots'));
+      await tester.pumpAndSettle();
+      expect(find.text('nennt sich „Wetterbot“'), findsOneWidget);
+      expect(door.ops, contains('check_bot'));
+    });
+
+    testWidgets('bots are marked in chats, whose they are is checked, and requests from bots say so', (tester) async {
+      final (door, server) = await online(
+        tester,
+        setup: (door, server) {
+          door.contacts.add({'user': 'local-wetter', 'name': 'Wetter', 'fingerprint': 'b7' * 16, 'confirmed': false});
+          door.contacts.add({'user': 'local-falsch', 'name': 'Falsch', 'fingerprint': 'b8' * 16, 'confirmed': false});
+          door.chats.addAll([
+            {'id': 'b1', 'peer': 'local-wetter', 'name': 'Wetter', 'state': 'active', 'last': 2},
+            {'id': 'b2', 'peer': 'local-falsch', 'name': 'Falsch', 'state': 'active', 'last': 1},
+            {'id': 'x1', 'peer': 'local-spam', 'name': 'local-spam', 'state': 'request', 'last': 0},
+          ]);
+          door.contactOwnedBots.add('local-wetter');
+          door.forgedBots.add('local-falsch');
+          server.bots['local-spam'] = 'local-mallory';
+        },
+      );
+      await tester.tap(find.text('Chats'));
+      await tester.pumpAndSettle();
+      expect(find.text('Anfrage von einem Bot'), findsOneWidget, reason: 'the server says so, before accepting');
+      for (final (user, name) in [('local-wetter', 'Wetterbot'), ('local-falsch', 'Falschbot')]) {
+        server.deliver(FakeDoor.wire({'kind': 'profile', 'user': user, 'profile': botProfile(name, 'local-bob')}));
+        await tester.pumpAndSettle();
+      }
+      expect(find.byType(BotChip), findsNWidgets(3));
+      expect(find.byWidgetPredicate((w) => w is BotChip && !w.ok), findsNWidgets(2), reason: 'forged and server-only');
+
+      await tester.tap(find.text('Wetter').first);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Bot von Bob (Kontakt)'), findsOneWidget);
+      await tester.tap(find.textContaining('Bot von Bob (Kontakt)'));
+      await tester.pumpAndSettle();
+      expect(find.text('Bot von Bob (Kontakt)'), findsOneWidget, reason: 'also on the card');
+      await tester.tap(find.byTooltip('Schließen').last);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Falsch').first);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Bot · Besitzer nicht nachweisbar'), findsOneWidget);
+      await tester.tap(find.text('local-spam').first);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Bot (laut Server) von local-mallory'), findsOneWidget);
+    });
+  });
 }

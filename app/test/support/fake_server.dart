@@ -39,6 +39,12 @@ class FakeServer implements ServerTransport {
 
   /// Changes and ciphertext that went out, as the app sent them.
   final List<Map<String, Object?>> commits = [];
+
+  /// Bots (M9): what owners handed in, the server's answer to the next
+  /// one, and accounts the server lists as bots (bot → owner, '' if none).
+  final List<Map<String, Object?>> vouched = [];
+  String? vouchError;
+  final Map<String, String> bots = {};
   final List<Map<String, Object?>> sent = [];
 
   /// Refuse the next change (another device was first) with this hash.
@@ -116,6 +122,14 @@ class FakeServer implements ServerTransport {
         return ok({'messages': List.of(_inbox)});
       case ('POST', '/v1/community'):
         return communities.op(body!);
+      case ('POST', '/v1/bots/vouch'):
+        final error = vouchError;
+        if (error != null) {
+          vouchError = null;
+          return ServerReply(403, {'ok': false, 'error': error});
+        }
+        vouched.add(body!);
+        return ok();
       case ('GET', '/v1/communities/sync'):
         final q = Uri.parse(path).queryParameters;
         return communities.sync(int.parse(q['since'] ?? '0'), int.parse(q['wait'] ?? '0'));
@@ -126,7 +140,14 @@ class FakeServer implements ServerTransport {
         return ok();
     }
     if (method == 'GET' && route.startsWith('/v1/accounts/')) {
+      final user = Uri.decodeComponent(route.substring('/v1/accounts/'.length));
+      final owner = bots[user];
       return ok({
+        'bot': owner == null
+            ? null
+            : {
+                'cert': owner.isEmpty ? null : {'owner': owner},
+              },
         'account_key': 'cd' * 32,
         'device_list': {
           'list': {'seq': 0},

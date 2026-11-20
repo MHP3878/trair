@@ -983,6 +983,10 @@ pub(crate) async fn op(
     Json(r): Json<Op>,
 ) -> Result<Json<Value>, ApiError> {
     let now = s.now();
+    // Bots join communities only through the right "add bots" (step 4b).
+    if crate::bots::is_bot(&s.db().conn, &me.user).map_err(internal)? {
+        return Err(ApiError(StatusCode::FORBIDDEN, "bot"));
+    }
     // Checks that need the account outside the database lock.
     let device_entry = if let Op::Post { .. } = &r {
         let (_, list, _) = load_account(&s, &me.user)?;

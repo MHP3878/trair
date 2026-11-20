@@ -253,6 +253,16 @@ class TrairVault {
   Future<CoreAnswer> leavePrepare(String chat) => _call({'op': 'leave_prepare', 'chat': chat});
   Future<CoreAnswer> leaveGroup(String chat) => _call({'op': 'leave_group', 'chat': chat});
   Future<CoreAnswer> acceptGroup(String chat) => _call({'op': 'accept_group', 'chat': chat});
+
+  // Bots (M9)
+
+  /// Sign the request code of a bot this account vouches for.
+  Future<CoreAnswer> vouchBot(String code) => _call({'op': 'vouch_bot', 'code': code});
+
+  /// Check a bot's certificate against its owner's key (hex, from the
+  /// server; a contact's key must match).
+  Future<CoreAnswer> checkBot(String user, String ownerKey) =>
+      _call({'op': 'check_bot', 'user': user, 'owner_key': ownerKey});
   Future<CoreAnswer> deleteChat(String chat) => _call({'op': 'delete_chat', 'chat': chat});
   Future<CoreAnswer> acceptNewKey(String chat, String user) =>
       _call({'op': 'accept_new_key', 'chat': chat, 'user': user});

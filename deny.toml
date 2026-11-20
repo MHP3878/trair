@@ -45,6 +45,10 @@ confidence-threshold = 0.93
 
 # Trairs eigene Pakete stehen unter AGPL-3.0-or-later.
 [[licenses.exceptions]]
+crate = "trair-bot"
+allow = ["AGPL-3.0-or-later"]
+
+[[licenses.exceptions]]
 crate = "trair-core"
 allow = ["AGPL-3.0-or-later"]
 

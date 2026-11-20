@@ -53,12 +53,13 @@ jobs:
       - name: Sicherheitskern und Server bauen
         id: core
         working-directory: .
-        run: cargo build -p trair-ffi -p trair-server --release --locked
+        run: cargo build -p trair-ffi -p trair-server -p trair-bot --release --locked
       - name: Widget-Tests, Tür zum Kern und Koppeln über den echten Server
         if: ${{ !cancelled() && steps.deps.outcome == 'success' && steps.core.outcome == 'success' }}
         env:
           TRAIR_FFI_LIB: ${{ github.workspace }}/target/release/libtrair_ffi.so
           TRAIR_SERVER_BIN: ${{ github.workspace }}/target/release/trair-server
+          TRAIR_BOT_BIN: ${{ github.workspace }}/target/release/trair-bot
         run: flutter test
       - name: Bildschirmfotos hochladen
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
@@ -119,9 +120,9 @@ jobs:
       - name: Clippy für Windows-Code
         working-directory: .
         run: cargo clippy -p trair-ffi -p trair-core --all-targets --locked -- -D warnings
-      - name: Sicherheitskern, Chats und Team-Werkzeug testen (Windows)
+      - name: Sicherheitskern, Chats, Team-Werkzeug und Bots testen (Windows)
         working-directory: .
-        run: cargo test -p trair-ffi -p trair-core -p trair-team --locked
+        run: cargo test -p trair-ffi -p trair-core -p trair-team -p trair-bot --locked
       - name: Sicherheitskern bauen
         working-directory: .
         run: cargo build -p trair-ffi --release --locked
@@ -146,9 +147,17 @@ jobs:
           if-no-files-found: error
       # The team tool for the project owner: makes the team key on their own
       # computer. The key itself never comes near CI.
-      - name: Team-Werkzeug und Server bauen
+      - name: Team-Werkzeug, Server und trair-bot bauen
         working-directory: .
-        run: cargo build -p trair-team -p trair-server --release --locked
+        run: cargo build -p trair-team -p trair-server -p trair-bot --release --locked
+      - name: trair-bot mit den Beispiel-Bots zusammenlegen
+        working-directory: .
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force bot-paket/beispiele | Out-Null
+          Copy-Item target/release/trair-bot.exe bot-paket/
+          Copy-Item bots/beispiele/* bot-paket/beispiele/
+          Get-ChildItem -Recurse bot-paket | Format-Table Name, Length
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Trair-Team-Werkzeug
@@ -161,6 +170,13 @@ jobs:
         with:
           name: Trair-Server
           path: target/release/trair-server.exe
+          retention-days: 30
+          if-no-files-found: error
+      # Bots (M9): trair-bot and the example bots.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Trair-Bot
+          path: bot-paket/
           retention-days: 30
           if-no-files-found: error
 
@@ -186,7 +202,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          for d in Trair-Windows-Demo Trair-Server Trair-Team-Werkzeug; do
+          for d in Trair-Windows-Demo Trair-Server Trair-Team-Werkzeug Trair-Bot; do
             (cd "$d" && zip -qr "../$d.zip" .)
           done
           ls -la
@@ -194,5 +210,5 @@ jobs:
           if ! gh release view vorschau >/dev/null 2>&1; then
             gh release create vorschau --draft --title "Vorschau" --notes "$notes"
           fi
-          gh release upload vorschau Trair-Windows-Demo.zip Trair-Server.zip Trair-Team-Werkzeug.zip --clobber
+          gh release upload vorschau Trair-Windows-Demo.zip Trair-Server.zip Trair-Team-Werkzeug.zip Trair-Bot.zip --clobber
           gh release edit vorschau --draft --notes "$notes"

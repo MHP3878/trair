@@ -161,7 +161,7 @@ pub fn verify_closed_message(device_key: &[u8], m: &OpenMessage, signature: &[u8
     verify(device_key, &channel_bytes(CLOSED_MESSAGE, m), signature)
 }
 
-fn verify(key: &[u8], message: &[u8], signature: &[u8]) -> Result<()> {
+pub(crate) fn verify(key: &[u8], message: &[u8], signature: &[u8]) -> Result<()> {
     OpenMlsRustCrypto::default()
         .crypto()
         .verify_signature(SCHEME, message, key, signature)

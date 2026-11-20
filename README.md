@@ -74,6 +74,14 @@ Sobald ein Chat läuft, bekommt das andere Konto automatisch dein Profil: Name, 
 
 **Geschlossene Kanäle:** Beim Anlegen eines Kanals „Geschlossen“ einschalten (Schloss-Symbol). Die Texte sind Ende-zu-Ende verschlüsselt, der Server sieht sie nicht. Das Trair eines Hüters (Gründer und wer Kanäle verwalten darf) nimmt alle auf, die laut Rollen lesen dürfen, gibt Neuen die letzten 50 Texte mit und entfernt, wer nicht mehr darf; jede Aufnahme steht im Kanal. Jeder Text ist vom Gerät unterschrieben, auch im Verlauf. Löschen dürfen Autor und Hüter; „Melden“ gibt den einen Text mit Unterschrift an die Moderation. Details: [SECURITY.md](SECURITY.md#closed-channels-m8-step-3b).
 
+**Bots:** Ein Bot ist ein eigenes Konto, das das Programm `trair-bot` auf deinem PC laufen lässt. Es kümmert sich um Schlüssel, Verschlüsselung und Server; dein Bot-Programm in einer beliebigen Sprache liest und schreibt nur JSON-Zeilen.
+
+1. `trair-bot neu --daten MEIN-BOT --name "Wetterbot"` legt den Bot an und zeigt einen Bot-Code.
+2. In Trair unter Einstellungen → Bots den Code einfügen und „Bot bestätigen“. Damit bestätigst du, dass er dir gehört; alle sehen dann „Bot von dir“, und erst dann darf er schreiben. Er steht danach in deinen Kontakten.
+3. `trair-bot start --daten MEIN-BOT -- python bots/beispiele/echo.py` startet ihn mit deinem Programm.
+
+Das Passwort für den Tresor des Bots kommt aus `TRAIR_BOT_PASSWORT`, aus `--passwort-datei` oder wird abgefragt; das Bot-Programm sieht es nie. Ereignisse: `ready`, `message`, `request`, `joined`, `left`, `changed`, `problem`. Befehle: `send`, `accept`, `decline`, `leave`, `add_contact`, `start_chat`, `chats`, `messages`, `contact_code`, `profile`, `stop` (Felder und Antworten: `crates/trair-bot/src/protocol.rs`). Beispiele in Python und JavaScript liegen in `bots/beispiele`. Communities folgen in Schritt 4b. Details: [SECURITY.md](SECURITY.md#bots-m9-step-4a).
+
 **Team-Meldungen:** Wer ein gültiges Trair-Team-Abzeichen hat, sieht sie in den Einstellungen. Auf dem Server-PC geht es auch ohne App: `trair-team meldungen --daten trair.db` und `trair-team erledigt --nummer 3 --daten trair.db`.
 
 ## Notfall-PINs

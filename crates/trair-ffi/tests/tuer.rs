@@ -2033,3 +2033,68 @@ fn d27_a_closed_channel_through_the_door_signed_with_history_and_deletion() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn d28_bot_codes_and_vouching_through_the_door() {
+    use trair_core::Account;
+    use trair_core::bots::{BotCert, parse_request, secret_hash, verify};
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let dir = fresh_dir();
+    call(json!({"op": "init", "dir": dir}));
+    assert_eq!(error(&call(json!({"op": "bot_request"}))), "locked");
+    assert_eq!(
+        error(&call(json!({"op": "vouch_bot", "code": "trairbot1:x:y:z"}))),
+        "locked"
+    );
+    let created = call(json!({"op": "create", "password": PW, "profile": {"name": "Julian"}}));
+    assert_eq!(created["ok"], true);
+    let me = call(json!({"op": "server_identity"}));
+    let owner_key = hex::decode(me["account_key"].as_str().unwrap()).unwrap();
+
+    // This account as a bot: a fresh code each time, the server gets the
+    // hash of its secret.
+    let a = call(json!({"op": "bot_request"}));
+    let b = call(json!({"op": "bot_request"}));
+    assert_ne!(a["code"], b["code"]);
+    let req = parse_request(a["code"].as_str().unwrap()).unwrap();
+    assert_eq!(req.bot, me["user"].as_str().unwrap());
+    assert_eq!(req.key, owner_key);
+    assert_eq!(secret_hash(&req.secret), a["hash"].as_str().unwrap());
+    // Its own bot: refused.
+    assert_eq!(
+        error(&call(json!({"op": "vouch_bot", "code": a["code"]}))),
+        "rejected"
+    );
+
+    // Vouching for another account's bot.
+    let bot = Account::generate("wetterbot").unwrap();
+    let (code, hash) = trair_core::bots::request_code(&bot).unwrap();
+    let v = call(json!({"op": "vouch_bot", "code": code}));
+    assert_eq!(v["ok"], true, "{v}");
+    let cert: BotCert = serde_json::from_value(v["cert"].clone()).unwrap();
+    assert_eq!(v["bot"], "wetterbot");
+    let contact = trair_core::ContactCode::parse(v["contact_code"].as_str().unwrap()).unwrap();
+    assert_eq!(contact.user, "wetterbot");
+    assert_eq!(contact.fingerprint, bot.fingerprint());
+    verify(&cert, &owner_key, Some("wetterbot"), Some(bot.public_key())).unwrap();
+    assert_eq!(
+        secret_hash(&hex::decode(v["secret"].as_str().unwrap()).unwrap()),
+        hash
+    );
+    for bad in ["", "trairbot1:wetterbot", "trair1:abc", &format!("{code}x")] {
+        assert_eq!(
+            error(&call(json!({"op": "vouch_bot", "code": bad}))),
+            "rejected",
+            "{bad:?}"
+        );
+    }
+    // No profile of that bot here yet.
+    assert_eq!(
+        error(&call(
+            json!({"op": "check_bot", "user": "wetterbot", "owner_key": hex::encode(&owner_key)})
+        )),
+        "not_found"
+    );
+    call(json!({"op": "lock"}));
+    let _ = std::fs::remove_dir_all(&dir);
+}

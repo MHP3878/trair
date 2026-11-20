@@ -484,8 +484,16 @@ pub(crate) fn profiles(m: &Messenger) -> Value {
                 now,
                 trair_core::badges::TEAM_KEYS,
             );
+            // The owner's signature needs the owner's key: the app gets it
+            // from the server and calls `check_bot`.
+            let bot = p
+                .profile
+                .bot
+                .as_ref()
+                .map(|b| json!({"owner": b.owner, "made": b.made}));
             json!({
                 "user": p.user,
+                "bot": bot,
                 "rev": p.profile.rev,
                 "name": p.profile.name,
                 "glow": p.profile.glow,
@@ -497,6 +505,22 @@ pub(crate) fn profiles(m: &Messenger) -> Value {
         })
         .collect();
     json!({"ok": true, "profiles": out})
+}
+
+/// Check the certificate a bot's profile came with against its owner's
+/// account key (hex, from the server). If the owner is a contact, the key
+/// must also be the contact's: then `contact` is true.
+pub(crate) fn check_bot(m: &Messenger, user: &str, owner_key: &str) -> Value {
+    let Ok(key) = hex::decode(owner_key) else {
+        return fail("bad_request");
+    };
+    match m.check_bot(user, &key) {
+        Ok(Some((valid, contact, owner))) => {
+            json!({"ok": true, "valid": valid, "owner": owner, "contact": contact})
+        }
+        Ok(None) => fail("not_found"),
+        Err(e) => core_error(e),
+    }
 }
 
 pub(crate) fn accept_request(m: &mut Messenger, chat: &str, name: &str) -> Value {

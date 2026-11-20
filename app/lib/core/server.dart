@@ -190,6 +190,10 @@ class ServerApi {
   // ----- communities (M8) -----
 
   /// One community op (`{"op": …}`, see crates/trair-server/src/communities.rs).
+  /// Vouch for a bot (its certificate and the secret from its code).
+  Future<ServerReply> vouchBot(Object? cert, String secret) =>
+      transport.send('POST', '/v1/bots/vouch', token: token, body: {'cert': cert, 'secret': secret});
+
   Future<ServerReply> community(Map<String, Object?> body) =>
       transport.send('POST', '/v1/community', token: token, body: body);
 

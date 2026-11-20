@@ -610,6 +610,55 @@ real server).
   channel any more; it has to be made again. History holds only texts of authors who are still in the
   channel. At most 1000 members per channel.
 
+## Bots (M9, step 4a)
+
+Code: `crates/trair-core/src/bots.rs` (certificate, request code),
+`profiles.rs` and `chats.rs` (certificate in the profile,
+`check_bot`), `crates/trair-server/src/bots.rs`, `crates/trair-bot`
+(the program), `crates/trair-ffi` (`bot_request`, `vouch_bot`,
+`check_bot`), `app/lib/app_state.dart` (`vouchBot`, `_checkBots`);
+tests: `bots.rs` (unit), `gruppen.rs` (a forging device, a swapped owner
+key), `tests/bots.rs` (b01-b02, real server), `tuer.rs` (d28),
+`trair-bot/tests/bot.rs` (t01-t02: real server, `trair-bot` in its own
+process, the example bots in Python and Node.js), `widget_test.dart`
+(group "Bots"), `server_native_test.dart` (app, core, server and
+`trair-bot`).
+
+- **A bot is an account of its own**, run by `trair-bot` on its owner's
+  computer. It has the same encrypted vault, the same core and the same
+  checks as the app (strict mode included); `trair-bot` only adds the
+  network. The bot's own program, in any language, speaks JSON lines
+  with `trair-bot` and never sees keys or the vault password (it is
+  removed from the program's environment). There is no open port:
+  only standard input and output.
+- **The owner vouches** (Julian's choice "Bot + Besitzer"). The owner's
+  account key signs the bot's account name, the bot's account key and
+  the owner's name (`trair/bot-owner/v1`). A bot's name and key are
+  public, so the request code also carries a one-time secret of 128 bits;
+  the server stores only its SHA-256 and takes a certificate only with
+  the matching secret. Each secret works once; a new code (from the
+  bot's operator) replaces the last and is how a bot moves to another
+  owner. At most 10 bots per owner; a bot cannot own bots.
+- **Until vouched, a bot is silent:** it may log in and receive, but the
+  server refuses its messages and chat changes (`bot_unconfirmed`). When
+  the owner's account goes, its bots lose the certificate and fall
+  silent again.
+- **Everyone sees whose a bot is, without trusting the server:** the
+  certificate travels in the bot's end-to-end profile. A receiver keeps
+  such a profile only if the certificate names the sending account and
+  its key. The app checks the owner's signature with the owner's key from
+  the server; if the owner is a contact, that key must also be the
+  contact's, so a server that swaps keys cannot make a bot look like
+  someone's. The app shows "BOT" and "Bot von …"; a certificate that does
+  not hold is shown as such. Before a chat request is accepted, only the
+  server says whether its sender is a bot (shown as "laut Server").
+- **No communities yet:** the server refuses every community operation
+  from a bot. Step 4b brings the right "add bots".
+- **What remains:** someone who automates a normal account is not marked;
+  no messenger can prevent that. A bot reads everything in the chats and
+  groups it is in, like any member. `trair-bot` talks only to a server on
+  the same computer until TLS is done, like the app.
+
 ## Emergency PINs
 
 Code: `crates/trair-core/src/notfall.rs`, `crates/trair-ffi/src/

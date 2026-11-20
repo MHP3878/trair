@@ -76,6 +76,8 @@ ICONS = {
     "scroll-text": 0xE45F,
     "settings": 0xE154,
     "shield-alert": 0xE1FE,
+    # Bots (M9)
+    "bot": 0xE1BB,
 }
 
 # Logo "Neon-Schild" (Julians Wahl, Mischung aus Schildblase und Neon-T)
