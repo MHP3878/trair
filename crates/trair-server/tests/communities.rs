@@ -143,7 +143,7 @@ impl Person {
     /// One op that the server must refuse with `code`.
     async fn refused(&self, w: &World, body: Value, code: &str) {
         let (status, answer) = self.op(w, body.clone()).await;
-        assert!(!status.is_success(), "{} could do {body}", self.user());
+        assert!(!status.is_success(), "not refused: {body}");
         assert_eq!(answer["error"], code, "{body} → {status} {answer}");
     }
 

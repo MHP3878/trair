@@ -1742,6 +1742,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('member-action-ban')));
       await tester.pumpAndSettle();
       await tester.enterText(find.byKey(const Key('ask-text')), 'Beleidigungen');
+      await tester.pump();
       await tester.tap(find.widgetWithText(PillButton, 'Bannen'));
       await tester.pumpAndSettle();
       expect(members.containsKey('local-bob'), isFalse);
@@ -1776,6 +1777,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining('Die Moderation von „Fremde Runde“'), findsOneWidget);
       await tester.enterText(find.byKey(const Key('ask-text')), 'beleidigend');
+      await tester.pump();
       await tester.tap(find.widgetWithText(PillButton, 'Melden'));
       await tester.pumpAndSettle();
       final report = ((server.communities.communities[id]!['reports'] as List).single as Map);
