@@ -277,10 +277,7 @@ class ProfilePopup extends StatelessWidget {
                           Flexible(
                             child: Text(
                               v.botLine!,
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: v.botOk ? TrairColors.textSoft : TrairColors.amber,
-                              ),
+                              style: TextStyle(fontSize: 13, color: v.botOk ? TrairColors.textSoft : TrairColors.amber),
                             ),
                           ),
                         ],

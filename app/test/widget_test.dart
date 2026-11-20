@@ -2060,8 +2060,14 @@ void main() {
       Future<void> vouch(String code, {String name = ''}) async {
         await tester.ensureVisible(find.byKey(const ValueKey('bot-code')));
         await tester.pumpAndSettle();
-        await tester.enterText(find.descendant(of: find.byKey(const ValueKey('bot-code')), matching: find.byType(TextField)), code);
-        await tester.enterText(find.descendant(of: find.byKey(const ValueKey('bot-name')), matching: find.byType(TextField)), name);
+        await tester.enterText(
+          find.descendant(of: find.byKey(const ValueKey('bot-code')), matching: find.byType(TextField)),
+          code,
+        );
+        await tester.enterText(
+          find.descendant(of: find.byKey(const ValueKey('bot-name')), matching: find.byType(TextField)),
+          name,
+        );
         await tester.tap(find.widgetWithText(PillButton, 'Bot bestätigen'));
         await tester.pumpAndSettle();
       }

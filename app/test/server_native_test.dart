@@ -531,7 +531,12 @@ void main() {
       final tmp = await Directory.systemTemp.createTemp('trair-bot-');
       final port = 20000 + (pid + 23) % 20000;
       final url = 'http://127.0.0.1:$port';
-      final server = await Process.start(serverBin!, ['--adresse', '127.0.0.1:$port', '--daten', '${tmp.path}/server.db']);
+      final server = await Process.start(serverBin!, [
+        '--adresse',
+        '127.0.0.1:$port',
+        '--daten',
+        '${tmp.path}/server.db',
+      ]);
       final log = StringBuffer();
       server.stdout.transform(const SystemEncoding().decoder).listen(log.write);
       server.stderr.transform(const SystemEncoding().decoder).listen(log.write);
@@ -552,7 +557,10 @@ void main() {
       final v = TrairVault(NativeDoor.load(lib!));
       expect((await v.init('${tmp.path}/olga')).ok, isTrue);
       final olga = AppState(DemoBackend(), v, accountsBase: '${tmp.path}/olga');
-      expect((await olga.createAccount(name: 'Olga', glowColor: TrairColors.accentLight, password: _randomWords())).ok, isTrue);
+      expect(
+        (await olga.createAccount(name: 'Olga', glowColor: TrairColors.accentLight, password: _randomWords())).ok,
+        isTrue,
+      );
       olga.serverUrl = url;
       await olga.connect();
       expect(olga.serverStatus, ServerStatus.connected, reason: '${olga.serverMessage} | $log');
@@ -561,7 +569,13 @@ void main() {
       // The bot is made by trair-bot; Olga vouches with its code in the app.
       final env = {'TRAIR_BOT_PASSWORT': _randomWords()};
       final made = await Process.run(botBin!, [
-        'neu', '--daten', '${tmp.path}/bot', '--name', 'Wetterbot', '--server', url,
+        'neu',
+        '--daten',
+        '${tmp.path}/bot',
+        '--name',
+        'Wetterbot',
+        '--server',
+        url,
       ], environment: env);
       expect(made.exitCode, 0, reason: '${made.stderr}');
       final code = (made.stdout as String).trim();
@@ -572,12 +586,19 @@ void main() {
       expect(await olga.vouchBot(code, 'Wetter'), isFalse, reason: 'the code works once');
 
       // The bot runs; it speaks JSON lines with this test as its program.
-      final running = await Process.start(botBin, ['start', '--daten', '${tmp.path}/bot', '--server', url], environment: env);
+      final running = await Process.start(botBin, [
+        'start',
+        '--daten',
+        '${tmp.path}/bot',
+        '--server',
+        url,
+      ], environment: env);
       bot = running;
       final events = StreamController<Map<String, Object?>>.broadcast();
-      running.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen(
-        (line) => events.add((jsonDecode(line) as Map).cast<String, Object?>()),
-      );
+      running.stdout
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .listen((line) => events.add((jsonDecode(line) as Map).cast<String, Object?>()));
       running.stderr.transform(utf8.decoder).listen(log.write);
       Future<Map<String, Object?>> next(String what, bool Function(Map<String, Object?>) fits) =>
           events.stream.firstWhere(fits).timeout(const Duration(seconds: 60), onTimeout: () => throw 'no $what | $log');

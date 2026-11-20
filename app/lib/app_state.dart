@@ -1113,7 +1113,10 @@ class AppState extends ChangeNotifier {
       for (final c in realChats)
         if (c.kind == 'direct' && c.state == 'request') c.peer,
     };
-    final next = {for (final e in requestBots.entries) if (open.contains(e.key)) e.key: e.value};
+    final next = {
+      for (final e in requestBots.entries)
+        if (open.contains(e.key)) e.key: e.value,
+    };
     var changed = next.length != requestBots.length;
     for (final user in open.where((u) => !requestBots.containsKey(u))) {
       final acc = await api.account(user);
