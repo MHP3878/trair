@@ -196,7 +196,7 @@ impl Messenger {
             return Ok(None);
         }
         match self.device.group_state(chat)? {
-            Some(s) if s.kind == GroupKind::Group => Ok(Some((s, self.device.accounts(chat)?))),
+            Some(s) if s.kind != GroupKind::Join => Ok(Some((s, self.device.accounts(chat)?))),
             _ => Ok(None),
         }
     }
@@ -364,6 +364,10 @@ impl Messenger {
                     update_keys: false,
                 })
             }
+            GroupKind::Channel => {
+                let _ = members;
+                self.joined_channel(group, &by.user, now, mark)
+            }
             GroupKind::Group => {
                 // Was this account waiting to join through this admin?
                 let waiting: Vec<String> = self
@@ -443,7 +447,7 @@ impl Messenger {
 
     fn group_chat(&self, chat: &str) -> Result<(Chat, GroupState)> {
         let c = self.chat(chat)?;
-        if c.kind != ChatKind::Group {
+        if !c.kind.is_group() {
             return Err(CoreError::Rejected("not a group".into()));
         }
         if c.state != ChatState::Active {
@@ -547,7 +551,7 @@ impl Messenger {
     /// A group with its members and roles.
     pub fn group_view(&self, chat: &str) -> Result<GroupView> {
         let c = self.chat(chat)?;
-        if c.kind != ChatKind::Group {
+        if !c.kind.is_group() {
             return Err(CoreError::Rejected("not a group".into()));
         }
         let state = self
@@ -761,7 +765,7 @@ impl Messenger {
     /// group's keys at once and keeps the history. Send the bytes to `to`.
     pub fn leave_group(&mut self, chat: &str, now: u64) -> Result<(Vec<u8>, Vec<String>)> {
         let c = self.chat(chat)?;
-        if c.kind != ChatKind::Group || c.state == ChatState::Left {
+        if !c.kind.is_group() || c.state == ChatState::Left {
             return Err(CoreError::Rejected("not a group to leave".into()));
         }
         let state = self.device.group_state(chat)?;
@@ -1223,7 +1227,16 @@ impl Messenger {
         mark: impl FnOnce(&Transaction) -> Result<()>,
     ) -> Result<Incoming> {
         match chat.kind {
-            ChatKind::Group if chat.state != ChatState::Left => {
+            ChatKind::Group | ChatKind::Channel if chat.state != ChatState::Left => {
+                if let Some(apply) = self.channel_control(chat, user, control, now)? {
+                    self.save(move |tx| {
+                        mark(tx)?;
+                        apply(tx)
+                    })?;
+                    return Ok(Incoming::Group {
+                        chat: chat.id.clone(),
+                    });
+                }
                 if control.get("leave").and_then(Value::as_bool) == Some(true) {
                     return self.member_left(chat, user, now, mark);
                 }

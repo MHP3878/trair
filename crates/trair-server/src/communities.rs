@@ -8,8 +8,13 @@
 //! Open channels are readable on the server on purpose (decision 9 of the
 //! planning: moderation needs it), and the app says so. Every message in
 //! them is signed by the sender's device, so the server can read and
-//! delete it, but not write one in someone's name or change it. Closed,
-//! end-to-end encrypted channels come in step 3b.
+//! delete it, but not write one in someone's name or change it.
+//!
+//! Closed channels (step 3b) are MLS groups: the server never sees their
+//! texts. It names the group (`grp`) and decides who keeps it: changes of
+//! that group are taken only from members who may manage channels (the
+//! keepers), whatever the change itself claims. Keepers ask the server who
+//! may read the channel and add or remove them.
 //!
 //! The server decides every right:
 //! - The owner has all rights. Everyone else has the rights of the role
@@ -40,7 +45,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use trair_core::badges::{self, Badge, BadgeKind};
-use trair_core::proofs::{OpenMessage, verify_open_message};
+use trair_core::proofs::{OpenMessage, verify_closed_message, verify_open_message};
 
 use crate::{ApiError, MAX_WAIT, Server, Session, bad, internal, load_account, random_hex};
 
@@ -140,6 +145,8 @@ CREATE TABLE IF NOT EXISTS c_channels (
     position INTEGER NOT NULL,
     read_roles TEXT,
     write_roles TEXT,
+    closed INTEGER NOT NULL DEFAULT 0,
+    grp TEXT,
     PRIMARY KEY (community, id)
 );
 CREATE TABLE IF NOT EXISTS c_messages (
@@ -472,13 +479,16 @@ struct Channel {
     topic: String,
     position: i64,
     access: Access,
+    /// End-to-end encrypted: an MLS group, `grp` its id.
+    closed: bool,
+    grp: Option<String>,
 }
 
 fn channels(c: &Connection, id: &str) -> Result<Vec<Channel>, ApiError> {
     let mut st = c
         .prepare(
-            "SELECT id, category, name, topic, position, read_roles, write_roles FROM c_channels
-             WHERE community = ?1 ORDER BY position, name",
+            "SELECT id, category, name, topic, position, read_roles, write_roles, closed, grp
+             FROM c_channels WHERE community = ?1 ORDER BY position, name",
         )
         .map_err(sql)?;
     let rows = st
@@ -493,6 +503,8 @@ fn channels(c: &Connection, id: &str) -> Result<Vec<Channel>, ApiError> {
                     read: parse_ids(r.get(5)?),
                     write: parse_ids(r.get(6)?),
                 },
+                closed: r.get::<_, i64>(7)? != 0,
+                grp: r.get(8)?,
             })
         })
         .map_err(sql)?;
@@ -600,6 +612,66 @@ fn delete_community(c: &Connection, id: &str, now: u64) -> Result<(), ApiError> 
     Ok(())
 }
 
+/// Who keeps the closed channels of a community: the owner and every
+/// member who may manage channels.
+fn keepers(c: &Connection, id: &str) -> Result<Vec<String>, ApiError> {
+    let k = community(c, id)?;
+    let rs = roles(c, id)?;
+    let mut out = Vec::new();
+    for m in members_of(c, id)? {
+        if let Some(st) = standing(c, id, &k.owner, &m)?
+            && perms_of(&st, &rs) & perm::MANAGE_CHANNELS != 0
+        {
+            out.push(m);
+        }
+    }
+    out.sort();
+    Ok(out)
+}
+
+/// For the MLS group of a closed channel: the accounts that may change it
+/// now. `None` for any other group.
+pub(crate) fn keepers_of_group(
+    c: &Connection,
+    group: &str,
+) -> rusqlite::Result<Option<Vec<String>>> {
+    let id: Option<String> = c
+        .query_row(
+            "SELECT community FROM c_channels WHERE grp = ?1",
+            [group],
+            |r| r.get(0),
+        )
+        .optional()?;
+    match id {
+        Some(id) => keepers(c, &id)
+            .map(Some)
+            .map_err(|_| rusqlite::Error::InvalidQuery),
+        None => Ok(None),
+    }
+}
+
+/// A device's public key from an account's stored device list (also of
+/// a device withdrawn since).
+fn device_key(c: &Connection, user: &str, device: &str) -> Result<Option<Vec<u8>>, ApiError> {
+    let list: Option<String> = c
+        .query_row(
+            "SELECT device_list FROM accounts WHERE user = ?1",
+            [user],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(sql)?;
+    let Some(list) = list else { return Ok(None) };
+    let list: trair_core::SignedDeviceList = serde_json::from_str(&list).map_err(internal)?;
+    Ok(list
+        .list
+        .devices
+        .iter()
+        .chain(&list.list.withdrawn)
+        .find(|d| d.id == device)
+        .and_then(|d| hex::decode(&d.key).ok()))
+}
+
 /// An account is deleted: it leaves every community, its messages in
 /// open channels go, and a community it owned goes to the member who
 /// stands highest (or is deleted when nobody is left).
@@ -703,6 +775,12 @@ pub(crate) enum Op {
         topic: String,
         read_roles: Option<Vec<i64>>,
         write_roles: Option<Vec<i64>>,
+        #[serde(default)]
+        closed: bool,
+    },
+    ChannelMembers {
+        community: String,
+        channel: String,
     },
     EditChannel {
         community: String,
@@ -1047,6 +1125,7 @@ fn run(
                         "position": ch.position, "read_roles": ch.access.read,
                         "write_roles": ch.access.write,
                         "can_write": ok && can_write(&a.me, &a.roles, &ch.access),
+                        "closed": ch.closed, "group": ch.grp,
                     })
                 })
                 .collect();
@@ -1121,6 +1200,7 @@ fn run(
             topic,
             read_roles,
             write_roles,
+            closed,
         } => {
             let a = Actor::load(c, &id, user)?;
             a.need(perm::MANAGE_CHANNELS)?;
@@ -1140,16 +1220,66 @@ fn run(
                 return Err(err(StatusCode::TOO_MANY_REQUESTS, "too_many"));
             }
             let ch = random_hex::<4>()?;
+            // A closed channel gets the id of its MLS group now, so the
+            // server knows whose changes to take before the first one.
+            let grp = if closed {
+                Some(random_hex::<16>()?)
+            } else {
+                None
+            };
             c.execute(
-                "INSERT INTO c_channels (community, id, category, name, topic, position, read_roles, write_roles)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                params![id, ch, category, name, topic, n, ids_text(&read_roles), ids_text(&write_roles)],
+                "INSERT INTO c_channels (community, id, category, name, topic, position, read_roles, write_roles,
+                   closed, grp)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![
+                    id,
+                    ch,
+                    category,
+                    name,
+                    topic,
+                    n,
+                    ids_text(&read_roles),
+                    ids_text(&write_roles),
+                    closed,
+                    grp
+                ],
             )
             .map_err(sql)?;
-            log(c, &id, user, "channel_create", &name, "", now)?;
+            log(
+                c,
+                &id,
+                user,
+                "channel_create",
+                &name,
+                if closed { "closed" } else { "" },
+                now,
+            )?;
             event(c, &id, "changed", &ch, 0, "", now)?;
             touched.members(c, &id)?;
-            Ok(json!({"ok": true, "channel": ch}))
+            Ok(json!({"ok": true, "channel": ch, "group": grp}))
+        }
+        Op::ChannelMembers {
+            community: id,
+            channel: ch,
+        } => {
+            let a = Actor::load(c, &id, user)?;
+            let chan = channel(c, &id, &ch)?;
+            if !can_read(&a.me, &a.roles, &chan.access) {
+                return Err(forbidden());
+            }
+            let mut readers = Vec::new();
+            for m in members_of(c, &id)? {
+                if let Some(st) = standing(c, &id, &a.c.owner, &m)?
+                    && can_read(&st, &a.roles, &chan.access)
+                {
+                    readers.push(m);
+                }
+            }
+            readers.sort();
+            Ok(
+                json!({"ok": true, "readers": readers, "keepers": keepers(c, &id)?,
+                "group": chan.grp, "closed": chan.closed}),
+            )
         }
         Op::EditChannel {
             community: id,
@@ -1638,6 +1768,9 @@ fn run(
         } => {
             let a = Actor::load(c, &id, user)?;
             let chan = channel(c, &id, &ch)?;
+            if chan.closed {
+                return Err(bad("closed_channel"));
+            }
             if !can_write(&a.me, &a.roles, &chan.access) {
                 return Err(forbidden());
             }
@@ -1681,6 +1814,9 @@ fn run(
         } => {
             let a = Actor::load(c, &id, user)?;
             let chan = channel(c, &id, &ch)?;
+            if chan.closed {
+                return Err(bad("closed_channel"));
+            }
             if !can_read(&a.me, &a.roles, &chan.access) {
                 return Err(forbidden());
             }
@@ -1750,6 +1886,7 @@ fn run(
             let mut snapshot = json!(null);
             let mut target = target;
             let mut ch = ch;
+            let mut closed_evidence = false;
             if let Some(id) = &community {
                 let a = Actor::load(c, id, user)?;
                 if let Some(mid) = message {
@@ -1770,6 +1907,21 @@ fn run(
                         json!({"user": author, "channel": chan.name, "text": text, "sent": sent});
                     target = Some(author);
                     ch = Some(mch);
+                } else if let (Some(cid), Some(e)) = (&ch, &evidence) {
+                    // A text from a closed channel: the server never had it,
+                    // so the reporter hands it over, and its device
+                    // signature shows it was written like that.
+                    let chan = channel(c, id, cid)?;
+                    if chan.closed {
+                        if !can_read(&a.me, &a.roles, &chan.access) {
+                            return Err(forbidden());
+                        }
+                        let t = closed_text(c, id, cid, e)?;
+                        snapshot = json!({"user": t.0, "channel": chan.name, "text": t.1,
+                            "sent": t.2, "signed": true});
+                        target = Some(t.0);
+                        closed_evidence = true;
+                    }
                 }
             } else if message.is_some() || ch.is_some() {
                 return Err(bad("community_needed"));
@@ -1777,7 +1929,7 @@ fn run(
             if !team && community.is_none() {
                 return Err(bad("community_needed"));
             }
-            if let Some(e) = evidence {
+            if let Some(e) = evidence.filter(|_| !closed_evidence) {
                 if !team
                     || serde_json::to_vec(&e).map_or(usize::MAX, |b| b.len()) > MAX_EVIDENCE_BYTES
                 {
@@ -1909,6 +2061,42 @@ fn run(
             Ok(json!({"ok": true}))
         }
     }
+}
+
+/// A reported text of a closed channel, checked against its author's
+/// device: (author, text, sent).
+fn closed_text(
+    c: &Connection,
+    community: &str,
+    channel: &str,
+    e: &Value,
+) -> Result<(String, String, u64), ApiError> {
+    let field = |k: &str| {
+        e.get(k)
+            .and_then(Value::as_str)
+            .ok_or_else(|| bad("bad_evidence"))
+    };
+    let (author, device, text) = (field("user")?, field("device")?, field("text")?);
+    let sent = e
+        .get("sent")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| bad("bad_evidence"))?;
+    let sig = hex::decode(field("sig")?).map_err(|_| bad("bad_evidence"))?;
+    if chars(text) > MAX_TEXT_CHARS {
+        return Err(bad("bad_evidence"));
+    }
+    let key = device_key(c, author, device)?.ok_or_else(|| bad("bad_evidence"))?;
+    let m = OpenMessage {
+        community,
+        channel,
+        user: author,
+        device,
+        sent,
+        text,
+    };
+    verify_closed_message(&key, &m, &sig)
+        .map_err(|_| err(StatusCode::FORBIDDEN, "bad_signature"))?;
+    Ok((author.to_string(), text.to_string(), sent))
 }
 
 fn ids_text(ids: &Option<Vec<i64>>) -> Option<String> {

@@ -186,7 +186,7 @@ fn name_of(m: &Messenger, user: &str) -> String {
 /// What a chat is called in the list: a group by its name, everything
 /// else by the other account.
 pub(crate) fn chat_name(m: &Messenger, c: &Chat) -> String {
-    if c.kind == ChatKind::Group
+    if c.kind.is_group()
         && let Ok(v) = m.group_view(&c.id)
     {
         return v.name;
@@ -228,11 +228,16 @@ pub(crate) fn chats(m: &Messenger) -> Value {
             "chats": list.iter().map(|c| {
                 let mut j = chat_json(c, &chat_name(m, c));
                 j["ends"] = json!(m.chat_end(&c.id).ok().flatten());
-                if c.kind == ChatKind::Group
+                if c.kind.is_group()
                     && let Ok(v) = m.group_view(&c.id)
                 {
                     j["role"] = json!(v.me.as_str());
                     j["members"] = json!(v.members.len());
+                }
+                if c.kind == ChatKind::Channel
+                    && let Ok(Some(r)) = m.channel_of(&c.id)
+                {
+                    j["channel"] = json!({"community": r.community, "channel": r.channel});
                 }
                 j
             }).collect::<Vec<_>>(),
@@ -249,9 +254,16 @@ pub(crate) fn messages(
 ) -> Value {
     let limit = limit.unwrap_or(50).clamp(1, 500) as usize;
     match m.messages(chat, before, limit) {
-        Ok(list) => {
-            json!({"ok": true, "messages": list.iter().map(message_json).collect::<Vec<_>>()})
-        }
+        Ok(list) => json!({"ok": true, "messages": list.iter().map(|msg| {
+            let mut j = message_json(msg);
+            // Texts of closed channels carry their device signature.
+            if let Ok(Some(t)) = m.channel_signature(msg.id) {
+                j["sent"] = json!(t.sent);
+                j["device"] = json!(t.device);
+                j["sig"] = json!(hex::encode(&t.sig));
+            }
+            j
+        }).collect::<Vec<_>>()}),
         Err(e) => core_error(e),
     }
 }

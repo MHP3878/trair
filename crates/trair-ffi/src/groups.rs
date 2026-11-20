@@ -14,6 +14,12 @@
 //! `join_group`, `join_message`, `join_requests`, `admit`, `close_join`,
 //! `deny_join`.
 //!
+//! Closed channels (M8, step 3b): `create_channel_group`, `add_to_channel`,
+//! `channel_remove`, `set_keepers`, `channel_history`,
+//! `delete_channel_message`. `chats` gives a channel's chat
+//! `channel: {community, channel}`; `messages` gives its texts `sent`,
+//! `device` and `sig` (hex), the device signature.
+//!
 //! Extra error codes: `not_allowed` (the group's rules say no),
 //! `outdated` (a device runs a Trair without groups).
 
@@ -264,4 +270,64 @@ pub(crate) fn close_join(m: &mut Messenger, chat: &str) -> Value {
 
 pub(crate) fn deny_join(m: &mut Messenger, chat: &str) -> Value {
     message(m.deny_join(chat))
+}
+
+// ------------------------------------------------------------ channels (3b)
+
+/// A keeper makes the MLS group of a closed channel, with the id the
+/// server chose.
+pub(crate) fn create_channel_group(
+    m: &mut Messenger,
+    group: &str,
+    name: &str,
+    community: &str,
+    channel: &str,
+    list: Vec<Offer>,
+) -> Value {
+    let Some(offers) = offers(list) else {
+        return fail("bad_request");
+    };
+    let r = trair_core::groups::ChannelRef {
+        community: community.to_string(),
+        channel: channel.to_string(),
+    };
+    match m.create_channel(group, name, r, &offers, now()) {
+        Ok((chat, p)) => json!({
+            "ok": true,
+            "chat": chat_json(&chat, name),
+            "commit": p.as_ref().map(commit_json),
+        }),
+        Err(e) => core_error(e),
+    }
+}
+
+pub(crate) fn add_to_channel(m: &mut Messenger, chat: &str, list: Vec<Offer>) -> Value {
+    let Some(offers) = offers(list) else {
+        return fail("bad_request");
+    };
+    commit(m.add_to_channel(chat, &offers))
+}
+
+pub(crate) fn channel_remove(m: &mut Messenger, chat: &str, user: &str) -> Value {
+    commit(m.channel_remove(chat, user))
+}
+
+pub(crate) fn set_keepers(m: &mut Messenger, chat: &str, keepers: &[String]) -> Value {
+    match m.set_keepers(chat, keepers) {
+        Ok(p) => json!({"ok": true, "commit": p.as_ref().map(commit_json)}),
+        Err(e) => core_error(e),
+    }
+}
+
+/// The last texts for a newcomer; `none: true` if there is nothing.
+pub(crate) fn channel_history(m: &mut Messenger, chat: &str, user: &str) -> Value {
+    match m.channel_history(chat, user) {
+        Ok(Some((bytes, to))) => json!({"ok": true, "body": b64(&bytes), "to": to}),
+        Ok(None) => json!({"ok": true, "none": true}),
+        Err(e) => core_error(e),
+    }
+}
+
+pub(crate) fn delete_channel_message(m: &mut Messenger, chat: &str, id: i64) -> Value {
+    message(m.delete_channel_message(chat, id))
 }
