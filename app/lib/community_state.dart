@@ -990,7 +990,8 @@ class Communities {
               if (!loaded.any((x) => x.id == msg.id)) {
                 await _check(id, ch, [msg]);
                 if (run != _run) return;
-                loaded.add(msg);
+                // The own post may have added it meanwhile.
+                if (!loaded.any((x) => x.id == msg.id)) loaded.add(msg);
               }
             }
           case 'deleted':

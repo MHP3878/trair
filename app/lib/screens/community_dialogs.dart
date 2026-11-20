@@ -114,38 +114,84 @@ Future<String?> askText(
   int maxLength = 1000,
   String initial = '',
   PillKind kind = PillKind.primary,
-}) {
-  final c = TextEditingController(text: initial);
-  return showDialog<String>(
-    context: context,
-    barrierColor: const Color(0x9905050A),
-    builder: (ctx) => StatefulBuilder(
-      builder: (ctx, set) => DialogShell(
-        title: title,
-        children: [
-          if (text.isNotEmpty) ...[Text(text, style: TrairText.muted), const SizedBox(height: 12)],
-          NoteField(
-            controller: c,
-            hint: hint,
-            lines: lines,
-            maxLength: maxLength,
-            autofocus: true,
-            fieldKey: const Key('ask-text'),
-          ),
-          const SizedBox(height: 14),
-          ListenableBuilder(
-            listenable: c,
-            builder: (_, _) => _buttons(
-              ctx,
-              yes,
-              needed && c.text.trim().isEmpty ? null : () => Navigator.pop(ctx, c.text.trim()),
-              kind: kind,
-            ),
-          ),
-        ],
+}) => showDialog<String>(
+  context: context,
+  barrierColor: const Color(0x9905050A),
+  builder: (_) => _AskText(
+    title: title,
+    text: text,
+    hint: hint,
+    yes: yes,
+    needed: needed,
+    lines: lines,
+    maxLength: maxLength,
+    initial: initial,
+    kind: kind,
+  ),
+);
+
+/// The field lives as long as the dialog (also while it fades out).
+class _AskText extends StatefulWidget {
+  const _AskText({
+    required this.title,
+    required this.text,
+    required this.hint,
+    required this.yes,
+    required this.needed,
+    required this.lines,
+    required this.maxLength,
+    required this.initial,
+    required this.kind,
+  });
+
+  final String title;
+  final String text;
+  final String hint;
+  final String yes;
+  final bool needed;
+  final int lines;
+  final int maxLength;
+  final String initial;
+  final PillKind kind;
+
+  @override
+  State<_AskText> createState() => _AskTextState();
+}
+
+class _AskTextState extends State<_AskText> {
+  late final _c = TextEditingController(text: widget.initial);
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => DialogShell(
+    title: widget.title,
+    children: [
+      if (widget.text.isNotEmpty) ...[Text(widget.text, style: TrairText.muted), const SizedBox(height: 12)],
+      NoteField(
+        controller: _c,
+        hint: widget.hint,
+        lines: widget.lines,
+        maxLength: widget.maxLength,
+        autofocus: true,
+        fieldKey: const Key('ask-text'),
       ),
-    ),
-  ).whenComplete(c.dispose);
+      const SizedBox(height: 14),
+      ListenableBuilder(
+        listenable: _c,
+        builder: (_, _) => _buttons(
+          context,
+          widget.yes,
+          widget.needed && _c.text.trim().isEmpty ? null : () => Navigator.pop(context, _c.text.trim()),
+          kind: widget.kind,
+        ),
+      ),
+    ],
+  );
 }
 
 /// Found a community or join one with a code.
@@ -311,57 +357,14 @@ Future<bool> showTeamReport(
   required String name,
   List<Map<String, Object?>> chatMessages = const [],
 }) async {
-  final reason = TextEditingController();
-  var attach = false;
-  final sent = await showDialog<bool>(
+  final answer = await showDialog<(String, bool)>(
     context: context,
     barrierColor: const Color(0x9905050A),
-    builder: (ctx) => StatefulBuilder(
-      builder: (ctx, set) => DialogShell(
-        title: '$name melden',
-        children: [
-          const Text(
-            'Die Meldung geht an das Trair-Team, nicht an eine Community. '
-            'Für Nachrichten in einer Community nimm „Melden“ an der Nachricht.',
-            style: TrairText.muted,
-          ),
-          const SizedBox(height: 12),
-          NoteField(controller: reason, hint: 'Was ist passiert?', maxLength: 1000, autofocus: true),
-          if (chatMessages.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            PillSwitch(
-              value: attach,
-              label: 'Die letzten ${chatMessages.length} Nachrichten aus eurem Chat anhängen',
-              onChanged: (v) => set(() => attach = v),
-            ),
-            if (attach)
-              const Padding(
-                padding: EdgeInsets.only(top: 6),
-                child: Text(
-                  'Diese Nachrichten sind dann nicht mehr Ende-zu-Ende verschlüsselt: '
-                  'Das Trair-Team und der Server können sie lesen.',
-                  style: TextStyle(fontSize: 12.5, height: 1.5, color: TrairColors.amber),
-                ),
-              ),
-          ],
-          const SizedBox(height: 14),
-          ListenableBuilder(
-            listenable: reason,
-            builder: (_, _) => _buttons(
-              ctx,
-              'An Trair-Team senden',
-              reason.text.trim().isEmpty ? null : () => Navigator.pop(ctx, true),
-              kind: PillKind.danger,
-            ),
-          ),
-        ],
-      ),
-    ),
+    builder: (_) => _TeamReport(name: name, messages: chatMessages.length),
   );
-  final text = reason.text.trim();
-  reason.dispose();
-  if (sent != true) return false;
-  final ok = await state.communities.reportToTeam(user, text, evidence: attach ? chatMessages : null);
+  if (answer == null) return false;
+  final (reason, attach) = answer;
+  final ok = await state.communities.reportToTeam(user, reason, evidence: attach ? chatMessages : null);
   if (context.mounted) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -372,4 +375,68 @@ Future<bool> showTeamReport(
     );
   }
   return ok;
+}
+
+class _TeamReport extends StatefulWidget {
+  const _TeamReport({required this.name, required this.messages});
+
+  final String name;
+
+  /// How many chat messages could be attached.
+  final int messages;
+
+  @override
+  State<_TeamReport> createState() => _TeamReportState();
+}
+
+class _TeamReportState extends State<_TeamReport> {
+  final _reason = TextEditingController();
+  bool _attach = false;
+
+  @override
+  void dispose() {
+    _reason.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => DialogShell(
+    title: '${widget.name} melden',
+    children: [
+      const Text(
+        'Die Meldung geht an das Trair-Team, nicht an eine Community. '
+        'Für Nachrichten in einer Community nimm „Melden“ an der Nachricht.',
+        style: TrairText.muted,
+      ),
+      const SizedBox(height: 12),
+      NoteField(controller: _reason, hint: 'Was ist passiert?', maxLength: 1000, autofocus: true),
+      if (widget.messages > 0) ...[
+        const SizedBox(height: 10),
+        PillSwitch(
+          value: _attach,
+          label: 'Die letzten ${widget.messages} Nachrichten aus eurem Chat anhängen',
+          onChanged: (v) => setState(() => _attach = v),
+        ),
+        if (_attach)
+          const Padding(
+            padding: EdgeInsets.only(top: 6),
+            child: Text(
+              'Diese Nachrichten sind dann nicht mehr Ende-zu-Ende verschlüsselt: '
+              'Das Trair-Team und der Server können sie lesen.',
+              style: TextStyle(fontSize: 12.5, height: 1.5, color: TrairColors.amber),
+            ),
+          ),
+      ],
+      const SizedBox(height: 14),
+      ListenableBuilder(
+        listenable: _reason,
+        builder: (_, _) => _buttons(
+          context,
+          'An Trair-Team senden',
+          _reason.text.trim().isEmpty ? null : () => Navigator.pop(context, (_reason.text.trim(), _attach)),
+          kind: PillKind.danger,
+        ),
+      ),
+    ],
+  );
 }

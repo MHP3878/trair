@@ -310,64 +310,12 @@ class _CommunitySettingsState extends State<CommunitySettings> {
   }
 
   /// Name, colour and rights of a role; null: cancelled.
-  Future<(String, Color, int)?> _roleDialog(BuildContext context, CRole? role, int mine) {
-    final name = TextEditingController(text: role?.name ?? '');
-    var color = role?.color ?? TrairColors.glowChoices.values.first;
-    var perms = role?.perms ?? 0;
-    final everyone = role?.everyone ?? false;
-    return showDialog<(String, Color, int)>(
-      context: context,
-      barrierColor: const Color(0x9905050A),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, set) => DialogShell(
-          title: role == null ? 'Neue Rolle' : (everyone ? 'Rechte von @alle' : 'Rolle bearbeiten'),
-          width: 460,
-          children: [
-            if (!everyone) ...[
-              PillField(
-                controller: name,
-                hint: 'Name der Rolle',
-                autofocus: role == null,
-                semanticLabel: 'Name der Rolle',
-              ),
-              const SizedBox(height: 12),
-              GlowSwatches(selected: color, onPick: (c) => set(() => color = c)),
-              const SizedBox(height: 14),
-            ],
-            for (final e in Perm.names.entries)
-              Opacity(
-                opacity: mine & e.key == e.key ? 1 : 0.45,
-                child: PillSwitch(
-                  value: perms & e.key == e.key,
-                  label: e.value,
-                  onChanged: mine & e.key == e.key
-                      ? (v) => set(() => perms = v ? perms | e.key : perms & ~e.key)
-                      : (_) {},
-                ),
-              ),
-            const SizedBox(height: 14),
-            ListenableBuilder(
-              listenable: name,
-              builder: (_, _) => Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  PillButton(label: 'Abbrechen', kind: PillKind.ghost, height: 38, onPressed: () => Navigator.pop(ctx)),
-                  const SizedBox(width: 8),
-                  PillButton(
-                    label: 'Speichern',
-                    height: 38,
-                    onPressed: !everyone && name.text.trim().isEmpty
-                        ? null
-                        : () => Navigator.pop(ctx, (everyone ? role!.name : name.text.trim(), color, perms)),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    ).whenComplete(name.dispose);
-  }
+  Future<(String, Color, int)?> _roleDialog(BuildContext context, CRole? role, int mine) =>
+      showDialog<(String, Color, int)>(
+        context: context,
+        barrierColor: const Color(0x9905050A),
+        builder: (_) => _RoleDialog(role: role, mine: mine),
+      );
 
   // ------------------------------------------------------------ channels
 
@@ -433,84 +381,23 @@ class _CommunitySettingsState extends State<CommunitySettings> {
   String _roleNames(CommunityInfo info, List<int> ids) => ids.map((id) => info.role(id)?.name ?? '?').join(', ');
 
   Future<void> _channelDialog(AppState state, CommunityInfo info, CChannel? ch) async {
-    final name = TextEditingController(text: ch?.name ?? '');
-    final category = TextEditingController(text: ch?.category ?? (info.categories.firstOrNull?.$1 ?? 'Allgemein'));
-    final topic = TextEditingController(text: ch?.topic ?? '');
-    // who: all, read (everyone reads, managers write), roles (only these roles see it).
-    var who = ch == null ? 'all' : (ch.limited ? 'roles' : (ch.readOnly ? 'read' : 'all'));
-    final roles = <int>{...?ch?.readRoles};
-    final ok = await showDialog<bool>(
+    final r = await showDialog<_ChannelValues>(
       context: context,
       barrierColor: const Color(0x9905050A),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, set) => DialogShell(
-          title: ch == null ? 'Neuer Kanal' : '#${ch.name} bearbeiten',
-          width: 460,
-          children: [
-            PillField(controller: name, hint: 'name-des-kanals', autofocus: ch == null, semanticLabel: 'Kanalname'),
-            const SizedBox(height: 10),
-            PillField(controller: category, hint: 'Kategorie', semanticLabel: 'Kategorie'),
-            const SizedBox(height: 10),
-            PillField(controller: topic, hint: 'Thema (optional)', semanticLabel: 'Thema'),
-            const SizedBox(height: 14),
-            const Text('Wer darf was?', style: TrairText.small),
-            const SizedBox(height: 6),
-            for (final (v, label) in [
-              ('all', 'Alle lesen und schreiben'),
-              ('read', 'Alle lesen, nur Moderation schreibt'),
-              ('roles', 'Nur bestimmte Rollen sehen ihn'),
-            ])
-              PillSwitch(value: who == v, label: label, onChanged: (_) => set(() => who = v)),
-            if (who == 'roles')
-              for (final r in info.roles.where((r) => !r.everyone))
-                Padding(
-                  padding: const EdgeInsets.only(left: 18),
-                  child: PillSwitch(
-                    value: roles.contains(r.id),
-                    label: r.name,
-                    onChanged: (v) => set(() => v ? roles.add(r.id) : roles.remove(r.id)),
-                  ),
-                ),
-            const SizedBox(height: 14),
-            ListenableBuilder(
-              listenable: Listenable.merge([name, category]),
-              builder: (_, _) => Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  PillButton(label: 'Abbrechen', kind: PillKind.ghost, height: 38, onPressed: () => Navigator.pop(ctx)),
-                  const SizedBox(width: 8),
-                  PillButton(
-                    label: 'Speichern',
-                    height: 38,
-                    onPressed: name.text.trim().isEmpty || category.text.trim().isEmpty
-                        ? null
-                        : () => Navigator.pop(ctx, true),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
+      builder: (_) => _ChannelDialog(info: info, channel: ch),
     );
-    final read = who == 'roles' ? roles.toList() : null;
-    final write = who == 'read' ? <int>[] : null;
-    final values = (name.text.trim().toLowerCase().replaceAll(' ', '-'), category.text.trim(), topic.text.trim());
-    name.dispose();
-    category.dispose();
-    topic.dispose();
-    if (ok != true) return;
+    if (r == null) return;
     final c = state.communities;
     if (ch == null) {
-      await c.createChannel(values.$1, values.$2, topic: values.$3, read: read, write: write);
+      await c.createChannel(r.name, r.category, topic: r.topic, read: r.read, write: r.write);
     } else {
       await c.editChannel(
         ch,
-        name: values.$1,
-        category: values.$2,
-        topic: values.$3,
-        read: read,
-        write: write,
+        name: r.name,
+        category: r.category,
+        topic: r.topic,
+        read: r.read,
+        write: r.write,
         keepAccess: false,
       );
     }
@@ -861,4 +748,190 @@ class _CommunitySettingsState extends State<CommunitySettings> {
       ),
     ),
   );
+}
+
+/// A role: name, colour, rights. Rights this account lacks are shown but
+/// cannot be switched (the server refuses them anyway).
+class _RoleDialog extends StatefulWidget {
+  const _RoleDialog({required this.role, required this.mine});
+
+  final CRole? role;
+  final int mine;
+
+  @override
+  State<_RoleDialog> createState() => _RoleDialogState();
+}
+
+class _RoleDialogState extends State<_RoleDialog> {
+  late final _name = TextEditingController(text: widget.role?.name ?? '');
+  late Color _color = widget.role?.color ?? TrairColors.glowChoices.values.first;
+  late int _perms = widget.role?.perms ?? 0;
+
+  bool get _everyone => widget.role?.everyone ?? false;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final role = widget.role;
+    final mine = widget.mine;
+    return DialogShell(
+      title: role == null ? 'Neue Rolle' : (_everyone ? 'Rechte von @alle' : 'Rolle bearbeiten'),
+      width: 460,
+      children: [
+        if (!_everyone) ...[
+          PillField(
+            controller: _name,
+            hint: 'Name der Rolle',
+            autofocus: role == null,
+            semanticLabel: 'Name der Rolle',
+          ),
+          const SizedBox(height: 12),
+          GlowSwatches(selected: _color, onPick: (c) => setState(() => _color = c)),
+          const SizedBox(height: 14),
+        ],
+        for (final e in Perm.names.entries)
+          Opacity(
+            opacity: mine & e.key == e.key ? 1 : 0.45,
+            child: PillSwitch(
+              value: _perms & e.key == e.key,
+              label: e.value,
+              onChanged: mine & e.key == e.key
+                  ? (v) => setState(() => _perms = v ? _perms | e.key : _perms & ~e.key)
+                  : (_) {},
+            ),
+          ),
+        const SizedBox(height: 14),
+        ListenableBuilder(
+          listenable: _name,
+          builder: (_, _) => Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              PillButton(label: 'Abbrechen', kind: PillKind.ghost, height: 38, onPressed: () => Navigator.pop(context)),
+              const SizedBox(width: 8),
+              PillButton(
+                label: 'Speichern',
+                height: 38,
+                onPressed: !_everyone && _name.text.trim().isEmpty
+                    ? null
+                    : () => Navigator.pop(context, (_everyone ? role!.name : _name.text.trim(), _color, _perms)),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// What the channel dialog gives back.
+class _ChannelValues {
+  const _ChannelValues(this.name, this.category, this.topic, this.read, this.write);
+
+  final String name;
+  final String category;
+  final String topic;
+  final List<int>? read;
+  final List<int>? write;
+}
+
+class _ChannelDialog extends StatefulWidget {
+  const _ChannelDialog({required this.info, required this.channel});
+
+  final CommunityInfo info;
+  final CChannel? channel;
+
+  @override
+  State<_ChannelDialog> createState() => _ChannelDialogState();
+}
+
+class _ChannelDialogState extends State<_ChannelDialog> {
+  late final _name = TextEditingController(text: widget.channel?.name ?? '');
+  late final _category = TextEditingController(
+    text: widget.channel?.category ?? (widget.info.categories.firstOrNull?.$1 ?? 'Allgemein'),
+  );
+  late final _topic = TextEditingController(text: widget.channel?.topic ?? '');
+
+  /// all (everyone reads and writes), read (managers write), roles (only these roles see it).
+  late String _who = switch (widget.channel) {
+    null => 'all',
+    CChannel ch when ch.limited => 'roles',
+    CChannel ch when ch.readOnly => 'read',
+    _ => 'all',
+  };
+  late final Set<int> _roles = {...?widget.channel?.readRoles};
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _category.dispose();
+    _topic.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ch = widget.channel;
+    return DialogShell(
+      title: ch == null ? 'Neuer Kanal' : '#${ch.name} bearbeiten',
+      width: 460,
+      children: [
+        PillField(controller: _name, hint: 'name-des-kanals', autofocus: ch == null, semanticLabel: 'Kanalname'),
+        const SizedBox(height: 10),
+        PillField(controller: _category, hint: 'Kategorie', semanticLabel: 'Kategorie'),
+        const SizedBox(height: 10),
+        PillField(controller: _topic, hint: 'Thema (optional)', semanticLabel: 'Thema'),
+        const SizedBox(height: 14),
+        const Text('Wer darf was?', style: TrairText.small),
+        const SizedBox(height: 6),
+        for (final (v, label) in const [
+          ('all', 'Alle lesen und schreiben'),
+          ('read', 'Alle lesen, nur Moderation schreibt'),
+          ('roles', 'Nur bestimmte Rollen sehen ihn'),
+        ])
+          PillSwitch(value: _who == v, label: label, onChanged: (_) => setState(() => _who = v)),
+        if (_who == 'roles')
+          for (final r in widget.info.roles.where((r) => !r.everyone))
+            Padding(
+              padding: const EdgeInsets.only(left: 18),
+              child: PillSwitch(
+                value: _roles.contains(r.id),
+                label: r.name,
+                onChanged: (v) => setState(() => v ? _roles.add(r.id) : _roles.remove(r.id)),
+              ),
+            ),
+        const SizedBox(height: 14),
+        ListenableBuilder(
+          listenable: Listenable.merge([_name, _category]),
+          builder: (_, _) => Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              PillButton(label: 'Abbrechen', kind: PillKind.ghost, height: 38, onPressed: () => Navigator.pop(context)),
+              const SizedBox(width: 8),
+              PillButton(
+                label: 'Speichern',
+                height: 38,
+                onPressed: _name.text.trim().isEmpty || _category.text.trim().isEmpty
+                    ? null
+                    : () => Navigator.pop(
+                        context,
+                        _ChannelValues(
+                          _name.text.trim().toLowerCase().replaceAll(' ', '-'),
+                          _category.text.trim(),
+                          _topic.text.trim(),
+                          _who == 'roles' ? _roles.toList() : null,
+                          _who == 'read' ? <int>[] : null,
+                        ),
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 }
