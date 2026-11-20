@@ -382,8 +382,7 @@ void main() {
       final tmp = await Directory.systemTemp.createTemp('trair-closed-');
       final file = File(lib!);
       final copies = [
-        for (final p in ['b', 'c'])
-          await file.copy('${tmp.path}/${p}_${file.uri.pathSegments.last}'),
+        for (final p in ['b', 'c']) await file.copy('${tmp.path}/${p}_${file.uri.pathSegments.last}'),
       ];
       final port = 20000 + (pid + 19) % 20000;
       final url = 'http://127.0.0.1:$port';
@@ -471,7 +470,11 @@ void main() {
       // Carl reports Max's text: the server checks its signature.
       final carlsCopy = carl.realMessages[group]!.firstWhere((m) => m.text == 'Nur für uns, ganz geheim');
       await carl.communities.open(id);
-      expect(await carl.communities.reportClosed(ch.id, carlsCopy.evidence, 'Test'), isTrue, reason: carl.communities.message);
+      expect(
+        await carl.communities.reportClosed(ch.id, carlsCopy.evidence, 'Test'),
+        isTrue,
+        reason: carl.communities.message,
+      );
       await o.loadReports();
       expect(o.reports!.single.quoted, 'Nur für uns, ganz geheim');
       final forged = Map.of(carlsCopy.evidence)..['text'] = 'Max hat was anderes gesagt';

@@ -245,7 +245,12 @@ class _RealCommunityScreenState extends State<RealCommunityScreen> {
             child: Row(
               children: [
                 ch.closed
-                    ? const Icon(TrairIcons.lock, size: 16, color: TrairColors.accentLight, semanticLabel: 'geschlossen')
+                    ? const Icon(
+                        TrairIcons.lock,
+                        size: 16,
+                        color: TrairColors.accentLight,
+                        semanticLabel: 'geschlossen',
+                      )
                     : const Icon(TrairIcons.hash, size: 16, color: TrairColors.amber, semanticLabel: 'offen'),
                 const SizedBox(width: 10),
                 Expanded(
@@ -534,7 +539,10 @@ class _RealCommunityScreenState extends State<RealCommunityScreen> {
                         padding: const EdgeInsets.fromLTRB(26, 8, 26, 130),
                         children: [
                           for (final m in messages)
-                            if (m.isNote) _channelNote(state, m) else _closedMessage(state, info, chat.id, channel, m, keeper),
+                            if (m.isNote)
+                              _channelNote(state, m)
+                            else
+                              _closedMessage(state, info, chat.id, channel, m, keeper),
                         ],
                       ),
               ),
@@ -656,7 +664,12 @@ class _RealCommunityScreenState extends State<RealCommunityScreen> {
             icon: const Icon(TrairIcons.ellipsis, size: 16, color: TrairColors.textMuted),
             onSelected: (v) async {
               if (v == 'delete') {
-                if (await confirmAction(context, 'Nachricht löschen?', 'Sie verschwindet bei allen im Kanal.', 'Löschen')) {
+                if (await confirmAction(
+                  context,
+                  'Nachricht löschen?',
+                  'Sie verschwindet bei allen im Kanal.',
+                  'Löschen',
+                )) {
                   await state.deleteChannelMessage(group, m.id);
                 }
               } else if (v == 'report') {

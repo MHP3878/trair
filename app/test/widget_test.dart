@@ -1914,7 +1914,9 @@ void main() {
       expect(server.sent, isNotEmpty);
 
       // Bob writes; it arrives through the encrypted chats.
-      server.deliver(FakeDoor.wire({'kind': 'group_message', 'chat': group, 'user': 'local-bob', 'text': 'Hallo Team'}));
+      server.deliver(
+        FakeDoor.wire({'kind': 'group_message', 'chat': group, 'user': 'local-bob', 'text': 'Hallo Team'}),
+      );
       await tester.pumpAndSettle();
       expect(find.text('Hallo Team'), findsOneWidget);
       expect(find.byTooltip('Ende-zu-Ende verschlüsselt · Unterschrift beim Empfang geprüft'), findsNWidgets(2));
@@ -1988,8 +1990,7 @@ void main() {
           ch = s.communities.closedChannel(id, 'vorstand');
         },
       );
-      final group =
-          ((server.communities.communities[id]!['channels'] as List).last as Map)['group'] as String;
+      final group = ((server.communities.communities[id]!['channels'] as List).last as Map)['group'] as String;
       await tester.tap(find.byTooltip('Schach-AG'));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('channel-vorstand')));

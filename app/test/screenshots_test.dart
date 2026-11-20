@@ -473,7 +473,12 @@ void main() {
     await tester.pumpAndSettle();
     final orga = ((c.communities[id]!['channels'] as List).last as Map)['group'] as String;
     server.deliver(
-      FakeDoor.wire({'kind': 'group_message', 'chat': orga, 'user': 'local-lena', 'text': 'Budget für die Deko: 300 €'}),
+      FakeDoor.wire({
+        'kind': 'group_message',
+        'chat': orga,
+        'user': 'local-lena',
+        'text': 'Budget für die Deko: 300 €',
+      }),
     );
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('channel-composer')), 'Passt, ich frag beim Getränkemarkt.');
