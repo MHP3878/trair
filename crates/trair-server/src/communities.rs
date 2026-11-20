@@ -1276,9 +1276,22 @@ fn run(
                 }
             }
             readers.sort();
+            // Has a keeper made the MLS group yet (its first change taken)?
+            let started: bool = match &chan.grp {
+                Some(g) => c
+                    .query_row(
+                        "SELECT next_epoch > 0 FROM groups WHERE id = ?1",
+                        [g],
+                        |r| r.get(0),
+                    )
+                    .optional()
+                    .map_err(sql)?
+                    .unwrap_or(false),
+                None => false,
+            };
             Ok(
                 json!({"ok": true, "readers": readers, "keepers": keepers(c, &id)?,
-                "group": chan.grp, "closed": chan.closed}),
+                "group": chan.grp, "closed": chan.closed, "started": started}),
             )
         }
         Op::EditChannel {

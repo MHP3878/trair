@@ -100,6 +100,7 @@ class FakeServer implements ServerTransport {
         });
       case ('POST', '/v1/commits'):
         commits.add(body!);
+        communities.startedGroups.add(body['group'] as String);
         final taken = refuseWithTaken;
         if (taken != null) {
           refuseWithTaken = null;

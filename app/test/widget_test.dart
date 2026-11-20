@@ -1845,4 +1845,174 @@ void main() {
       expect(find.text('Keine offenen Meldungen.'), findsOneWidget);
     });
   });
+
+  group('Geschlossene Kanäle', () {
+    Future<(FakeDoor, FakeServer)> online(WidgetTester tester, {void Function(FakeServer)? setup}) async {
+      final server = FakeServer();
+      setup?.call(server);
+      final door = FakeDoor(password: pw, profile: {'name': 'Julian'})..chatsEnabled = true;
+      await _start(tester, door: door, server: server);
+      await _unlock(tester);
+      await _openSettings(tester);
+      await tester.ensureVisible(find.widgetWithText(PillButton, 'Verbinden'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Verbinden'));
+      await tester.pumpAndSettle();
+      return (door, server);
+    }
+
+    testWidgets('a keeper makes one: the group, everyone let in, signed texts, reports, deleting, newcomers', (
+      tester,
+    ) async {
+      late String id;
+      final (door, server) = await online(
+        tester,
+        setup: (s) {
+          id = s.communities.found('Abi 2026');
+          s.communities.addMember(id, 'local-bob');
+          s.communities.addMember(id, 'local-ada');
+        },
+      );
+      await tester.tap(find.byTooltip('Abi 2026'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Community-Einstellungen'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('tab-channels')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Neuer Kanal'));
+      await tester.pumpAndSettle();
+      await tester.enterText(_field('name-des-kanals'), 'team');
+      await tester.tap(find.byKey(const ValueKey('channel-closed')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Weder der Server noch die Moderation'), findsOneWidget);
+      await tester.ensureVisible(find.widgetWithText(PillButton, 'Speichern'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Speichern'));
+      await tester.pumpAndSettle();
+      final made = server.communities.ops.lastWhere((o) => o['op'] == 'create_channel');
+      expect(made['closed'], true);
+      final channels = (server.communities.communities[id]!['channels'] as List).cast<Map<String, Object?>>();
+      final group = channels.last['group'] as String;
+      // The keeper's Trair made the MLS group with everyone who may read it.
+      expect(door.channelOps.first, startsWith('create:$group:'));
+      expect(door.channelOps.first, allOf(contains('local-bob'), contains('local-ada')));
+      final commit = server.commits.lastWhere((c) => c['group'] == group);
+      expect((commit['welcome_to'] as List).length, 2);
+      expect(find.byKey(const ValueKey('channel-setting-team')), findsOneWidget);
+
+      // Into the channel: end to end, the keeper writes.
+      await tester.tap(find.widgetWithText(PillButton, 'Zurück zum Kanal'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('channel-team')));
+      await tester.pumpAndSettle();
+      expect(find.text('Geschlossen · Ende-zu-Ende'), findsOneWidget);
+      await tester.enterText(find.byKey(const Key('channel-composer')), 'Nur für uns');
+      await tester.tap(find.byTooltip('Senden'));
+      await tester.pumpAndSettle();
+      expect(find.text('Nur für uns'), findsOneWidget);
+      expect(server.communities.ops.where((o) => o['op'] == 'post'), isEmpty, reason: 'nothing readable to the server');
+      expect(server.sent, isNotEmpty);
+
+      // Bob writes; it arrives through the encrypted chats.
+      server.deliver(FakeDoor.wire({'kind': 'group_message', 'chat': group, 'user': 'local-bob', 'text': 'Hallo Team'}));
+      await tester.pumpAndSettle();
+      expect(find.text('Hallo Team'), findsOneWidget);
+      expect(find.byTooltip('Ende-zu-Ende verschlüsselt · Unterschrift beim Empfang geprüft'), findsNWidgets(2));
+
+      // A report hands the moderation that one text with its signature.
+      await tester.tap(find.byTooltip('Mehr').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Melden').last);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Der Kanal ist verschlüsselt'), findsOneWidget);
+      await tester.enterText(find.byKey(const Key('ask-text')), 'Test');
+      await tester.pump();
+      await tester.tap(find.widgetWithText(PillButton, 'Melden'));
+      await tester.pumpAndSettle();
+      final report = ((server.communities.communities[id]!['reports'] as List).last as Map);
+      expect(report['snapshot'], containsPair('text', 'Hallo Team'));
+      expect(report['snapshot'], containsPair('signed', true));
+
+      // The keeper deletes Bob's text for everyone.
+      await tester.tap(find.byTooltip('Mehr').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Löschen').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Löschen'));
+      await tester.pumpAndSettle();
+      expect(door.channelOps, contains('delete:Hallo Team'));
+      expect(find.text('Hallo Team'), findsNothing);
+
+      // Carl joins the community: the keeper's Trair lets him in and hands
+      // him the last texts.
+      server.communities.addMember(id, 'local-carl');
+      await tester.pumpAndSettle();
+      expect(door.channelOps, containsAllInOrder(['add:local-carl', 'history:local-carl']));
+      expect(
+        server.sent.any((m) => (m['to'] as List).any((t) => (t as Map)['user'] == 'local-carl')),
+        isTrue,
+        reason: 'the history goes to Carl only',
+      );
+      // Bob is removed from the community: also from the channel.
+      await tester.tap(find.byKey(const ValueKey('member-local-bob')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('member-action-kick')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Entfernen'));
+      await tester.pumpAndSettle();
+      expect(door.channelOps, contains('remove:local-bob'));
+      // The channel never shows up among the chats.
+      await tester.tap(find.byTooltip('Direktnachrichten'));
+      await tester.pumpAndSettle();
+      expect(find.text('team'), findsNothing);
+    });
+
+    testWidgets('a member waits for a keeper, then reads and writes; members change nothing', (tester) async {
+      late String id;
+      late String ch;
+      final (door, server) = await online(
+        tester,
+        setup: (s) {
+          id = s.communities.found('Schach-AG', owner: 'local-olga');
+          s.communities.addMember(id, FakeCommunities.me);
+          ch = s.communities.closedChannel(id, 'vorstand');
+        },
+      );
+      final group =
+          ((server.communities.communities[id]!['channels'] as List).last as Map)['group'] as String;
+      await tester.tap(find.byTooltip('Schach-AG'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('channel-vorstand')));
+      await tester.pumpAndSettle();
+      expect(find.text('Warte auf Aufnahme durch einen Hüter.'), findsOneWidget);
+      expect(find.byKey(const Key('channel-composer')), findsNothing);
+      expect(door.channelOps, isEmpty, reason: 'no keeper: this Trair changes nothing');
+      // Olga's Trair lets this account in.
+      server.deliver(
+        FakeDoor.wire({
+          'kind': 'group_welcome',
+          'chat': group,
+          'by': 'local-olga',
+          'name': 'vorstand',
+          'members': ['local-olga', FakeCommunities.me],
+          'channel': {'community': id, 'channel': ch},
+        }),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('local-olga hat dich aufgenommen'), findsOneWidget);
+      expect(find.byKey(const Key('channel-composer')), findsOneWidget);
+      await tester.enterText(find.byKey(const Key('channel-composer')), 'Danke!');
+      await tester.tap(find.byTooltip('Senden'));
+      await tester.pumpAndSettle();
+      expect(find.text('Danke!'), findsOneWidget);
+      // Own text: delete yes, report no.
+      await tester.tap(find.byTooltip('Mehr').last);
+      await tester.pumpAndSettle();
+      expect(find.text('Melden'), findsNothing);
+      expect(find.text('Löschen'), findsOneWidget);
+      await tester.tapAt(const Offset(5, 5));
+      await tester.pumpAndSettle();
+      expect(door.channelOps, isEmpty);
+    });
+  });
 }

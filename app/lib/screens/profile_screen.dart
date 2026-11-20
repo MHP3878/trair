@@ -1143,7 +1143,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   List<Widget> _pinForm(AppState state) {
-    final chats = state.realChats.where((c) => c.state == 'active').toList();
+    final chats = state.realChats.where((c) => c.state == 'active' && !c.isChannel).toList();
     if (_pinChat != null && !chats.any((c) => c.id == _pinChat)) _pinChat = null;
     final min = _pinSends ? 12 : 6;
     final text = _pinText.text.trim();

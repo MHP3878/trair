@@ -1127,6 +1127,7 @@ async fn k10_a_closed_channel_has_a_group_and_the_server_never_holds_its_texts()
     assert_eq!(m["readers"], json!(["ada", "olga"]));
     assert_eq!(m["keepers"], json!(["olga"]));
     assert_eq!(m["group"], group.as_str());
+    assert_eq!(m["started"], false, "no keeper made the group yet");
     max.refused(
         &w,
         json!({"op": "channel_members", "community": id, "channel": ch}),
@@ -1188,6 +1189,7 @@ async fn k11_only_keepers_change_the_group_whatever_a_change_claims() {
         )
         .await;
     assert_eq!(m["keepers"], json!(["ada", "olga"]));
+    assert_eq!(m["started"], true, "Olga's first change was taken");
     assert_eq!(commit_as(&w, &ada, &group, 1, &[]).await.0, StatusCode::OK);
     olga.ok(
         &w,

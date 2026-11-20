@@ -141,6 +141,28 @@ class FakeCommunities {
     });
   }
 
+  /// MLS groups of closed channels whose first change the server took.
+  final Set<String> startedGroups = {};
+
+  /// A closed channel (as a keeper made it).
+  String closedChannel(String id, String name, {List<int>? readRoles}) {
+    final channels = (communities[id]!['channels'] as List).cast<Map<String, Object?>>();
+    final ch = 'x${channels.length + 1}';
+    channels.add({
+      'id': ch,
+      'category': 'Intern',
+      'name': name,
+      'topic': '',
+      'position': channels.length,
+      'read_roles': readRoles,
+      'write_roles': null,
+      'closed': true,
+      'group': '${ch.codeUnitAt(1)}'.padLeft(2, '0') * 16,
+    });
+    _event(id, 'changed', channel: ch);
+    return ch;
+  }
+
   /// Team reports for the team inbox.
   final List<Map<String, Object?>> teamReports = [];
 
@@ -425,6 +447,8 @@ class FakeCommunities {
       case 'create_channel':
         if (!can(2)) return _fail('not_allowed');
         final ch = 'c${channels.length + 1}';
+        final closed = r['closed'] == true;
+        final group = closed ? 'ab${channels.length}'.padRight(32, '0') : null;
         channels.add({
           'id': ch,
           'category': r['category'],
@@ -433,10 +457,29 @@ class FakeCommunities {
           'position': channels.length,
           'read_roles': r['read_roles'],
           'write_roles': r['write_roles'],
+          'closed': closed,
+          'group': group,
         });
         _log(id, 'channel_create', r['name'] as String);
         _event(id, 'changed', channel: ch);
-        return _ok({'channel': ch});
+        return _ok({'channel': ch, 'group': group});
+      case 'channel_members':
+        final ch = channels.where((x) => x['id'] == r['channel']).firstOrNull;
+        if (ch == null) return _fail('not_found', 404);
+        if (!_canRead(id, me, ch)) return _fail('not_allowed');
+        return _ok({
+          'readers': [
+            for (final m in members.keys)
+              if (_canRead(id, m, ch)) m,
+          ]..sort(),
+          'keepers': [
+            for (final m in members.keys)
+              if (_perms(id, m) & 2 != 0) m,
+          ]..sort(),
+          'group': ch['group'],
+          'closed': ch['closed'] == true,
+          'started': startedGroups.contains(ch['group']),
+        });
       case 'create_invite':
         if (!can(64)) return _fail('not_allowed');
         final code = 'trairc:${'0' * 18}${(c['invites'] as Map).length + 1}0';
@@ -450,6 +493,26 @@ class FakeCommunities {
               {'id': (i as Map)['id'], 'creator': me, 'uses': i['uses'], 'ends': 1800086400},
           ],
         });
+      case 'report' when r['evidence'] is Map:
+        // A text from a closed channel, with its signature.
+        final e = (r['evidence'] as Map).cast<String, Object?>();
+        if (e['sig'] != 'sig-${e['text']}') return _fail('bad_signature');
+        final reports = c['reports'] as List;
+        reports.add({
+          'id': reports.length + 1,
+          'community': id,
+          'reporter': me,
+          'target': e['user'],
+          'channel': r['channel'],
+          'message': null,
+          'reason': r['reason'],
+          'snapshot': {'user': e['user'], 'channel': r['channel'], 'text': e['text'], 'signed': true},
+          'at': 1800000000,
+          'status': 'open',
+          'handled_by': null,
+          'note': '',
+        });
+        return _ok({'id': reports.length});
       case 'report':
         final reports = c['reports'] as List;
         final mid = r['message'] as int?;

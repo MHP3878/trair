@@ -328,8 +328,8 @@ class _CommunitySettingsState extends State<CommunitySettings> {
         children: [
           const Expanded(
             child: Text(
-              'Alle Kanäle sind offen (für die Moderation lesbar). Geschlossene, Ende-zu-Ende verschlüsselte '
-              'Kanäle kommen als Nächstes.',
+              'Offene Kanäle (#) sind für die Moderation lesbar. Geschlossene (Schloss) sind Ende-zu-Ende '
+              'verschlüsselt; das Trair eines Hüters nimmt Berechtigte auf.',
               style: TrairText.small,
             ),
           ),
@@ -346,10 +346,13 @@ class _CommunitySettingsState extends State<CommunitySettings> {
       for (final ch in info.channels)
         _row(
           key: ValueKey('channel-setting-${ch.name}'),
-          leading: const Icon(TrairIcons.hash, size: 16, color: TrairColors.amber),
+          leading: ch.closed
+              ? const Icon(TrairIcons.lock, size: 16, color: TrairColors.accentLight)
+              : const Icon(TrairIcons.hash, size: 16, color: TrairColors.amber),
           title: ch.name,
           subtitle: [
             ch.category,
+            if (ch.closed) 'geschlossen',
             if (ch.limited) 'nur ${_roleNames(info, ch.readRoles!)}',
             if (ch.readOnly) 'nur Moderation schreibt',
           ].join(' · '),
@@ -391,7 +394,7 @@ class _CommunitySettingsState extends State<CommunitySettings> {
     if (r == null) return;
     final c = state.communities;
     if (ch == null) {
-      await c.createChannel(r.name, r.category, topic: r.topic, read: r.read, write: r.write);
+      await c.createChannel(r.name, r.category, topic: r.topic, read: r.read, write: r.write, closed: r.closed);
     } else {
       await c.editChannel(
         ch,
@@ -827,13 +830,16 @@ class _RoleDialogState extends State<_RoleDialog> {
 
 /// What the channel dialog gives back.
 class _ChannelValues {
-  const _ChannelValues(this.name, this.category, this.topic, this.read, this.write);
+  const _ChannelValues(this.name, this.category, this.topic, this.read, this.write, {this.closed = false});
 
   final String name;
   final String category;
   final String topic;
   final List<int>? read;
   final List<int>? write;
+
+  /// End-to-end encrypted (only when making a channel).
+  final bool closed;
 }
 
 class _ChannelDialog extends StatefulWidget {
@@ -861,6 +867,7 @@ class _ChannelDialogState extends State<_ChannelDialog> {
     _ => 'all',
   };
   late final Set<int> _roles = {...?widget.channel?.readRoles};
+  bool _closed = false;
 
   @override
   void dispose() {
@@ -882,6 +889,23 @@ class _ChannelDialogState extends State<_ChannelDialog> {
         PillField(controller: _category, hint: 'Kategorie', semanticLabel: 'Kategorie'),
         const SizedBox(height: 10),
         PillField(controller: _topic, hint: 'Thema (optional)', semanticLabel: 'Thema'),
+        if (ch == null) ...[
+          const SizedBox(height: 10),
+          LabeledSwitch(
+            key: const ValueKey('channel-closed'),
+            value: _closed,
+            label: 'Geschlossen (Ende-zu-Ende verschlüsselt)',
+            onChanged: (v) => setState(() => _closed = v),
+          ),
+          Text(
+            _closed
+                ? 'Weder der Server noch die Moderation können mitlesen; nur ein gemeldeter Text wird sichtbar. '
+                      'Das Trair eines Hüters nimmt Berechtigte auf, Neue bekommen die letzten 50 Nachrichten.'
+                : 'Offen: Der Server kann die Nachrichten lesen, damit Moderation geht.',
+            style: TrairText.small,
+          ),
+        ] else if (ch.closed)
+          const Text('Geschlossen (Ende-zu-Ende) – das lässt sich nicht mehr ändern.', style: TrairText.small),
         const SizedBox(height: 14),
         const Text('Wer darf was?', style: TrairText.small),
         const SizedBox(height: 6),
@@ -922,6 +946,7 @@ class _ChannelDialogState extends State<_ChannelDialog> {
                           _topic.text.trim(),
                           _who == 'roles' ? _roles.toList() : null,
                           _who == 'read' ? <int>[] : null,
+                          closed: _closed,
                         ),
                       ),
               ),
