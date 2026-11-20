@@ -536,20 +536,22 @@ class _RealCommunityScreenState extends State<RealCommunityScreen> {
                           'Anderer Schlüssel als beim ersten Mal. Frag die Person auf einem anderen Weg.',
                           style: TextStyle(fontSize: 12.5, color: TrairColors.amber),
                         ),
-                        PillButton(
-                          label: 'Neuen Schlüssel annehmen',
-                          height: 30,
-                          kind: PillKind.ghost,
-                          onPressed: () async {
-                            if (await confirmAction(
-                              context,
-                              'Neuen Schlüssel annehmen?',
-                              'Nur wenn $name dir auf einem anderen Weg bestätigt hat, dass das ein neues Konto ist.',
-                              'Annehmen',
-                            )) {
-                              await c.acceptKey(m.user);
-                            }
-                          },
+                        IntrinsicWidth(
+                          child: PillButton(
+                            label: 'Neuen Schlüssel annehmen',
+                            height: 30,
+                            kind: PillKind.ghost,
+                            onPressed: () async {
+                              if (await confirmAction(
+                                context,
+                                'Neuen Schlüssel annehmen?',
+                                'Nur wenn $name dir auf einem anderen Weg bestätigt hat, dass das ein neues Konto ist.',
+                                'Annehmen',
+                              )) {
+                                await c.acceptKey(m.user);
+                              }
+                            },
+                          ),
                         ),
                       ],
                     ),
@@ -777,7 +779,7 @@ class _RealCommunityScreenState extends State<RealCommunityScreen> {
               const Text('Du kannst keine Rollen vergeben.', style: TrairText.muted)
             else
               for (final r in roles)
-                PillSwitch(
+                LabeledSwitch(
                   key: ValueKey('role-switch-${r.name}'),
                   value: chosen.contains(r.id),
                   label: r.name,

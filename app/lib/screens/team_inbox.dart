@@ -63,7 +63,7 @@ class _TeamInboxState extends State<TeamInbox> {
             style: TrairText.muted,
           ),
           const SizedBox(height: 10),
-          PillSwitch(
+          LabeledSwitch(
             value: _all,
             label: 'Auch erledigte zeigen',
             onChanged: (v) {
@@ -112,8 +112,7 @@ class _TeamInboxState extends State<TeamInbox> {
           if (r.note.isNotEmpty) Text('Notiz: ${r.note}', style: TrairText.small),
           if (r.status == 'open') ...[
             const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
+            Row(
               children: [
                 PillButton(
                   label: 'Erledigt',
@@ -131,6 +130,7 @@ class _TeamInboxState extends State<TeamInbox> {
                     if (note != null) await c.teamHandle(r.id, 'done', note: note);
                   },
                 ),
+                const SizedBox(width: 8),
                 PillButton(
                   label: 'Ablehnen',
                   kind: PillKind.ghost,

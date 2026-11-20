@@ -210,13 +210,15 @@ class _CommunitySettingsState extends State<CommunitySettings> {
         style: TrairText.small,
       ),
       const SizedBox(height: 16),
-      Align(
-        alignment: Alignment.centerRight,
-        child: PillButton(
-          label: 'Speichern',
-          height: 40,
-          onPressed: () => state.communities.edit(name: _name.text, about: _about.text, rules: _rules.text),
-        ),
+      Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          PillButton(
+            label: 'Speichern',
+            height: 40,
+            onPressed: () => state.communities.edit(name: _name.text, about: _about.text, rules: _rules.text),
+          ),
+        ],
       ),
     ];
   }
@@ -415,11 +417,10 @@ class _CommunitySettingsState extends State<CommunitySettings> {
         style: TrairText.small,
       ),
       const SizedBox(height: 12),
-      Wrap(
-        spacing: 8,
-        runSpacing: 8,
+      Row(
         children: [
           PillButton(label: '24 Std. · einmal', height: 38, onPressed: () => c.createInvite(24 * 60, 1)),
+          const SizedBox(width: 8),
           PillButton(
             label: '7 Tage · unbegrenzt',
             height: 38,
@@ -484,7 +485,7 @@ class _CommunitySettingsState extends State<CommunitySettings> {
     final c = state.communities;
     final list = c.reports;
     return [
-      PillSwitch(
+      LabeledSwitch(
         value: _allReports,
         label: 'Auch erledigte zeigen',
         onChanged: (v) {
@@ -538,9 +539,7 @@ class _CommunitySettingsState extends State<CommunitySettings> {
             if (r.note.isNotEmpty) ...[const SizedBox(height: 6), Text('Notiz: ${r.note}', style: TrairText.small)],
             if (r.status == 'open') ...[
               const SizedBox(height: 10),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
+              Row(
                 children: [
                   PillButton(
                     label: 'Erledigt',
@@ -558,12 +557,14 @@ class _CommunitySettingsState extends State<CommunitySettings> {
                       if (note != null) await c.handleReport(r.id, 'done', note: note);
                     },
                   ),
+                  const SizedBox(width: 8),
                   PillButton(
                     label: 'Ablehnen',
                     kind: PillKind.ghost,
                     height: 34,
                     onPressed: () => c.handleReport(r.id, 'dismissed'),
                   ),
+                  const SizedBox(width: 8),
                   if (target != null && info.member(target) != null && info.can(Perm.kick) && info.above(target))
                     PillButton(
                       label: 'Entfernen',
@@ -795,15 +796,11 @@ class _RoleDialogState extends State<_RoleDialog> {
           const SizedBox(height: 14),
         ],
         for (final e in Perm.names.entries)
-          Opacity(
-            opacity: mine & e.key == e.key ? 1 : 0.45,
-            child: PillSwitch(
-              value: _perms & e.key == e.key,
-              label: e.value,
-              onChanged: mine & e.key == e.key
-                  ? (v) => setState(() => _perms = v ? _perms | e.key : _perms & ~e.key)
-                  : (_) {},
-            ),
+          LabeledSwitch(
+            value: _perms & e.key == e.key,
+            label: e.value,
+            enabled: mine & e.key == e.key,
+            onChanged: (v) => setState(() => _perms = v ? _perms | e.key : _perms & ~e.key),
           ),
         const SizedBox(height: 14),
         ListenableBuilder(
@@ -893,12 +890,12 @@ class _ChannelDialogState extends State<_ChannelDialog> {
           ('read', 'Alle lesen, nur Moderation schreibt'),
           ('roles', 'Nur bestimmte Rollen sehen ihn'),
         ])
-          PillSwitch(value: _who == v, label: label, onChanged: (_) => setState(() => _who = v)),
+          LabeledSwitch(value: _who == v, label: label, onChanged: (_) => setState(() => _who = v)),
         if (_who == 'roles')
           for (final r in widget.info.roles.where((r) => !r.everyone))
             Padding(
               padding: const EdgeInsets.only(left: 18),
-              child: PillSwitch(
+              child: LabeledSwitch(
                 value: _roles.contains(r.id),
                 label: r.name,
                 onChanged: (v) => setState(() => v ? _roles.add(r.id) : _roles.remove(r.id)),

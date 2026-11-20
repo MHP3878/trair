@@ -93,6 +93,48 @@ class NoteField extends StatelessWidget {
   }
 }
 
+/// A switch with its words in front; the whole row switches.
+class LabeledSwitch extends StatelessWidget {
+  const LabeledSwitch({
+    super.key,
+    required this.value,
+    required this.label,
+    required this.onChanged,
+    this.enabled = true,
+  });
+
+  final bool value;
+  final String label;
+  final ValueChanged<bool> onChanged;
+
+  /// Off: shown dimmed and cannot be switched (a right this account lacks).
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    borderRadius: BorderRadius.circular(12),
+    onTap: enabled ? () => onChanged(!value) : null,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(fontSize: 14, color: enabled ? TrairColors.text : TrairColors.textMuted),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Opacity(
+            opacity: enabled ? 1 : 0.45,
+            child: PillSwitch(value: value, label: label, onChanged: enabled ? onChanged : (_) {}),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
 Widget _buttons(BuildContext ctx, String yes, VoidCallback? onYes, {PillKind kind = PillKind.primary}) => Row(
   mainAxisAlignment: MainAxisAlignment.end,
   children: [
@@ -412,7 +454,7 @@ class _TeamReportState extends State<_TeamReport> {
       NoteField(controller: _reason, hint: 'Was ist passiert?', maxLength: 1000, autofocus: true),
       if (widget.messages > 0) ...[
         const SizedBox(height: 10),
-        PillSwitch(
+        LabeledSwitch(
           value: _attach,
           label: 'Die letzten ${widget.messages} Nachrichten aus eurem Chat anhängen',
           onChanged: (v) => setState(() => _attach = v),
