@@ -508,7 +508,14 @@ void main() {
         }
         await Future<void>.delayed(const Duration(milliseconds: 50));
       }
-      expect([for (final x in seen) if (x.isAdmin) x.user], [carlUser], reason: 'Carl keeps the channel now | $log');
+      expect(
+        [
+          for (final x in seen)
+            if (x.isAdmin) x.user,
+        ],
+        [carlUser],
+        reason: 'Carl keeps the channel now | $log',
+      );
       for (final a in apps) {
         await a.lock();
       }
