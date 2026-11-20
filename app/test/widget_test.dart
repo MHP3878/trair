@@ -2068,6 +2068,11 @@ void main() {
           find.descendant(of: find.byKey(const ValueKey('bot-name')), matching: find.byType(TextField)),
           name,
         );
+        await Scrollable.ensureVisible(
+          tester.element(find.widgetWithText(PillButton, 'Bot bestätigen')),
+          alignment: 0.5,
+        );
+        await tester.pumpAndSettle();
         await tester.tap(find.widgetWithText(PillButton, 'Bot bestätigen'));
         await tester.pumpAndSettle();
       }
