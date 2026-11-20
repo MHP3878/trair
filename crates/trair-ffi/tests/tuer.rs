@@ -1755,6 +1755,17 @@ fn d26_open_messages_are_signed_here_and_checked_against_pinned_keys() {
     let mut changed = own.clone();
     changed["text"] = json!("Tschüss");
     assert_eq!(check(json!([changed]), mine.clone()), ["bad"]);
+    // The server hands out another key under my own name: never "own".
+    let twin = trair_core::Account::generate(&user).unwrap();
+    let twin_id = trair_core::DeviceIdentity::generate().unwrap();
+    let twin_list = trair_core::SignedDeviceList::first(&twin, twin_id.entry()).unwrap();
+    assert_eq!(
+        check(
+            json!([open_item(&twin, &twin_id, "Ich bin du", 1_800_000_000)]),
+            json!({user.clone(): author(&twin, &twin_list)})
+        ),
+        ["changed"]
+    );
 
     // A contact: known key, then compared in person.
     let bob = Bob::new();
