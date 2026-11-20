@@ -1549,7 +1549,9 @@ void main() {
       final bobs = (server.communities.communities[id]!['messages'] as List).cast<Map<String, Object?>>().firstWhere(
         (m) => m['text'] == 'Moin Julian',
       );
-      await tester.tap(find.descendant(of: find.byKey(ValueKey('open-${bobs['id']}')), matching: find.byTooltip('Mehr')));
+      await tester.tap(
+        find.descendant(of: find.byKey(ValueKey('open-${bobs['id']}')), matching: find.byTooltip('Mehr')),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Löschen').last);
       await tester.pumpAndSettle();
@@ -1566,7 +1568,10 @@ void main() {
         setup: (s) {
           id = s.communities.found('Schach-AG', owner: 'local-olga');
           s.communities.setRules(id, '1. Fair spielen');
-          (s.communities.communities[id]!['invites'] as Map)['trairc:0123456789abcdef0123'] = {'id': 'i1', 'uses': null};
+          (s.communities.communities[id]!['invites'] as Map)['trairc:0123456789abcdef0123'] = {
+            'id': 'i1',
+            'uses': null,
+          };
         },
       );
       await tester.tap(find.byTooltip('Community gründen oder beitreten'));
@@ -1639,7 +1644,13 @@ void main() {
           s.communities.addMember(id, 'local-bob');
           s.communities.addMember(id, 'local-max');
           s.communities.postAs(id, 'allgemein', 'local-max', 'Spam spam spam');
-          s.communities.addReport(id, reporter: 'local-bob', target: 'local-max', reason: 'Spam', text: 'Spam spam spam');
+          s.communities.addReport(
+            id,
+            reporter: 'local-bob',
+            target: 'local-max',
+            reason: 'Spam',
+            text: 'Spam spam spam',
+          );
         },
       );
       await tester.tap(find.byTooltip('Abi 2026'));
@@ -1810,7 +1821,10 @@ void main() {
       });
       final door = FakeDoor(password: pw, profile: {'name': 'Julian'})
         ..chatsEnabled = true
-        ..teamBadge = {'claim': {'kind': 'team'}, 'signature': 'x'};
+        ..teamBadge = {
+          'claim': {'kind': 'team'},
+          'signature': 'x',
+        };
       await _start(tester, door: door, server: server);
       await _unlock(tester);
       await _openSettings(tester);

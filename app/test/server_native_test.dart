@@ -308,7 +308,11 @@ void main() {
       final id = made!;
       expect(o.current!.iAmOwner, isTrue);
       expect([for (final c in o.current!.channels) c.name], ['regeln', 'allgemein']);
-      expect(await o.edit(name: 'Abi 2026', about: 'Unser Jahrgang', rules: '1. Nett sein'), isTrue, reason: o.message);
+      expect(
+        await o.edit(name: 'Abi 2026', about: 'Unser Jahrgang', rules: '1. Nett sein'),
+        isTrue,
+        reason: o.message,
+      );
       final code = await o.createInvite(60, 1);
       expect(code, startsWith('trairc:'));
 

@@ -330,7 +330,13 @@ class CReport {
 }
 
 class CLogEntry {
-  const CLogEntry({required this.actor, required this.action, required this.target, required this.detail, required this.at});
+  const CLogEntry({
+    required this.actor,
+    required this.action,
+    required this.target,
+    required this.detail,
+    required this.at,
+  });
 
   factory CLogEntry.fromJson(Map<String, Object?> j) => CLogEntry(
     actor: j['actor'] as String? ?? '',
@@ -574,10 +580,15 @@ class Communities {
     await fetch(fresh);
     Future<void> run(List<OpenMessage> part) async {
       final users = {for (final m in part) m.user};
-      final r = await vault.checkOpenMessages(id, channel, [for (final m in part) m.toCheck()], {
-        for (final u in users)
-          if (_keys[u] != null) u: _keys[u],
-      });
+      final r = await vault.checkOpenMessages(
+        id,
+        channel,
+        [for (final m in part) m.toCheck()],
+        {
+          for (final u in users)
+            if (_keys[u] != null) u: _keys[u],
+        },
+      );
       final results = (r.raw['results'] as List? ?? const []).cast<String>();
       for (var i = 0; i < part.length && i < results.length; i++) {
         part[i].signed = _signed(results[i]);

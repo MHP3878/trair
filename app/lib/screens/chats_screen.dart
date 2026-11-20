@@ -1277,13 +1277,14 @@ class _ChatsScreenState extends State<ChatsScreen> {
                                       user: chat.peer,
                                       name: chat.name,
                                       chatMessages: [
-                                        for (final m in (state.realMessages[chat.id] ?? const <RealMessage>[])
-                                            .where((m) => !m.isNote && m.text.isNotEmpty)
-                                            .toList()
-                                            .reversed
-                                            .take(20)
-                                            .toList()
-                                            .reversed)
+                                        for (final m
+                                            in (state.realMessages[chat.id] ?? const <RealMessage>[])
+                                                .where((m) => !m.isNote && m.text.isNotEmpty)
+                                                .toList()
+                                                .reversed
+                                                .take(20)
+                                                .toList()
+                                                .reversed)
                                           {'from': m.outgoing ? 'ich' : chat.peer, 'text': m.text, 'at': m.at},
                                       ],
                                     )

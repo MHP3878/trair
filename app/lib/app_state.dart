@@ -329,6 +329,7 @@ class AppState extends ChangeNotifier {
     go(TrairScreen.community);
     await communities.open(id);
   }
+
   final Future<Uint8List?> Function()? _pickPictureFile;
 
   /// What the start screen lists; [account] is the one chosen there.

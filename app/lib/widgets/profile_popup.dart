@@ -106,7 +106,9 @@ Future<void> showProfileCard(BuildContext context, ProfileView view, {VoidCallba
     context: context,
     barrierColor: const Color(0x9905050A),
     barrierLabel: 'Profil schließen',
-    builder: (_) => Center(child: ProfilePopup(view: view, onReport: onReport)),
+    builder: (_) => Center(
+      child: ProfilePopup(view: view, onReport: onReport),
+    ),
   );
 }
 

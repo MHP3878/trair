@@ -438,7 +438,13 @@ void main() {
     c.postAs(id, 'allgemein', 'local-lena', 'Wer bringt die Musikbox zum Abiball mit?');
     c.postAs(id, 'allgemein', 'local-malik', 'Ich! Und Snacks.');
     c.postAs(id, 'allgemein', 'local-aylin', 'Kauft hier Follower, billig!!!');
-    c.addReport(id, reporter: 'local-lena', target: 'local-aylin', reason: 'Werbung', text: 'Kauft hier Follower, billig!!!');
+    c.addReport(
+      id,
+      reporter: 'local-lena',
+      target: 'local-aylin',
+      reason: 'Werbung',
+      text: 'Kauft hier Follower, billig!!!',
+    );
     final other = c.found('Schach-AG', owner: 'local-olga');
     c.addMember(other, FakeCommunities.me);
     c.setRules(other, '1. Fair spielen\n2. Keine Hilfe von Programmen');

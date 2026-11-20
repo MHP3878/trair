@@ -44,9 +44,7 @@ class _RealCommunityScreenState extends State<RealCommunityScreen> {
     final info = c.current;
     if (info == null) {
       return Backdrop(
-        child: Center(
-          child: Text(c.message.isEmpty ? 'Lädt …' : c.message, style: TrairText.muted),
-        ),
+        child: Center(child: Text(c.message.isEmpty ? 'Lädt …' : c.message, style: TrairText.muted)),
       );
     }
     final channel = info.channels.where((ch) => ch.id == c.currentChannel).firstOrNull;
@@ -59,7 +57,9 @@ class _RealCommunityScreenState extends State<RealCommunityScreen> {
             child: _settings
                 ? CommunitySettings(info: info, onClose: () => setState(() => _settings = false))
                 : channel == null
-                ? const GlassPanel(child: Center(child: Text('Kein Kanal', style: TrairText.muted)))
+                ? const GlassPanel(
+                    child: Center(child: Text('Kein Kanal', style: TrairText.muted)),
+                  )
                 : _channel(state, info, channel),
           ),
           if (!_settings) SizedBox(width: 248, child: _members(state, info)),
@@ -177,9 +177,7 @@ class _RealCommunityScreenState extends State<RealCommunityScreen> {
               const SizedBox(height: 6),
               Row(
                 children: [
-                  Expanded(
-                    child: SelectableText(code, style: TrairText.mono.copyWith(fontSize: 13.5)),
-                  ),
+                  Expanded(child: SelectableText(code, style: TrairText.mono.copyWith(fontSize: 13.5))),
                   RoundIconButton(
                     icon: TrairIcons.copy,
                     tooltip: 'Kopieren (verschwindet nach 60 Sekunden)',
@@ -192,10 +190,7 @@ class _RealCommunityScreenState extends State<RealCommunityScreen> {
             ] else
               const Padding(
                 padding: EdgeInsets.only(bottom: 8),
-                child: Text(
-                  'Wer den Code hat, kommt rein (außer Gebannte).',
-                  style: TrairText.small,
-                ),
+                child: Text('Wer den Code hat, kommt rein (außer Gebannte).', style: TrairText.small),
               ),
             Row(
               children: [

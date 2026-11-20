@@ -273,13 +273,8 @@ class TrairVault {
   // ----- communities (M8): signatures of open channels -----
 
   /// Sign a message for an open channel with this device.
-  Future<CoreAnswer> signOpenMessage(String community, String channel, String text, int sent) => _call({
-    'op': 'sign_open_message',
-    'community': community,
-    'channel': channel,
-    'text': text,
-    'sent': sent,
-  });
+  Future<CoreAnswer> signOpenMessage(String community, String channel, String text, int sent) =>
+      _call({'op': 'sign_open_message', 'community': community, 'channel': channel, 'text': text, 'sent': sent});
 
   /// One word per message: own, verified, contact, known, new, changed, bad.
   Future<CoreAnswer> checkOpenMessages(

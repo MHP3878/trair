@@ -28,14 +28,7 @@ class FakeCommunities {
   ServerReply _fail(String code, [int status = 403]) => ServerReply(status, {'ok': false, 'error': code});
 
   void _event(String id, String kind, {String channel = '', int ref = 0, String target = ''}) {
-    _events.add({
-      'seq': ++_seq,
-      'community': id,
-      'kind': kind,
-      'channel': channel,
-      'ref': ref,
-      'target': target,
-    });
+    _events.add({'seq': ++_seq, 'community': id, 'kind': kind, 'channel': channel, 'ref': ref, 'target': target});
     _woken?.complete();
     _woken = null;
   }
@@ -93,7 +86,10 @@ class FakeCommunities {
 
   /// [user] joins (or is put in) [id] with these roles.
   void addMember(String id, String user, {List<int> roles = const []}) {
-    _members(id)[user] = {'roles': [...roles], 'rules_rev': 0};
+    _members(id)[user] = {
+      'roles': [...roles],
+      'rules_rev': 0,
+    };
     _event(id, 'joined', target: user);
   }
 
@@ -121,7 +117,13 @@ class FakeCommunities {
     return m['id'] as int;
   }
 
-  void addReport(String id, {required String reporter, required String target, required String reason, String text = ''}) {
+  void addReport(
+    String id, {
+    required String reporter,
+    required String target,
+    required String reason,
+    String text = '',
+  }) {
     final reports = communities[id]!['reports'] as List;
     reports.add({
       'id': reports.length + 1,
@@ -404,13 +406,9 @@ class FakeCommunities {
       case 'create_role':
         if (!can(4)) return _fail('not_allowed');
         final rid = _roles(id).map((x) => x['id'] as int).reduce((a, b) => a > b ? a : b) + 1;
-        _roles(id).insert(0, {
-          'id': rid,
-          'name': r['name'],
-          'color': r['color'],
-          'position': 30 + rid,
-          'perms': r['perms'],
-        });
+        _roles(
+          id,
+        ).insert(0, {'id': rid, 'name': r['name'], 'color': r['color'], 'position': 30 + rid, 'perms': r['perms']});
         _log(id, 'role_create', r['name'] as String);
         _event(id, 'changed');
         return _ok({'role': rid});

@@ -112,11 +112,7 @@ class _CommunitySettingsState extends State<CommunitySettings> {
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                           child: Row(
                             children: [
-                              Icon(
-                                icon,
-                                size: 16,
-                                color: id == 'leave' ? TrairColors.rose : TrairColors.textSoft,
-                              ),
+                              Icon(icon, size: 16, color: id == 'leave' ? TrairColors.rose : TrairColors.textSoft),
                               const SizedBox(width: 10),
                               Expanded(child: Text(label, style: const TextStyle(fontSize: 14))),
                             ],
@@ -183,7 +179,9 @@ class _CommunitySettingsState extends State<CommunitySettings> {
         Text(info.rules.isEmpty ? 'Keine Regeln.' : info.rules, style: TrairText.body),
         const SizedBox(height: 18),
         Text(
-          info.rulesOk ? 'Du hast die aktuellen Regeln akzeptiert.' : 'Du hast die aktuellen Regeln noch nicht akzeptiert.',
+          info.rulesOk
+              ? 'Du hast die aktuellen Regeln akzeptiert.'
+              : 'Du hast die aktuellen Regeln noch nicht akzeptiert.',
           style: TrairText.small,
         ),
       ];
@@ -326,7 +324,12 @@ class _CommunitySettingsState extends State<CommunitySettings> {
           width: 460,
           children: [
             if (!everyone) ...[
-              PillField(controller: name, hint: 'Name der Rolle', autofocus: role == null, semanticLabel: 'Name der Rolle'),
+              PillField(
+                controller: name,
+                hint: 'Name der Rolle',
+                autofocus: role == null,
+                semanticLabel: 'Name der Rolle',
+              ),
               const SizedBox(height: 12),
               GlowSwatches(selected: color, onPick: (c) => set(() => color = c)),
               const SizedBox(height: 14),
@@ -337,7 +340,9 @@ class _CommunitySettingsState extends State<CommunitySettings> {
                 child: PillSwitch(
                   value: perms & e.key == e.key,
                   label: e.value,
-                  onChanged: mine & e.key == e.key ? (v) => set(() => perms = v ? perms | e.key : perms & ~e.key) : (_) {},
+                  onChanged: mine & e.key == e.key
+                      ? (v) => set(() => perms = v ? perms | e.key : perms & ~e.key)
+                      : (_) {},
                 ),
               ),
             const SizedBox(height: 14),
@@ -581,9 +586,7 @@ class _CommunitySettingsState extends State<CommunitySettings> {
             whenText(b.at),
             if (b.reason.isNotEmpty) '„${b.reason}“',
           ].join(' · '),
-          actions: [
-            PillButton(label: 'Entbannen', kind: PillKind.ghost, height: 32, onPressed: () => c.unban(b.user)),
-          ],
+          actions: [PillButton(label: 'Entbannen', kind: PillKind.ghost, height: 32, onPressed: () => c.unban(b.user))],
         ),
     ];
   }
@@ -645,10 +648,7 @@ class _CommunitySettingsState extends State<CommunitySettings> {
                 child: Text(r.quoted, style: const TextStyle(fontSize: 13.5, color: TrairColors.textSoft)),
               ),
             ],
-            if (r.note.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Text('Notiz: ${r.note}', style: TrairText.small),
-            ],
+            if (r.note.isNotEmpty) ...[const SizedBox(height: 6), Text('Notiz: ${r.note}', style: TrairText.small)],
             if (r.status == 'open') ...[
               const SizedBox(height: 10),
               Wrap(
@@ -743,14 +743,29 @@ class _CommunitySettingsState extends State<CommunitySettings> {
                 TextSpan(text: '${_actions[e.action] ?? e.action} '),
                 if (e.target.isNotEmpty)
                   TextSpan(
-                    text: const {'kick', 'ban', 'unban', 'roles', 'message_delete', 'transfer', 'successor'}.contains(e.action)
+                    text:
+                        const {
+                          'kick',
+                          'ban',
+                          'unban',
+                          'roles',
+                          'message_delete',
+                          'transfer',
+                          'successor',
+                        }.contains(e.action)
                         ? _name2(state, e.target)
                         : e.target,
                     style: const TextStyle(fontWeight: FontWeight.w600),
                   ),
                 if (e.detail.isNotEmpty && !const {'roles', 'role_create', 'role_edit'}.contains(e.action))
-                  TextSpan(text: ' · ${e.detail}', style: const TextStyle(color: TrairColors.textMuted)),
-                TextSpan(text: '  ${whenText(e.at)}', style: const TextStyle(color: TrairColors.placeholder, fontSize: 12)),
+                  TextSpan(
+                    text: ' · ${e.detail}',
+                    style: const TextStyle(color: TrairColors.textMuted),
+                  ),
+                TextSpan(
+                  text: '  ${whenText(e.at)}',
+                  style: const TextStyle(color: TrairColors.placeholder, fontSize: 12),
+                ),
               ],
             ),
             style: const TextStyle(fontSize: 13.5, color: TrairColors.textSoft),
@@ -803,7 +818,12 @@ class _CommunitySettingsState extends State<CommunitySettings> {
           kind: PillKind.danger,
           height: 40,
           onPressed: () async {
-            if (await confirmAction(context, '„${info.name}“ verlassen?', 'Du kannst mit einer Einladung wiederkommen.', 'Verlassen')) {
+            if (await confirmAction(
+              context,
+              '„${info.name}“ verlassen?',
+              'Du kannst mit einer Einladung wiederkommen.',
+              'Verlassen',
+            )) {
               if (await c.leave()) state.go(TrairScreen.chats);
             }
           },

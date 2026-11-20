@@ -153,10 +153,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           const SizedBox(height: 14),
                           _privacyCard(state),
                           const SizedBox(height: 14),
-                          if (state.communities.hasTeamBadge) ...[
-                            const TeamInbox(),
-                            const SizedBox(height: 14),
-                          ],
+                          if (state.communities.hasTeamBadge) ...[const TeamInbox(), const SizedBox(height: 14)],
                           _accountCard(state),
                         ],
                       ),
