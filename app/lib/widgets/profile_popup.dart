@@ -99,21 +99,27 @@ class ProfileView {
   final bool showTrust;
 }
 
-/// Open the profile card of [view] above everything else.
-Future<void> showProfileCard(BuildContext context, ProfileView view) {
+/// Open the profile card of [view] above everything else. With
+/// [onReport] the card offers to report the person to the Trair team.
+Future<void> showProfileCard(BuildContext context, ProfileView view, {VoidCallback? onReport}) {
   return showDialog<void>(
     context: context,
     barrierColor: const Color(0x9905050A),
     barrierLabel: 'Profil schließen',
-    builder: (_) => Center(child: ProfilePopup(view: view)),
+    builder: (_) => Center(
+      child: ProfilePopup(view: view, onReport: onReport),
+    ),
   );
 }
 
 /// The profile card, like a Discord profile: banner, glowing name, badges.
 class ProfilePopup extends StatelessWidget {
-  const ProfilePopup({super.key, required this.view});
+  const ProfilePopup({super.key, required this.view, this.onReport});
 
   final ProfileView view;
+
+  /// Report the person to the Trair team (closes the card first).
+  final VoidCallback? onReport;
 
   @override
   Widget build(BuildContext context) {
@@ -151,6 +157,22 @@ class ProfilePopup extends StatelessWidget {
                         ),
                       ),
                     ),
+                    if (onReport != null)
+                      Positioned(
+                        left: 10,
+                        top: 10,
+                        child: RoundIconButton(
+                          icon: TrairIcons.flag,
+                          tooltip: 'Ans Trair-Team melden',
+                          size: 32,
+                          color: const Color(0x59000000),
+                          iconColor: Colors.white,
+                          onPressed: () {
+                            Navigator.of(context).pop();
+                            onReport!();
+                          },
+                        ),
+                      ),
                     Positioned(
                       right: 10,
                       top: 10,

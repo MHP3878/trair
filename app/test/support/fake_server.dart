@@ -5,6 +5,8 @@ import 'dart:async';
 
 import 'package:trair_app/core/server.dart';
 
+import 'fake_communities.dart';
+
 /// Stands in for crates/trair-server in widget tests: answers at once,
 /// without network. The real server has its own end-to-end tests, and
 /// test/server_native_test.dart runs the app against it.
@@ -25,6 +27,9 @@ class FakeServer implements ServerTransport {
 
   /// Completed by the test to let the new device arrive later.
   Completer<void>? holdGuest;
+
+  /// Communities (M8).
+  final communities = FakeCommunities();
 
   // ----- chats (M4) -----
 
@@ -108,6 +113,11 @@ class FakeServer implements ServerTransport {
         // Like the real long poll: wait until something arrives.
         if (_inbox.isEmpty && wait > 0) await (_arrived ??= Completer<void>()).future;
         return ok({'messages': List.of(_inbox)});
+      case ('POST', '/v1/community'):
+        return communities.op(body!);
+      case ('GET', '/v1/communities/sync'):
+        final q = Uri.parse(path).queryParameters;
+        return communities.sync(int.parse(q['since'] ?? '0'), int.parse(q['wait'] ?? '0'));
       case ('POST', '/v1/messages/ack'):
         final ids = (body!['ids'] as List).cast<int>();
         acked.addAll(ids);

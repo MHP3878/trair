@@ -800,6 +800,7 @@ struct Bob {
     dir: PathBuf,
     account: trair_core::Account,
     list: trair_core::SignedDeviceList,
+    identity: trair_core::DeviceIdentity,
 }
 
 impl Bob {
@@ -829,6 +830,7 @@ impl Bob {
             dir,
             account,
             list,
+            identity,
         }
     }
 
@@ -1683,5 +1685,185 @@ fn d25_a_group_through_the_door_with_a_key_roles_and_closing() {
             .is_empty()
     );
     call(json!({"op": "lock"}));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Someone writing in an open channel, outside the door.
+fn open_item(
+    account: &trair_core::Account,
+    identity: &trair_core::DeviceIdentity,
+    text: &str,
+    sent: u64,
+) -> Value {
+    let m = trair_core::proofs::OpenMessage {
+        community: "c1",
+        channel: "allgemein",
+        user: account.user(),
+        device: &identity.id,
+        sent,
+        text,
+    };
+    let sig = trair_core::proofs::sign_open_message(identity, &m).unwrap();
+    json!({"user": account.user(), "device": identity.id, "text": text, "sent": sent, "sig": hex::encode(sig)})
+}
+
+fn author(account: &trair_core::Account, list: &trair_core::SignedDeviceList) -> Value {
+    json!({"account_key": hex::encode(account.public_key()), "device_list": list})
+}
+
+fn check(messages: Value, authors: Value) -> Vec<String> {
+    let r = call(
+        json!({"op": "check_open_messages", "community": "c1", "channel": "allgemein",
+        "messages": messages, "authors": authors}),
+    );
+    assert_eq!(r["ok"], true, "{r}");
+    r["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x.as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn d26_open_messages_are_signed_here_and_checked_against_pinned_keys() {
+    let _turn = TURN.lock().unwrap_or_else(|p| p.into_inner());
+    let dir = fresh_dir();
+    call(json!({"op": "init", "dir": dir}));
+    assert_eq!(
+        error(&call(
+            json!({"op": "sign_open_message", "community": "c1", "channel": "allgemein", "text": "x", "sent": 1})
+        )),
+        "locked"
+    );
+    call(json!({"op": "create", "password": PW, "profile": {"name": "Julian"}}));
+    let me = call(json!({"op": "server_identity"}));
+    let user = me["user"].as_str().unwrap().to_string();
+
+    // Our own message, signed in here.
+    let signed = call(
+        json!({"op": "sign_open_message", "community": "c1", "channel": "allgemein",
+        "text": "Hallo", "sent": 1_800_000_000_u64}),
+    );
+    assert_eq!(signed["ok"], true, "{signed}");
+    assert_eq!(signed["user"], user.as_str());
+    let own = json!({"user": user, "device": signed["device"], "text": "Hallo",
+        "sent": 1_800_000_000_u64, "sig": signed["signature"]});
+    let mine =
+        json!({user.clone(): {"account_key": me["account_key"], "device_list": me["device_list"]}});
+    assert_eq!(check(json!([own.clone()]), mine.clone()), ["own"]);
+    let mut changed = own.clone();
+    changed["text"] = json!("Tschüss");
+    assert_eq!(check(json!([changed]), mine.clone()), ["bad"]);
+    // The server hands out another key under my own name: never "own".
+    let twin = trair_core::Account::generate(&user).unwrap();
+    let twin_id = trair_core::DeviceIdentity::generate().unwrap();
+    let twin_list = trair_core::SignedDeviceList::first(&twin, twin_id.entry()).unwrap();
+    assert_eq!(
+        check(
+            json!([open_item(&twin, &twin_id, "Ich bin du", 1_800_000_000)]),
+            json!({user.clone(): author(&twin, &twin_list)})
+        ),
+        ["changed"]
+    );
+
+    // A contact: known key, then compared in person.
+    let bob = Bob::new();
+    call(json!({"op": "add_contact", "code": bob.m.contact_code(), "name": "Bob"}));
+    let from_bob = open_item(&bob.account, &bob.identity, "Moin", 1_800_000_000);
+    let bob_keys = json!({"local-bob": author(&bob.account, &bob.list)});
+    assert_eq!(
+        check(json!([from_bob.clone()]), bob_keys.clone()),
+        ["contact"]
+    );
+    assert_eq!(
+        call(json!({"op": "confirm_contact", "user": "local-bob"}))["ok"],
+        true
+    );
+    assert_eq!(
+        check(json!([from_bob.clone()]), bob_keys.clone()),
+        ["verified"]
+    );
+    // The server hands out another key for Bob: never the contact's.
+    let fake = trair_core::Account::generate("local-bob").unwrap();
+    let fake_id = trair_core::DeviceIdentity::generate().unwrap();
+    let fake_list = trair_core::SignedDeviceList::first(&fake, fake_id.entry()).unwrap();
+    assert_eq!(
+        check(
+            json!([open_item(&fake, &fake_id, "Ich bin Bob", 1_800_000_000)]),
+            json!({"local-bob": author(&fake, &fake_list)})
+        ),
+        ["changed"]
+    );
+
+    // A stranger: pinned the first time, then known; another key later
+    // is a warning until it is accepted.
+    let eve = trair_core::Account::generate("local-eve").unwrap();
+    let eve_id = trair_core::DeviceIdentity::generate().unwrap();
+    let eve_list = trair_core::SignedDeviceList::first(&eve, eve_id.entry()).unwrap();
+    let from_eve = open_item(&eve, &eve_id, "Hi", 1_800_000_000);
+    let eve_keys = json!({"local-eve": author(&eve, &eve_list)});
+    assert_eq!(
+        check(
+            json!([from_eve.clone(), from_eve.clone()]),
+            eve_keys.clone()
+        ),
+        ["new", "known"]
+    );
+    let eve2 = trair_core::Account::generate("local-eve").unwrap();
+    let eve2_id = trair_core::DeviceIdentity::generate().unwrap();
+    let eve2_list = trair_core::SignedDeviceList::first(&eve2, eve2_id.entry()).unwrap();
+    let eve2_keys = json!({"local-eve": author(&eve2, &eve2_list)});
+    let from_eve2 = open_item(&eve2, &eve2_id, "Neues Handy", 1_800_000_100);
+    assert_eq!(
+        check(json!([from_eve2.clone()]), eve2_keys.clone()),
+        ["changed"]
+    );
+    // No team badge, no team inbox (and nothing while locked).
+    assert_eq!(error(&call(json!({"op": "team_badge"}))), "none");
+    // The pin survives locking.
+    call(json!({"op": "lock"}));
+    assert_eq!(error(&call(json!({"op": "team_badge"}))), "locked");
+    assert_eq!(
+        error(&call(
+            json!({"op": "check_open_messages", "community": "c1", "channel": "allgemein", "messages": [], "authors": {}})
+        )),
+        "locked"
+    );
+    call(json!({"op": "unlock", "password": PW}));
+    assert_eq!(
+        check(json!([from_eve2.clone()]), eve2_keys.clone()),
+        ["changed"]
+    );
+    let accepted = call(
+        json!({"op": "accept_open_key", "user": "local-eve", "account_key": hex::encode(eve2.public_key())}),
+    );
+    assert_eq!(accepted["ok"], true, "{accepted}");
+    assert_eq!(
+        check(
+            json!([from_eve2.clone(), from_eve.clone()]),
+            eve2_keys.clone()
+        ),
+        ["known", "bad"]
+    );
+
+    // Missing keys, a device not in the list, a signature from someone
+    // else, broken hex: all bad.
+    assert_eq!(check(json!([from_eve.clone()]), json!({})), ["bad"]);
+    let mut other_device = from_bob.clone();
+    other_device["device"] = json!(eve_id.id);
+    assert_eq!(check(json!([other_device]), bob_keys.clone()), ["bad"]);
+    let mut borrowed = from_eve.clone();
+    borrowed["user"] = json!("local-bob");
+    assert_eq!(check(json!([borrowed]), bob_keys.clone()), ["bad"]);
+    let mut broken = from_bob.clone();
+    broken["sig"] = json!("zz");
+    assert_eq!(check(json!([broken]), bob_keys), ["bad"]);
+    // Another channel or community is another message.
+    let r = call(
+        json!({"op": "check_open_messages", "community": "c2", "channel": "allgemein",
+        "messages": [from_eve], "authors": eve_keys}),
+    );
+    assert_eq!(r["results"], json!(["bad"]));
     let _ = std::fs::remove_dir_all(&dir);
 }

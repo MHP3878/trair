@@ -18,6 +18,7 @@ import 'screens/community_screen.dart';
 import 'screens/lock_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/profile_screen.dart';
+import 'screens/real_community_screen.dart';
 import 'screens/start_screen.dart';
 import 'theme.dart';
 import 'widgets/common.dart';
@@ -149,7 +150,10 @@ class _Router extends StatelessWidget {
       TrairScreen.lock => const LockScreen(),
       TrairScreen.onboarding => const OnboardingScreen(),
       TrairScreen.chats => const ChatsScreen(),
-      TrairScreen.community => const CommunityScreen(),
+      TrairScreen.community =>
+        state.communities.active == null
+            ? const CommunityScreen()
+            : RealCommunityScreen(key: ValueKey('community-${state.communities.active}')),
       TrairScreen.profile => const ProfileScreen(),
     };
     final switcher = AnimatedSwitcher(

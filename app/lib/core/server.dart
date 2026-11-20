@@ -186,6 +186,17 @@ class ServerApi {
 
   Future<ServerReply> ack(List<int> ids) =>
       transport.send('POST', '/v1/messages/ack', token: token, body: {'ids': ids});
+
+  // ----- communities (M8) -----
+
+  /// One community op (`{"op": …}`, see crates/trair-server/src/communities.rs).
+  Future<ServerReply> community(Map<String, Object?> body) =>
+      transport.send('POST', '/v1/community', token: token, body: body);
+
+  /// What happened in this account's communities after [since]; with
+  /// [wait] the server holds the answer until something happens.
+  Future<ServerReply> communitySync(int since, int wait) =>
+      transport.send('GET', '/v1/communities/sync?since=$since&wait=$wait', token: token, wait: wait);
 }
 
 /// `user:device` ids as the server wants them.

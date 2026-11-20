@@ -1179,8 +1179,20 @@ async fn s10_the_server_takes_one_change_per_chat_and_epoch() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
     // The server never stores who is in a chat, and forgets idle chats.
+    // (Communities, the `c_` tables, are run by the server on purpose:
+    // it decides their rights, so it knows their members.)
     let tables = w.server.db_tables();
-    assert!(tables.iter().all(|t| !t.contains("member")), "{tables:?}");
+    assert!(
+        tables
+            .iter()
+            .all(|t| t.starts_with("c_") || !t.contains("member")),
+        "{tables:?}"
+    );
+    assert!(
+        tables.iter().any(|t| t.starts_with("messages."))
+            && !tables.contains(&"groups.members".to_string()),
+        "{tables:?}"
+    );
     w.later(IDLE_LIMIT + 1);
     assert!(w.server.cleanup().unwrap().groups >= 1);
 }

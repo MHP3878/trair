@@ -19,6 +19,7 @@ pub mod groups;
 pub mod keypackages;
 pub mod mls;
 pub mod notfall;
+pub mod open_chats;
 pub mod pairing;
 pub mod policy;
 pub mod profiles;
@@ -36,6 +37,7 @@ pub use error::{CoreError, Result};
 pub use group_chats::{GroupMember, GroupView, JoinRequest, Tidy};
 pub use groups::{Acct, GroupKind, GroupState, Role};
 pub use mls::{Device, Event, KeyPackageOffer, Member, Outgoing};
+pub use open_chats::{Author, AuthorKeys};
 pub use policy::{Policy, Trust};
 pub use vault::{Vault, VaultError};
 

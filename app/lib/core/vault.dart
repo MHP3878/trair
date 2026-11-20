@@ -270,6 +270,32 @@ class TrairVault {
   Future<CoreAnswer> closeJoin(String chat) => _call({'op': 'close_join', 'chat': chat});
   Future<CoreAnswer> denyJoin(String chat) => _call({'op': 'deny_join', 'chat': chat});
 
+  // ----- communities (M8): signatures of open channels -----
+
+  /// Sign a message for an open channel with this device.
+  Future<CoreAnswer> signOpenMessage(String community, String channel, String text, int sent) =>
+      _call({'op': 'sign_open_message', 'community': community, 'channel': channel, 'text': text, 'sent': sent});
+
+  /// One word per message: own, verified, contact, known, new, changed, bad.
+  Future<CoreAnswer> checkOpenMessages(
+    String community,
+    String channel,
+    List<Map<String, Object?>> messages,
+    Map<String, Object?> authors,
+  ) => _call({
+    'op': 'check_open_messages',
+    'community': community,
+    'channel': channel,
+    'messages': messages,
+    'authors': authors,
+  });
+
+  Future<CoreAnswer> acceptOpenKey(String user, String accountKey) =>
+      _call({'op': 'accept_open_key', 'user': user, 'account_key': accountKey});
+
+  /// The own team badge as signed (public), for the team inbox.
+  Future<CoreAnswer> teamBadge() => _call({'op': 'team_badge'});
+
   /// Where the vault lives: %APPDATA%\Trair on Windows.
   static String dataDir() {
     final env = Platform.environment;

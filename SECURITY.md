@@ -491,6 +491,67 @@ tests: `groups.rs` (unit), `tests/gruppen.rs` (g01-g12, real MLS),
   device to existing groups and keeping one's own devices' contacts in
   step are not built yet.
 
+## Communities (M8, step 3a)
+
+Code: `crates/trair-server/src/communities.rs` (rights, rules, reports,
+log, sync), `crates/trair-core/src/proofs.rs` (`OpenMessage`),
+`crates/trair-core/src/open_chats.rs` (checking authors),
+`crates/trair-ffi/src/communities.rs`, `crates/trair-team/src/lib.rs`
+(`meldungen`, `erledigt`), `app/lib/community_state.dart`; tests:
+`communities.rs` (unit, rights), `tests/communities.rs` (k01-k09, real
+server), `tuer.rs` (d26), `werkzeug.rs` (w06), `widget_test.dart` (group
+"Communities"), `server_native_test.dart` (two apps, real server).
+
+- **Open channels are readable on the server, on purpose.** Moderation
+  needs it (planning decision 9); the app says so on every channel and
+  when founding. Closed, end-to-end encrypted channels follow in step 3b.
+  Direct chats and groups are untouched by this.
+- **The server cannot forge.** Every message carries a signature of the
+  sender's device over community, channel, account, device, time and
+  text (`trair/open-message/v1`). The server checks it before storing and
+  refuses a time more than 5 minutes off. Every reader's core checks it
+  again against the sender's device list, signed by the account key, and
+  says how far that key is known: a contact's pinned key, else the key
+  first seen for that name (pinned in the reader's encrypted chat
+  database), else "new". Another key for a known name is shown as a
+  warning until the reader accepts it; a bad signature is struck through.
+  What remains: for a name nobody has seen, the server could invent an
+  account; only contacts are shown as trusted. The server can delete
+  messages and leave things out.
+- **The server decides every right.** The owner has all rights; everyone
+  else those of "@alle" and of their roles. A member stands as high as
+  their highest role. Nobody acts on someone as high or higher or on the
+  owner, shapes a role at or above their own, or gives (or takes) a right
+  they do not have. Channels can be limited to roles for reading and
+  writing; managing channels sees everything. Members write only after
+  accepting the current rules; changed rules must be accepted again.
+  Messages from channels a member may not read are never sent to them,
+  also not by the long poll.
+- **Invitations** are `trairc:` plus 80 random bits; only the SHA-256 is
+  stored. At most 30 days, optionally limited uses, revocable. Banned
+  accounts cannot join with any code.
+- **Reports.** A report on a message keeps a copy of what was written
+  (so deleting the message does not delete the evidence). Reports in a
+  community go to members with the right "Meldungen"; reports from a
+  profile go to the Trair team only: the server shows them against a team
+  badge that is valid for the asking account (`team_badge`, checked with
+  the team keys), or the team tool reads them from the server's database.
+  A reporter may attach the last messages of a direct chat; the dialog
+  says that they leave the end-to-end encryption then. Text from reports
+  reaches the team tool's terminal without control characters. Handled
+  reports are deleted after 90 days, the moderators' log after 180.
+- **Limits.** 30 messages per minute and 20 reports per hour per account;
+  20 communities per owner, 100 channels, 50 roles, 10 000 members,
+  4000 characters per message and rules text.
+- **Deleting an account** removes its memberships, messages, bans and
+  invitations. A community it owned goes to the member who stands highest
+  (the earliest to join on a tie); with nobody left it is deleted with
+  everything in it. The same happens when the server deletes an idle
+  account.
+- **Team keys:** until the real public team key is in `TEAM_KEYS`, nobody
+  has a team badge, so the team inbox is empty in the app; the team tool
+  works without it.
+
 ## Emergency PINs
 
 Code: `crates/trair-core/src/notfall.rs`, `crates/trair-ffi/src/

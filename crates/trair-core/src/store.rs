@@ -161,6 +161,11 @@ CREATE TABLE IF NOT EXISTS group_pins (
     fp TEXT NOT NULL,
     PRIMARY KEY (chat, user)
 ) WITHOUT ROWID;
+-- Account keys of community authors as first seen (open channels).
+CREATE TABLE IF NOT EXISTS open_pins (
+    user TEXT PRIMARY KEY,
+    fp TEXT NOT NULL
+) WITHOUT ROWID;
 ";
 
 /// An open chat database.

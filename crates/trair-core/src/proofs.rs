@@ -86,9 +86,120 @@ pub fn verify_account_deletion(
     verify(account_key, &delete_bytes(user, now), signature)
 }
 
+/// What a device signs for a message in an open community channel. The
+/// server can read such a message and delete it, but not write one in
+/// someone's name or change it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenMessage<'a> {
+    /// Community id.
+    pub community: &'a str,
+    /// Channel id.
+    pub channel: &'a str,
+    /// Sending account.
+    pub user: &'a str,
+    /// Sending device id (`d-…`).
+    pub device: &'a str,
+    /// When the device sent it (seconds since 1970).
+    pub sent: u64,
+    /// The text.
+    pub text: &'a str,
+}
+
+const OPEN_MESSAGE: &[u8] = b"trair/open-message/v1\0";
+
+fn open_bytes(m: &OpenMessage) -> Vec<u8> {
+    let mut b = OPEN_MESSAGE.to_vec();
+    for part in [m.community, m.channel, m.user, m.device, m.text] {
+        b.extend_from_slice(&(part.len() as u64).to_le_bytes());
+        b.extend_from_slice(part.as_bytes());
+    }
+    b.extend_from_slice(&m.sent.to_le_bytes());
+    b
+}
+
+/// Sign a message for an open channel with this device's key.
+pub fn sign_open_message(device: &DeviceIdentity, m: &OpenMessage) -> Result<Vec<u8>> {
+    if m.device != device.id {
+        return Err(CoreError::Rejected("not this device".into()));
+    }
+    device.keys.sign(&open_bytes(m)).map_err(internal)
+}
+
+/// Check a message of an open channel against the sending device's entry
+/// in its account's (verified) device list.
+pub fn verify_open_message(device: &DeviceEntry, m: &OpenMessage, signature: &[u8]) -> Result<()> {
+    if device.id != m.device {
+        return Err(CoreError::Rejected("another device".into()));
+    }
+    let key = hex::decode(&device.key).map_err(|_| CoreError::Rejected("device key".into()))?;
+    verify(&key, &open_bytes(m), signature)
+}
+
 fn verify(key: &[u8], message: &[u8], signature: &[u8]) -> Result<()> {
     OpenMlsRustCrypto::default()
         .crypto()
         .verify_signature(SCHEME, message, key, signature)
         .map_err(|_| CoreError::Rejected("signature is wrong".into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn open_messages_are_bound_to_device_and_every_field() {
+        let device = DeviceIdentity::generate().unwrap();
+        let entry = device.entry();
+        let m = OpenMessage {
+            community: "c1",
+            channel: "allgemein",
+            user: "olga",
+            device: &device.id,
+            sent: 1_800_000_000,
+            text: "Hallo zusammen",
+        };
+        let sig = sign_open_message(&device, &m).unwrap();
+        verify_open_message(&entry, &m, &sig).unwrap();
+        let changed = [
+            OpenMessage {
+                community: "c2",
+                ..m.clone()
+            },
+            OpenMessage {
+                channel: "regeln",
+                ..m.clone()
+            },
+            OpenMessage {
+                user: "ada",
+                ..m.clone()
+            },
+            OpenMessage {
+                sent: m.sent + 1,
+                ..m.clone()
+            },
+            OpenMessage {
+                text: "Hallo zusammen!",
+                ..m.clone()
+            },
+        ];
+        for c in &changed {
+            assert!(verify_open_message(&entry, c, &sig).is_err(), "{c:?}");
+        }
+        // Another device's key, or a message naming another device.
+        let other = DeviceIdentity::generate().unwrap();
+        assert!(verify_open_message(&other.entry(), &m, &sig).is_err());
+        assert!(sign_open_message(&other, &m).is_err());
+        // Shifting text between fields does not give the same bytes.
+        let a = OpenMessage {
+            channel: "ab",
+            text: "c",
+            ..m.clone()
+        };
+        let b = OpenMessage {
+            channel: "a",
+            text: "bc",
+            ..m.clone()
+        };
+        assert_ne!(open_bytes(&a), open_bytes(&b));
+    }
 }

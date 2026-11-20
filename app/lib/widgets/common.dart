@@ -725,7 +725,7 @@ class DemoBar extends StatelessWidget {
                 ),
                 Flexible(
                   child: Text(
-                    ' · Echte Chats stehen unter „Echt verschlüsselt“, Communities sind noch ausgedacht',
+                    ' · Echte Chats stehen unter „Echt verschlüsselt“, „Trair Beta“ ist eine Demo-Community',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 12, color: TrairColors.amberText),

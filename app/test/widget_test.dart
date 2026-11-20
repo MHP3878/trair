@@ -17,6 +17,7 @@ import 'package:trair_app/widgets/badges.dart';
 import 'package:trair_app/widgets/common.dart';
 import 'package:trair_app/widgets/profile_popup.dart';
 
+import 'support/fake_communities.dart';
 import 'support/fake_door.dart';
 import 'support/fake_server.dart';
 import 'support/multi_door.dart';
@@ -1464,6 +1465,384 @@ void main() {
       await tester.pumpAndSettle();
       expect(door.ops, contains('accept_new_key'));
       expect(find.textContaining('Der Schlüssel von Bob hat sich geändert'), findsNothing);
+    });
+  });
+
+  group('Communities', () {
+    Future<(FakeDoor, FakeServer)> online(WidgetTester tester, {void Function(FakeServer)? setup}) async {
+      final server = FakeServer();
+      setup?.call(server);
+      final door = FakeDoor(password: pw, profile: {'name': 'Julian'})..chatsEnabled = true;
+      await _start(tester, door: door, server: server);
+      await _unlock(tester);
+      await _openSettings(tester);
+      await tester.ensureVisible(find.widgetWithText(PillButton, 'Verbinden'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Verbinden'));
+      await tester.pumpAndSettle();
+      return (door, server);
+    }
+
+    Future<void> send(WidgetTester tester, String text) async {
+      await tester.enterText(find.byKey(const Key('channel-composer')), text);
+      await tester.tap(find.byTooltip('Senden'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('without a server the plus only explains; the demo stays where it was', (tester) async {
+      await _start(tester);
+      await _unlock(tester);
+      await tester.tap(find.byTooltip('Community gründen oder beitreten'));
+      await tester.pump();
+      expect(find.textContaining('Communities laufen über den Server'), findsOneWidget);
+      await tester.tap(find.byTooltip('Trair Beta'));
+      await tester.pumpAndSettle();
+      expect(find.text('Trair Beta'), findsWidgets);
+      await tester.pump(const Duration(seconds: 5));
+    });
+
+    testWidgets('found a community, write signed, others arrive live with their check', (tester) async {
+      final (door, server) = await online(tester);
+      await tester.tap(find.byTooltip('Community gründen oder beitreten'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Die Kanäle sind offen'), findsOneWidget);
+      await tester.enterText(_field('z. B. Abi 2026'), 'Abi 2026');
+      await tester.tap(find.widgetWithText(PillButton, 'Gründen').last);
+      await tester.pumpAndSettle();
+      final id = server.communities.communities.keys.single;
+      expect(find.byTooltip('Abi 2026'), findsOneWidget, reason: 'the rail shows it');
+      expect(find.text('allgemein'), findsWidgets);
+      expect(find.text('Offen · für Moderation lesbar'), findsOneWidget);
+      expect(find.text('Gründer'), findsOneWidget);
+
+      await send(tester, 'Hallo zusammen');
+      final post = server.communities.ops.lastWhere((o) => o['op'] == 'post');
+      expect(post['sig'], 'sig-Hallo zusammen', reason: 'signed by this device');
+      expect(post['channel'], 'allgemein');
+      expect(find.text('Hallo zusammen'), findsOneWidget);
+      expect(find.byTooltip('Von deinem Gerät unterschrieben'), findsOneWidget);
+
+      // Others write: it arrives by the long poll, checked by the core.
+      server.communities.addMember(id, 'local-bob');
+      server.communities.postAs(id, 'allgemein', 'local-bob', 'Moin Julian');
+      await tester.pumpAndSettle();
+      expect(find.text('Moin Julian'), findsOneWidget);
+      expect(find.byKey(const ValueKey('member-local-bob')), findsOneWidget);
+      door.openChecks['local-eve'] = 'bad';
+      server.communities.addMember(id, 'local-eve');
+      server.communities.postAs(id, 'allgemein', 'local-eve', 'Ich bin Bob');
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Unterschrift ungültig: nicht von dieser Person'), findsOneWidget);
+      door.openChecks['local-max'] = 'changed';
+      server.communities.addMember(id, 'local-max');
+      server.communities.postAs(id, 'allgemein', 'local-max', 'Neues Handy');
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Anderer Schlüssel als beim ersten Mal'), findsOneWidget);
+      await tester.tap(find.widgetWithText(PillButton, 'Neuen Schlüssel annehmen'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Annehmen'));
+      await tester.pumpAndSettle();
+      expect(door.ops, contains('accept_open_key'));
+      expect(find.textContaining('Anderer Schlüssel als beim ersten Mal'), findsNothing);
+
+      // Deleted on the server: gone here too.
+      final bobs = (server.communities.communities[id]!['messages'] as List).cast<Map<String, Object?>>().firstWhere(
+        (m) => m['text'] == 'Moin Julian',
+      );
+      await tester.tap(
+        find.descendant(of: find.byKey(ValueKey('open-${bobs['id']}')), matching: find.byTooltip('Mehr')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Löschen').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Löschen'));
+      await tester.pumpAndSettle();
+      expect(find.text('Moin Julian'), findsNothing);
+      expect((server.communities.communities[id]!['log'] as List).first, containsPair('action', 'message_delete'));
+    });
+
+    testWidgets('joining with a code: rules first, read-only channels, only own settings', (tester) async {
+      late String id;
+      final (_, server) = await online(
+        tester,
+        setup: (s) {
+          id = s.communities.found('Schach-AG', owner: 'local-olga');
+          s.communities.setRules(id, '1. Fair spielen');
+          (s.communities.communities[id]!['invites'] as Map)['trairc:0123456789abcdef0123'] = {
+            'id': 'i1',
+            'uses': null,
+          };
+        },
+      );
+      await tester.tap(find.byTooltip('Community gründen oder beitreten'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Beitreten').first);
+      await tester.pumpAndSettle();
+      await tester.enterText(_field('trairc:…'), 'trairc:falsch');
+      await tester.tap(find.widgetWithText(PillButton, 'Beitreten').last);
+      await tester.pumpAndSettle();
+      expect(find.text('Diesen Einladungscode gibt es nicht.'), findsOneWidget);
+      await tester.enterText(find.byType(TextField).last, 'trairc:0123456789abcdef0123');
+      await tester.tap(find.widgetWithText(PillButton, 'Beitreten').last);
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Schach-AG'), findsOneWidget);
+
+      // Rules first.
+      expect(find.text('Bevor du schreibst: Regeln lesen und akzeptieren.'), findsOneWidget);
+      expect(find.byKey(const Key('channel-composer')), findsNothing);
+      await tester.tap(find.widgetWithText(PillButton, 'Regeln lesen'));
+      await tester.pumpAndSettle();
+      expect(find.text('1. Fair spielen'), findsOneWidget);
+      await tester.tap(find.widgetWithText(PillButton, 'Akzeptieren'));
+      await tester.pumpAndSettle();
+      expect(server.communities.ops.lastWhere((o) => o['op'] == 'accept_rules'), {
+        'op': 'accept_rules',
+        'community': id,
+        'rev': 1,
+      });
+      expect(find.byKey(const Key('channel-composer')), findsOneWidget);
+      await send(tester, 'Hallo AG');
+      expect(find.text('Hallo AG'), findsOneWidget);
+
+      // #regeln: everyone reads, only moderation writes.
+      await tester.tap(find.byKey(const ValueKey('channel-regeln')));
+      await tester.pumpAndSettle();
+      expect(find.text('In diesem Kanal schreibt nur die Moderation.'), findsOneWidget);
+
+      // New rules: accept again before writing.
+      server.communities.setRules(id, '1. Fair spielen\n2. Kein Spam');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('channel-allgemein')));
+      await tester.pumpAndSettle();
+      expect(find.text('Bevor du schreibst: Regeln lesen und akzeptieren.'), findsOneWidget);
+
+      // A plain member: no tabs for roles, channels, bans, reports, log.
+      await tester.tap(find.byTooltip('Community-Einstellungen'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('tab-overview')), findsOneWidget);
+      expect(find.byKey(const ValueKey('tab-leave')), findsOneWidget);
+      for (final t in ['roles', 'channels', 'invites', 'bans', 'reports', 'log']) {
+        expect(find.byKey(ValueKey('tab-$t')), findsNothing, reason: t);
+      }
+      expect(find.text('Verlassen'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('tab-leave')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Community verlassen'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Verlassen'));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Schach-AG'), findsNothing);
+      expect(find.text('Schach-AG'), findsNothing, reason: 'back to the chats');
+    });
+
+    testWidgets('moderation: roles, kick, ban, reports and the log', (tester) async {
+      late String id;
+      final (_, server) = await online(
+        tester,
+        setup: (s) {
+          id = s.communities.found('Abi 2026');
+          s.communities.addMember(id, 'local-bob');
+          s.communities.addMember(id, 'local-max');
+          s.communities.postAs(id, 'allgemein', 'local-max', 'Spam spam spam');
+          s.communities.addReport(
+            id,
+            reporter: 'local-bob',
+            target: 'local-max',
+            reason: 'Spam',
+            text: 'Spam spam spam',
+          );
+        },
+      );
+      await tester.tap(find.byTooltip('Abi 2026'));
+      await tester.pumpAndSettle();
+      expect(find.text('Spam spam spam'), findsOneWidget);
+      final members = (server.communities.communities[id]!['members'] as Map).cast<String, Map<String, Object?>>();
+
+      // Bob becomes moderator.
+      await tester.tap(find.byKey(const ValueKey('member-local-bob')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('member-action-roles')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('role-switch-Moderator')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Speichern'));
+      await tester.pumpAndSettle();
+      expect(members['local-bob']!['roles'], [2]);
+      expect(find.text('Moderator · 1'), findsOneWidget, reason: 'the member list groups by role');
+
+      // A report: the moderators see what was reported, and handle it.
+      await tester.tap(find.byTooltip('Community-Einstellungen'));
+      await tester.pumpAndSettle();
+      for (final t in ['overview', 'roles', 'channels', 'invites', 'bans', 'reports', 'log', 'leave']) {
+        expect(find.byKey(ValueKey('tab-$t')), findsOneWidget, reason: 'the owner sees $t');
+      }
+      await tester.tap(find.byKey(const ValueKey('tab-reports')));
+      await tester.pumpAndSettle();
+      expect(find.text('Spam'), findsOneWidget);
+      expect(find.text('Spam spam spam'), findsOneWidget);
+      await tester.tap(find.widgetWithText(PillButton, 'Entfernen'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Entfernen').last);
+      await tester.pumpAndSettle();
+      expect(members.containsKey('local-max'), isFalse, reason: 'kicked from the report');
+      await tester.tap(find.widgetWithText(PillButton, 'Ablehnen'));
+      await tester.pumpAndSettle();
+      expect(((server.communities.communities[id]!['reports'] as List).single as Map)['status'], 'dismissed');
+      expect(find.text('Keine offenen Meldungen.'), findsOneWidget);
+
+      // The log says who did what.
+      await tester.tap(find.byKey(const ValueKey('tab-log')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('hat entfernt', findRichText: true), findsOneWidget);
+      expect(find.textContaining('hat Rollen geändert von', findRichText: true), findsOneWidget);
+
+      // A new role and a channel only moderators see.
+      await tester.tap(find.byKey(const ValueKey('tab-roles')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Neue Rolle'));
+      await tester.pumpAndSettle();
+      await tester.enterText(_field('Name der Rolle'), 'Helfer');
+      await tester.ensureVisible(_switch('Nachrichten anderer löschen'));
+      await tester.pumpAndSettle();
+      await tester.tap(_switch('Nachrichten anderer löschen'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.widgetWithText(PillButton, 'Speichern'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Speichern'));
+      await tester.pumpAndSettle();
+      final made = server.communities.ops.lastWhere((o) => o['op'] == 'create_role');
+      expect(made['name'], 'Helfer');
+      expect(made['perms'], 32);
+      expect(find.byKey(const ValueKey('role-Helfer')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('tab-channels')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Neuer Kanal'));
+      await tester.pumpAndSettle();
+      await tester.enterText(_field('name-des-kanals'), 'Team Raum');
+      await tester.tap(_switch('Nur bestimmte Rollen sehen ihn'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(_switch('Moderator'));
+      await tester.pumpAndSettle();
+      await tester.tap(_switch('Moderator'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.widgetWithText(PillButton, 'Speichern'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Speichern'));
+      await tester.pumpAndSettle();
+      final ch = server.communities.ops.lastWhere((o) => o['op'] == 'create_channel');
+      expect(ch['name'], 'team-raum');
+      expect(ch['read_roles'], [2]);
+      expect(ch['write_roles'], isNull);
+
+      // Ban Bob, then lift it again.
+      await tester.tap(find.widgetWithText(PillButton, 'Zurück zum Kanal'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('member-local-bob')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('member-action-ban')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('ask-text')), 'Beleidigungen');
+      await tester.pump();
+      await tester.tap(find.widgetWithText(PillButton, 'Bannen'));
+      await tester.pumpAndSettle();
+      expect(members.containsKey('local-bob'), isFalse);
+      await tester.tap(find.byTooltip('Community-Einstellungen'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('tab-bans')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('„Beleidigungen“'), findsOneWidget);
+      await tester.tap(find.widgetWithText(PillButton, 'Entbannen'));
+      await tester.pumpAndSettle();
+      expect(server.communities.communities[id]!['bans'], isEmpty);
+      expect(find.text('Niemand ist gebannt.'), findsOneWidget);
+    });
+
+    testWidgets('reports: a message to the moderators, a person to the Trair team, and the team inbox', (tester) async {
+      late String id;
+      final (door, server) = await online(
+        tester,
+        setup: (s) {
+          id = s.communities.found('Fremde Runde', owner: 'local-olga');
+          s.communities.addMember(id, FakeCommunities.me);
+          s.communities.addMember(id, 'local-troll');
+          s.communities.postAs(id, 'allgemein', 'local-troll', 'Du bist doof');
+        },
+      );
+      await tester.tap(find.byTooltip('Fremde Runde'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Mehr').last);
+      await tester.pumpAndSettle();
+      expect(find.text('Löschen'), findsNothing, reason: 'no right to delete others');
+      await tester.tap(find.text('Melden').last);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Die Moderation von „Fremde Runde“'), findsOneWidget);
+      await tester.enterText(find.byKey(const Key('ask-text')), 'beleidigend');
+      await tester.pump();
+      await tester.tap(find.widgetWithText(PillButton, 'Melden'));
+      await tester.pumpAndSettle();
+      final report = ((server.communities.communities[id]!['reports'] as List).single as Map);
+      expect(report['reason'], 'beleidigend');
+      expect(report['target'], 'local-troll');
+      expect(find.textContaining('Die Moderation der Community sieht es jetzt'), findsOneWidget);
+
+      // The same person to the Trair team (a profile report).
+      await tester.tap(find.byKey(const ValueKey('member-local-troll')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('member-action-kick')), findsNothing, reason: 'no right to kick');
+      await tester.tap(find.byKey(const ValueKey('member-action-team')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('geht an das Trair-Team'), findsOneWidget);
+      await tester.enterText(find.byType(TextField).last, 'bedroht Leute');
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'An Trair-Team senden'));
+      await tester.pumpAndSettle();
+      expect(server.communities.teamReports.single['user'], 'local-troll');
+      expect(server.communities.teamReports.single['team'], true);
+      expect(server.communities.teamReports.single.containsKey('evidence'), isFalse, reason: 'nothing attached');
+      expect(find.textContaining('Das Trair-Team sieht es jetzt'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 5));
+
+      // Without a team badge there is no team inbox.
+      await tester.tap(find.byTooltip('Einstellungen'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('team-inbox')), findsNothing);
+      expect(door.teamBadge, isNull);
+    });
+
+    testWidgets('a valid team badge opens the team inbox', (tester) async {
+      final server = FakeServer();
+      server.communities.teamReports.add({
+        'id': 1,
+        'reporter': 'local-max',
+        'user': 'local-ada',
+        'reason': 'bedroht mich',
+        'evidence': [
+          {'from': 'local-ada', 'text': 'Drohung'},
+        ],
+        'status': 'open',
+      });
+      final door = FakeDoor(password: pw, profile: {'name': 'Julian'})
+        ..chatsEnabled = true
+        ..teamBadge = {
+          'claim': {'kind': 'team'},
+          'signature': 'x',
+        };
+      await _start(tester, door: door, server: server);
+      await _unlock(tester);
+      await _openSettings(tester);
+      await tester.ensureVisible(find.widgetWithText(PillButton, 'Verbinden'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(PillButton, 'Verbinden'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const Key('team-inbox')));
+      await tester.pumpAndSettle();
+      expect(find.text('bedroht mich'), findsOneWidget);
+      expect(find.textContaining('local-ada: Drohung'), findsOneWidget);
+      await tester.ensureVisible(find.widgetWithText(PillButton, 'Ablehnen'));
+      await tester.tap(find.widgetWithText(PillButton, 'Ablehnen'));
+      await tester.pumpAndSettle();
+      expect(server.communities.teamReports.single['status'], 'dismissed');
+      expect(find.text('Keine offenen Meldungen.'), findsOneWidget);
     });
   });
 }

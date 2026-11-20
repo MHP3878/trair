@@ -255,3 +255,170 @@ fn w05_dates_and_help() {
     assert_eq!(run(&[], &mut c, &settings()), 0);
     assert!(c.text().contains("trair-team neu"));
 }
+
+/// A real server database with two team reports and one for moderators.
+fn server_db(dir: &Path) -> PathBuf {
+    let path = dir.join("trair.db");
+    drop(trair_server::Db::open(&path).unwrap());
+    let c = rusqlite::Connection::open(&path).unwrap();
+    for (team, reporter, target, reason, snapshot) in [
+        (
+            1,
+            "max",
+            "ada",
+            "bedroht mich",
+            r#"{"forwarded":[{"from":"ada","text":"Drohung 5678"}]}"#,
+        ),
+        (
+            0,
+            "olga",
+            "max",
+            "Spam",
+            r#"{"text":"nur für Moderatoren"}"#,
+        ),
+        (1, "eve", "bob", "Trick\u{1b}[2J\u{7}", "null"),
+    ] {
+        c.execute(
+            "INSERT INTO c_reports (team, community, reporter, target, snapshot, reason, at, status, note)
+             VALUES (?1, NULL, ?2, ?3, ?4, ?5, ?6, 'open', '')",
+            rusqlite::params![team, reporter, target, snapshot, reason, NOW as i64],
+        )
+        .unwrap();
+    }
+    path
+}
+
+#[test]
+fn w06_team_reports_are_shown_and_handled_from_the_server_database() {
+    let dir = temp_dir();
+    let db = server_db(&dir);
+    let data = db.to_string_lossy().into_owned();
+    let mut c = Fake::default();
+    assert_eq!(
+        run(&args(&["meldungen", "--daten", &data]), &mut c, &settings()),
+        0,
+        "{}",
+        c.text()
+    );
+    let text = c.text();
+    assert!(
+        text.contains("#1") && text.contains("von max") && text.contains("Drohung 5678"),
+        "{text}"
+    );
+    assert!(
+        text.contains("#3") && text.contains("2 Meldung(en)."),
+        "{text}"
+    );
+    assert!(
+        !text.contains("nur für Moderatoren"),
+        "moderator reports stay out"
+    );
+    assert!(
+        !text.contains('\u{1b}') && !text.contains('\u{7}'),
+        "no control characters reach the terminal"
+    );
+
+    let mut c = Fake::default();
+    assert_eq!(
+        run(
+            &args(&[
+                "erledigt",
+                "--nummer",
+                "#1",
+                "--daten",
+                &data,
+                "--notiz",
+                "Konto gesperrt"
+            ]),
+            &mut c,
+            &settings()
+        ),
+        0,
+        "{}",
+        c.text()
+    );
+    assert!(c.text().contains("#1 ist jetzt erledigt"));
+    let mut c = Fake::default();
+    assert_eq!(
+        run(
+            &args(&["erledigt", "--nummer", "3", "--daten", &data, "--abgelehnt"]),
+            &mut c,
+            &settings()
+        ),
+        0
+    );
+    let mut c = Fake::default();
+    run(&args(&["meldungen", "--daten", &data]), &mut c, &settings());
+    assert!(
+        c.text().contains("Keine offenen Meldungen."),
+        "{}",
+        c.text()
+    );
+    let mut c = Fake::default();
+    run(
+        &args(&["meldungen", "--daten", &data, "--alle"]),
+        &mut c,
+        &settings(),
+    );
+    assert!(
+        c.text().contains("erledigt")
+            && c.text().contains("Konto gesperrt")
+            && c.text().contains("abgelehnt"),
+        "{}",
+        c.text()
+    );
+    let row: (String, String) = rusqlite::Connection::open(&db)
+        .unwrap()
+        .query_row(
+            "SELECT status, handled_by FROM c_reports WHERE id = 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(row, ("done".to_string(), "trair-team".to_string()));
+
+    // The moderators' report is not the team's; nothing else is touched.
+    let mut c = Fake::default();
+    assert_eq!(
+        run(
+            &args(&["erledigt", "--nummer", "2", "--daten", &data]),
+            &mut c,
+            &settings()
+        ),
+        1
+    );
+    assert!(c.text().contains("Keine Team-Meldung #2"));
+    // Missing or wrong database, missing number.
+    for (list, says) in [
+        (vec!["meldungen"], "--daten fehlt"),
+        (
+            vec!["meldungen", "--daten", "/gibt/es/nicht.db"],
+            "gibt es nicht",
+        ),
+        (vec!["erledigt", "--daten", &data], "--nummer fehlt"),
+        (
+            vec!["erledigt", "--nummer", "x", "--daten", &data],
+            "braucht eine Zahl",
+        ),
+    ] {
+        let mut c = Fake::default();
+        assert_ne!(run(&args(&list), &mut c, &settings()), 0);
+        assert!(c.text().contains(says), "{list:?}: {}", c.text());
+    }
+    let other = dir.join("leer.db");
+    rusqlite::Connection::open(&other)
+        .unwrap()
+        .execute_batch("CREATE TABLE x (y)")
+        .unwrap();
+    let mut c = Fake::default();
+    assert_eq!(
+        run(
+            &args(&["meldungen", "--daten", &other.to_string_lossy()]),
+            &mut c,
+            &settings()
+        ),
+        1
+    );
+    assert!(c.text().contains("keine Trair-Server-Datenbank"));
+    let _ = std::fs::remove_dir_all(&dir);
+}

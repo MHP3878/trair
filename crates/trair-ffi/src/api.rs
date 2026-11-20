@@ -51,6 +51,12 @@
 //! | `decline_request` | `chat`                 |                                  |
 //! | `key_packages`    | `n`, `last_resort`     | `packages`, `last_resort`        |
 //! | `apply_contact_list` | `account_key`, `device_list` | `withdrawn`              |
+//! | `sign_open_message` | `community`, `channel`, `text`, `sent` | `signature`, `device`, `user` |
+//! | `check_open_messages` | `community`, `channel`, `messages`, `authors` | `results` |
+//! | `accept_open_key` | `user`, `account_key`    |                                  |
+//! | `team_badge`      |                        | `badge` (signed, public); error `none` |
+//!
+//! The community ops (M8) are described in `communities.rs`.
 //!
 //! The chat ops (M4) need an unlocked vault; their details are in
 //! `chats.rs`. `create`, `unlock` and `pair_guest_finish` also answer
@@ -95,6 +101,7 @@ use trair_core::vault::{Vault, VaultError};
 use zeroize::Zeroizing;
 
 use crate::chats::{self, Offer};
+use crate::communities;
 use crate::groups;
 use crate::notfall;
 use crate::platform;
@@ -384,6 +391,23 @@ enum Request {
         now: u64,
     },
     NotfallFinish {},
+    SignOpenMessage {
+        community: String,
+        channel: String,
+        text: String,
+        sent: u64,
+    },
+    CheckOpenMessages {
+        community: String,
+        channel: String,
+        messages: Vec<communities::OpenItem>,
+        authors: std::collections::HashMap<String, communities::AuthorItem>,
+    },
+    AcceptOpenKey {
+        user: String,
+        account_key: String,
+    },
+    TeamBadge {},
 }
 
 #[derive(Default)]
@@ -478,6 +502,16 @@ fn run(state: &mut State, req: Request) -> Value {
         Request::ServerIdentity {} => server_identity(state),
         Request::SignLogin { challenge } => sign_login(state, &challenge),
         Request::SignDeletion { now } => sign_deletion(state, now),
+        Request::TeamBadge {} => team_badge(state),
+        Request::SignOpenMessage {
+            community,
+            channel,
+            text,
+            sent,
+        } => match state.vault.as_ref() {
+            Some(v) => communities::sign_open_message(v, &community, &channel, &text, sent),
+            None => fail("locked"),
+        },
         Request::PairHostStart { channel } => pair_host_start(state, channel),
         Request::PairHostFinish { hello, offer } => pair_host_finish(state, &hello, &offer),
         Request::PairGuestStart { code } => pair_guest_start(state, &code),
@@ -601,6 +635,15 @@ fn chat_op(state: &mut State, req: Request) -> Value {
             account_key,
             device_list,
         } => chats::apply_contact_list(m, &account_key, device_list),
+        Request::CheckOpenMessages {
+            community,
+            channel,
+            messages,
+            authors,
+        } => communities::check_open_messages(m, &community, &channel, messages, authors),
+        Request::AcceptOpenKey { user, account_key } => {
+            communities::accept_open_key(m, &user, &account_key)
+        }
         _ => fail("bad_request"),
     }
 }
@@ -1242,6 +1285,24 @@ fn add_badge(state: &mut State, badge: Value) -> Value {
         answer["badges"] = own_badges(vault);
     }
     answer
+}
+
+/// The own team badge, as signed by the team key, for the server's team
+/// inbox. Public: it only proves what the profile shows anyway.
+fn team_badge(state: &State) -> Value {
+    let Some(vault) = state.vault.as_ref() else {
+        return fail("locked");
+    };
+    let now = unix_now();
+    vault
+        .badges()
+        .iter()
+        .find(|b| {
+            badges::verify(b, vault.account().public_key(), now, badges::TEAM_KEYS)
+                .is_ok_and(|v| v.kind == badges::BadgeKind::Team)
+        })
+        .and_then(|b| serde_json::to_value(b).ok())
+        .map_or_else(|| fail("none"), |b| json!({"ok": true, "badge": b}))
 }
 
 fn unix_now() -> u64 {

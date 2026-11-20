@@ -16,6 +16,7 @@ import 'dart:math';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trair_app/app_state.dart';
 import 'package:trair_app/backend/demo_backend.dart';
+import 'package:trair_app/community_state.dart';
 import 'package:trair_app/core/door.dart';
 import 'package:trair_app/core/server.dart';
 import 'package:trair_app/core/vault.dart';
@@ -242,6 +243,134 @@ void main() {
       for (final secret in ['Hallo Bob', 'Angekommen', 'Notfall', 'Julian', 'Bob']) {
         expect(text.contains(secret), isFalse, reason: '"$secret" is readable on the server');
       }
+    },
+    skip: lib == null || serverBin == null ? 'TRAIR_FFI_LIB und TRAIR_SERVER_BIN fehlen' : false,
+    timeout: const Timeout(Duration(minutes: 3)),
+  );
+
+  test(
+    'a community through the real server: rules, signed messages, reports and kicking',
+    () async {
+      final tmp = await Directory.systemTemp.createTemp('trair-community-');
+      final file = File(lib!);
+      final copy = File('${tmp.path}/b_${file.uri.pathSegments.last}');
+      await file.copy(copy.path);
+      final port = 20000 + (pid + 13) % 20000;
+      final url = 'http://127.0.0.1:$port';
+      final server = await Process.start(serverBin!, [
+        '--adresse',
+        '127.0.0.1:$port',
+        '--daten',
+        '${tmp.path}/server.db',
+      ]);
+      final log = StringBuffer();
+      server.stdout.transform(const SystemEncoding().decoder).listen(log.write);
+      server.stderr.transform(const SystemEncoding().decoder).listen(log.write);
+      addTearDown(() async {
+        server.kill();
+        await server.exitCode;
+        await tmp.delete(recursive: true);
+      });
+      final api = ServerApi(HttpTransport(Uri.parse(url)));
+      for (var i = 0; i < 100 && !(await api.health()).ok; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      expect((await api.health()).ok, isTrue, reason: 'server did not start: $log');
+
+      final olgaVault = TrairVault(NativeDoor.load(lib));
+      final maxVault = TrairVault(NativeDoor.load(copy.path));
+      expect((await olgaVault.init('${tmp.path}/olga')).ok, isTrue);
+      expect((await maxVault.init('${tmp.path}/max')).ok, isTrue);
+      final olga = AppState(DemoBackend(), olgaVault, accountsBase: '${tmp.path}/olga');
+      final max = AppState(DemoBackend(), maxVault, accountsBase: '${tmp.path}/max');
+      for (final (s, name) in [(olga, 'Olga'), (max, 'Max')]) {
+        final made = await s.createAccount(name: name, glowColor: TrairColors.accentLight, password: _randomWords());
+        expect(made.ok, isTrue, reason: '${made.raw}');
+        s.serverUrl = url;
+        await s.connect();
+        expect(s.serverStatus, ServerStatus.connected, reason: '${s.serverMessage} | $log');
+        await s.refreshChats();
+      }
+      Future<void> until(bool Function() done, String what) async {
+        for (var i = 0; i < 200 && !done(); i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+        expect(done(), isTrue, reason: '$what | ${olga.communities.message} | ${max.communities.message}');
+      }
+
+      await until(() => olga.communities.online && max.communities.online, 'both follow their communities');
+      final o = olga.communities;
+      final m = max.communities;
+
+      // Olga founds it, sets rules and makes a one-time invitation.
+      final made = await o.create('Abi 2026');
+      expect(made, isNotNull, reason: o.message);
+      final id = made!;
+      expect(o.current!.iAmOwner, isTrue);
+      expect([for (final c in o.current!.channels) c.name], ['regeln', 'allgemein']);
+      expect(
+        await o.edit(name: 'Abi 2026', about: 'Unser Jahrgang', rules: '1. Nett sein'),
+        isTrue,
+        reason: o.message,
+      );
+      final code = await o.createInvite(60, 1);
+      expect(code, startsWith('trairc:'));
+
+      // Max joins; he writes only after accepting the rules.
+      expect(await m.join(code!), id);
+      expect(m.current!.rulesOk, isFalse);
+      expect(await m.post('Hallo zusammen'), isFalse);
+      expect(m.message, 'Bitte erst die Regeln akzeptieren.');
+      expect(await m.acceptRules(), isTrue, reason: m.message);
+      expect(await m.post('Hallo zusammen'), isTrue, reason: m.message);
+
+      // Olga sees it live, checked by her core: signed, a name seen for the
+      // first time.
+      await until(() => o.messagesOf(id, 'allgemein').any((x) => x.text == 'Hallo zusammen'), 'Olga gets it live');
+      final fromMax = o.messagesOf(id, 'allgemein').firstWhere((x) => x.text == 'Hallo zusammen');
+      expect(fromMax.signed, Signed.fresh);
+      expect(await o.post('Willkommen, Max!'), isTrue, reason: o.message);
+      await until(() => m.messagesOf(id, 'allgemein').any((x) => x.text == 'Willkommen, Max!'), 'Max gets it');
+      expect(m.messagesOf(id, 'allgemein').firstWhere((x) => x.text == 'Willkommen, Max!').signed, Signed.fresh);
+      // Loaded again: the same key as the first time.
+      await m.loadMessages(id, 'allgemein');
+      expect(m.messagesOf(id, 'allgemein').firstWhere((x) => x.text == 'Willkommen, Max!').signed, Signed.known);
+      expect(m.messagesOf(id, 'allgemein').firstWhere((x) => x.text == 'Hallo zusammen').signed, Signed.own);
+      // Once Olga is a contact, her contact key counts.
+      expect(await max.addContact(olga.contactCode, 'Olga'), isTrue, reason: max.chatMessage);
+      await m.loadMessages(id, 'allgemein');
+      expect(m.messagesOf(id, 'allgemein').firstWhere((x) => x.text == 'Willkommen, Max!').signed, Signed.contact);
+
+      // Max has no rights: he cannot delete Olga's message or see reports.
+      final olgas = m.messagesOf(id, 'allgemein').firstWhere((x) => x.text == 'Willkommen, Max!');
+      expect(await m.deleteMessage(olgas.id), isFalse);
+      expect(m.message, 'Dafür fehlt dir das Recht.');
+      await m.loadReports();
+      expect(m.reports, isNull);
+
+      // Max reports a message; Olga's moderation sees what was written.
+      expect(await m.post('Kauft Follower bei mir'), isTrue);
+      final ad = m.messagesOf(id, 'allgemein').firstWhere((x) => x.text == 'Kauft Follower bei mir');
+      expect(await m.reportMessage(olgas.id, 'Test-Meldung'), isTrue, reason: m.message);
+      await o.loadReports();
+      expect(o.reports!.single.reason, 'Test-Meldung');
+      expect(o.reports!.single.quoted, 'Willkommen, Max!');
+      await o.handleReport(o.reports!.single.id, 'dismissed', note: 'nur ein Test');
+      expect(o.reports, isEmpty);
+
+      // Olga deletes Max's ad and removes him: Max is told and loses it.
+      expect(await o.deleteMessage(ad.id), isTrue, reason: o.message);
+      await until(() => !m.messagesOf(id, 'allgemein').any((x) => x.id == ad.id), 'the deletion reaches Max');
+      final maxUser = max.contactCode.split(':')[1];
+      expect(await o.kick(maxUser, 'Werbung'), isTrue, reason: o.message);
+      await until(() => m.list.isEmpty && m.active == null, 'Max is out');
+      expect(m.message, 'Du bist nicht mehr in „Abi 2026“.');
+      await o.loadLog();
+      expect([for (final e in o.log!) e.action], containsAll(['kick', 'message_delete', 'rules', 'invite']));
+
+      await olga.lock();
+      await max.lock();
+      expect(o.online, isFalse, reason: 'locking forgets the communities');
     },
     skip: lib == null || serverBin == null ? 'TRAIR_FFI_LIB und TRAIR_SERVER_BIN fehlen' : false,
     timeout: const Timeout(Duration(minutes: 3)),

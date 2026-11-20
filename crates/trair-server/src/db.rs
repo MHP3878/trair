@@ -56,7 +56,7 @@ pub enum CommitOutcome {
 
 /// The database.
 pub struct Db {
-    conn: Connection,
+    pub(crate) conn: Connection,
 }
 
 type DbResult<T> = rusqlite::Result<T>;
@@ -129,6 +129,7 @@ impl Db {
                 "ALTER TABLE keypackages ADD COLUMN last_resort INTEGER NOT NULL DEFAULT 0;",
             )?;
         }
+        conn.execute_batch(crate::communities::SCHEMA)?;
         // Databases from before groups lack the committers column.
         let has_committers: bool = conn.query_row(
             "SELECT COUNT(*) FROM pragma_table_info('groups') WHERE name = 'committers'",
@@ -414,13 +415,21 @@ impl Db {
 
     /// Delete an account and everything that belongs to it.
     pub fn delete_account(&self, user: &str) -> DbResult<()> {
+        self.delete_account_at(user, 0)
+    }
+
+    /// Delete an account and everything that belongs to it, also in
+    /// communities (see [`crate::communities`]); `now` dates the events.
+    pub fn delete_account_at(&self, user: &str, now: u64) -> DbResult<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        crate::communities::forget_user(&tx, user, now)?;
         for table in ["sessions", "keypackages", "messages", "accounts"] {
-            self.conn.execute(
+            tx.execute(
                 &format!("DELETE FROM {table} WHERE user = ?1"),
                 params![user],
             )?;
         }
-        Ok(())
+        tx.commit()
     }
 
     /// Remove old messages, expired sessions and idle accounts.
@@ -446,9 +455,11 @@ impl Db {
             rows.collect::<DbResult<_>>()?
         };
         for user in &idle {
-            self.delete_account(user)?;
+            self.delete_account_at(user, now)?;
         }
         cleaned.accounts = idle.len();
+        // Community events are only for catching up.
+        crate::communities::cleanup(&self.conn, now, message_lifetime)?;
         // Chats nobody changed for as long are forgotten too.
         cleaned.groups = self.conn.execute(
             "DELETE FROM groups WHERE updated <= ?1",

@@ -20,8 +20,12 @@ path = "src/main.rs"
 trair-core = { path = "../trair-core" }
 hex = "0.4.3"
 rpassword = "=7.5.5"
+# Reads the reports from the server's database (M8). Same as the server.
+rusqlite = { version = "=0.43.0", features = ["bundled"] }
 serde_json = "1.0.154"
 zeroize = "=1.9.2"
 
 [dev-dependencies]
 getrandom = "=0.4.3"
+# The tests make a real server database (same tables as in use).
+trair-server = { path = "../trair-server" }
