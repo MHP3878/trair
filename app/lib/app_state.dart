@@ -204,6 +204,7 @@ class PeerProfile {
     this.picture,
     this.badges = const [],
     this.nameWarning = false,
+    this.botOwner,
   });
 
   factory PeerProfile.fromJson(Map<String, Object?> j) => PeerProfile(
@@ -217,6 +218,7 @@ class PeerProfile {
       for (final b in (j['badges'] as List? ?? const []).whereType<Map<String, Object?>>()) ?ProfileBadge.fromJson(b),
     ],
     nameWarning: j['name_warning'] == true,
+    botOwner: j['bot'] is Map ? (j['bot'] as Map)['owner'] as String? : null,
   );
 
   final String user;
@@ -231,6 +233,25 @@ class PeerProfile {
 
   /// The chosen name looks official without a team badge.
   final bool nameWarning;
+
+  /// For a bot: the account its certificate names as owner (checked
+  /// separately, see [AppState.botChecks]).
+  final String? botOwner;
+}
+
+/// What the check of a bot's certificate found.
+class BotCheck {
+  const BotCheck({required this.owner, required this.valid, this.contact = false});
+
+  /// The owner's account.
+  final String owner;
+
+  /// The owner's signature holds (against the key from the server, and the
+  /// contact's key if the owner is a contact).
+  final bool valid;
+
+  /// The owner is a contact and that contact's key signed.
+  final bool contact;
 }
 
 /// An emergency PIN as the settings show it (never the PIN itself).
@@ -978,6 +999,9 @@ class AppState extends ChangeNotifier {
     groupKeys = {};
     chatsReady = false;
     peerProfiles = const {};
+    botChecks = const {};
+    requestBots = const {};
+    botMessage = '';
     _profilesStale = true;
     contactCode = '';
     contacts = const [];
@@ -1010,11 +1034,162 @@ class AppState extends ChangeNotifier {
           for (final j in (p.raw['profiles'] as List).cast<Map<String, Object?>>())
             j['user'] as String: PeerProfile.fromJson(j),
         };
+        unawaited(_checkBots());
       }
     }
+    unawaited(_checkRequests());
     notifyListeners();
     // A new chat may still lack the own profile.
     if (chatsOnline) unawaited(_shareProfile());
+  }
+
+  // ------------------------------------------------------------ bots (M9)
+
+  /// Checked bot certificates, by bot.
+  Map<String, BotCheck> botChecks = const {};
+
+  /// Requests from accounts the server lists as bots: bot → owner ('' if
+  /// nobody vouched). Only the server's word: strangers' profiles stay
+  /// closed until a request is accepted.
+  Map<String, String> requestBots = const {};
+
+  /// What the last "Bot bestätigen" said.
+  String botMessage = '';
+
+  bool _checkingBots = false;
+  bool _checkBotsAgain = false;
+
+  /// Check every bot certificate that came with a profile: the owner's
+  /// key comes from the server; if the owner is a contact, the core also
+  /// holds it against the contact's key. One run at a time; profiles that
+  /// arrive meanwhile get a second run.
+  Future<void> _checkBots() async {
+    if (_checkingBots) {
+      _checkBotsAgain = true;
+      return;
+    }
+    _checkingBots = true;
+    try {
+      do {
+        _checkBotsAgain = false;
+        await _checkBotsOnce();
+      } while (_checkBotsAgain);
+    } finally {
+      _checkingBots = false;
+    }
+  }
+
+  Future<void> _checkBotsOnce() async {
+    final api = _api;
+    if (api == null) return;
+    final next = Map.of(botChecks);
+    var changed = false;
+    for (final p in peerProfiles.values) {
+      final owner = p.botOwner;
+      if (owner == null) {
+        changed |= next.remove(p.user) != null;
+        continue;
+      }
+      if (next[p.user]?.owner == owner) continue;
+      final acc = await api.account(owner);
+      final key = acc.body['account_key'];
+      // Without the owner's key (offline, owner gone) it stays unchecked.
+      if (!acc.ok || key is! String) continue;
+      final c = await vault!.checkBot(p.user, key);
+      next[p.user] = BotCheck(owner: owner, valid: c.ok && c.raw['valid'] == true, contact: c.raw['contact'] == true);
+      changed = true;
+    }
+    if (changed && identical(api, _api)) {
+      botChecks = next;
+      notifyListeners();
+    }
+  }
+
+  /// Ask the server whether a request comes from a bot.
+  Future<void> _checkRequests() async {
+    final api = _api;
+    if (api == null) return;
+    final open = {
+      for (final c in realChats)
+        if (c.kind == 'direct' && c.state == 'request') c.peer,
+    };
+    final next = {for (final e in requestBots.entries) if (open.contains(e.key)) e.key: e.value};
+    var changed = next.length != requestBots.length;
+    for (final user in open.where((u) => !requestBots.containsKey(u))) {
+      final acc = await api.account(user);
+      final bot = acc.body['bot'];
+      if (acc.ok && bot is Map) {
+        final cert = bot['cert'];
+        next[user] = cert is Map ? cert['owner'] as String? ?? '' : '';
+        changed = true;
+      }
+    }
+    if (changed && identical(api, _api)) {
+      requestBots = next;
+      notifyListeners();
+    }
+  }
+
+  /// Is [user] a bot (as far as this account knows)?
+  bool isBot(String user) => peerProfiles[user]?.botOwner != null || requestBots.containsKey(user);
+
+  /// One line on a bot: whose it is and whether that holds. Null for
+  /// people.
+  String? botLine(String user) {
+    final owner = peerProfiles[user]?.botOwner;
+    if (owner == null) {
+      final claimed = requestBots[user];
+      if (claimed == null) return null;
+      return claimed.isEmpty ? 'Bot (laut Server), ohne Besitzer' : 'Bot (laut Server) von ${displayName(claimed)}';
+    }
+    final c = botChecks[user];
+    if (c == null || c.owner != owner) return 'Bot · Besitzer wird geprüft …';
+    if (!c.valid) return 'Bot · Besitzer nicht nachweisbar';
+    if (owner == ownUser) return 'Dein Bot';
+    return 'Bot von ${displayName(owner)}${c.contact ? ' (Kontakt)' : ''}';
+  }
+
+  /// Bots this account vouched for, as far as their profiles came.
+  List<PeerProfile> get ownBots => [
+    for (final p in peerProfiles.values)
+      if (p.botOwner == ownUser && botChecks[p.user]?.valid == true) p,
+  ];
+
+  /// Vouch for a bot with the code its `trair-bot` showed. The bot becomes
+  /// a contact named [name].
+  Future<bool> vouchBot(String code, String name) async {
+    final api = _api;
+    if (api == null || !chatsReady) {
+      botMessage = 'Erst mit dem Server verbinden.';
+      notifyListeners();
+      return false;
+    }
+    final v = await vault!.vouchBot(code.trim());
+    if (!v.ok) {
+      botMessage = 'Das ist kein gültiger Bot-Code (er beginnt mit trairbot1:).';
+      notifyListeners();
+      return false;
+    }
+    final r = await api.vouchBot(v.raw['cert'], v.raw['secret'] as String);
+    if (!r.ok) {
+      botMessage = switch (r.error) {
+        'bad_secret' => 'Dieser Code gilt nicht mehr: schon benutzt, oder der Bot hat einen neueren gemacht.',
+        'unknown_bot' => 'Diesen Bot kennt der Server nicht.',
+        'too_many_bots' => 'Du hast schon 10 Bots.',
+        'bot_owner' => 'Ein Bot kann keine Bots besitzen.',
+        _ => 'Das ging nicht (${r.error}).',
+      };
+      notifyListeners();
+      return false;
+    }
+    final user = v.raw['bot'] as String;
+    final contact = v.raw['contact_code'];
+    if (contact is String && !contacts.any((c) => c.user == user)) {
+      await vault!.addContact(contact, name.trim().isEmpty ? 'Mein Bot' : name.trim());
+    }
+    botMessage = 'Bestätigt. Der Bot steht jetzt in deinen Kontakten.';
+    await refreshChats();
+    return true;
   }
 
   // ------------------------------------------------- profiles to contacts

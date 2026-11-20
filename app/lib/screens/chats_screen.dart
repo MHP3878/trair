@@ -416,6 +416,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
                           Flexible(
                             child: Text(c.name, overflow: TextOverflow.ellipsis, style: _peerName(p, 14.5)),
                           ),
+                          if (state.isBot(c.peer)) ...[
+                            const SizedBox(width: 6),
+                            BotChip(ok: state.botChecks[c.peer]?.valid == true),
+                          ],
                           if (p != null && p.badges.isNotEmpty) ...[
                             const SizedBox(width: 6),
                             BadgeRow(badges: p.badges, size: 14, spacing: 3),
@@ -424,6 +428,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                       ),
                       Text(
                         switch (c.state) {
+                          'request' when state.isBot(c.peer) => 'Anfrage von einem Bot',
                           'request' => 'Anfrage: kein Kontakt',
                           'left' => 'Dieses Gerät ist nicht mehr dabei',
                           _ when c.ends != null => 'Verschwindet ${vanishesIn(c.ends!)}',
@@ -1270,7 +1275,12 @@ class _ChatsScreenState extends State<ChatsScreen> {
                           ? null
                           : () => showProfileCard(
                               context,
-                              ProfileView.peer(chat, p),
+                              ProfileView.peer(
+                                chat,
+                                p,
+                                botLine: state.botLine(chat.peer),
+                                botOk: state.botChecks[chat.peer]?.valid == true,
+                              ),
                               onReport: state.communities.online && !chat.isGroup
                                   ? () => showTeamReport(
                                       context,
@@ -1315,6 +1325,10 @@ class _ChatsScreenState extends State<ChatsScreen> {
                                           style: _peerName(p, 16),
                                         ),
                                       ),
+                                      if (state.isBot(chat.peer)) ...[
+                                        const SizedBox(width: 8),
+                                        BotChip(ok: state.botChecks[chat.peer]?.valid == true),
+                                      ],
                                       if (p != null && p.badges.isNotEmpty) ...[
                                         const SizedBox(width: 8),
                                         BadgeRow(badges: p.badges, size: 16, spacing: 4),
@@ -1324,6 +1338,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                                   Text(
                                     [
                                       if (chat.ends != null) 'Verschwindet ${vanishesIn(chat.ends!)}',
+                                      ?state.botLine(chat.peer),
                                       if (chosen != null) 'nennt sich „$chosen“',
                                       chat.peer,
                                     ].join(' · '),

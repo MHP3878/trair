@@ -883,3 +883,39 @@ class MinSizeScaler extends StatelessWidget {
     );
   }
 }
+
+/// "BOT" next to a bot's name; amber while its owner is not proven.
+class BotChip extends StatelessWidget {
+  const BotChip({super.key, this.ok = true, this.size = 10});
+
+  final bool ok;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = ok ? TrairColors.accentLight : TrairColors.amber;
+    return Semantics(
+      label: 'Bot',
+      excludeSemantics: true,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+        decoration: BoxDecoration(
+          color: color.withAlpha(0x26),
+          borderRadius: BorderRadius.circular(5),
+          border: Border.all(color: color.withAlpha(0x55)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(TrairIcons.bot, size: size + 1, color: color),
+            const SizedBox(width: 3),
+            Text(
+              'BOT',
+              style: TextStyle(fontSize: size, fontWeight: FontWeight.w700, letterSpacing: 0.6, color: color),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

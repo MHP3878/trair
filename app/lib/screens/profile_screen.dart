@@ -36,6 +36,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _deleteBusy = false;
   String _deleteError = '';
   final _badgeInput = TextEditingController();
+  final _botCode = TextEditingController();
+  final _botName = TextEditingController();
+  bool _botBusy = false;
   bool _badgeBusy = false;
   String _badgeMessage = '';
   bool _badgeOk = false;
@@ -60,6 +63,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     'Trust': GlobalKey(),
     'Geräte': GlobalKey(),
     'Server': GlobalKey(),
+    'Bots': GlobalKey(),
     'Sicherheit': GlobalKey(),
     'Notfall': GlobalKey(),
     'Privatsphäre': GlobalKey(),
@@ -98,6 +102,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _deviceName,
       _withdrawPw,
       _badgeInput,
+      _botCode,
+      _botName,
       _pinPw,
       _newPin1,
       _newPin2,
@@ -113,6 +119,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     'Trust': TrairIcons.badgeCheck,
     'Geräte': TrairIcons.monitorSmartphone,
     'Server': TrairIcons.server,
+    'Bots': TrairIcons.bot,
     'Sicherheit': TrairIcons.shieldCheck,
     'Notfall': TrairIcons.triangleAlert,
     'Privatsphäre': TrairIcons.eyeOff,
@@ -146,6 +153,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           _devicesCard(state),
                           const SizedBox(height: 14),
                           _serverCard(state),
+                          const SizedBox(height: 14),
+                          _botsCard(state),
                           const SizedBox(height: 14),
                           _securityCard(state),
                           const SizedBox(height: 14),
@@ -624,6 +633,105 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const Text(
             'Vorerst läuft der Server nur auf diesem PC: starte trair-server.exe und verbinde dich. Er sieht nie '
             'deine Passwörter, Schlüssel oder Nachrichten, nur verschlüsselte Pakete.',
+            style: TrairText.small,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Bots (M9): vouch for a bot with the code its trair-bot showed.
+  Widget _botsCard(AppState state) {
+    final mine = state.ownBots;
+    Future<void> vouch() async {
+      if (_botCode.text.trim().isEmpty || _botBusy) return;
+      setState(() => _botBusy = true);
+      final ok = await state.vouchBot(_botCode.text, _botName.text);
+      if (!mounted) return;
+      setState(() => _botBusy = false);
+      if (ok) {
+        _botCode.clear();
+        _botName.clear();
+      }
+    }
+
+    return SoftCard(
+      key: _keys['Bots'],
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _title('Bots'),
+          const Text(
+            'Ein Bot ist ein eigenes Konto, das das Programm trair-bot auf einem PC laufen lässt. Mit seinem Code '
+            'bestätigst du, dass er dir gehört: Alle sehen dann „Bot von dir“, und erst dann darf er schreiben. Er '
+            'liest nur Chats und Gruppen, in die man ihn holt.',
+            style: TrairText.small,
+          ),
+          const SizedBox(height: 12),
+          const FieldLabel('Bot-Code'),
+          PillField(
+            key: const ValueKey('bot-code'),
+            controller: _botCode,
+            hint: 'trairbot1:…',
+            mono: true,
+            height: 46,
+            semanticLabel: 'Bot-Code',
+          ),
+          const SizedBox(height: 10),
+          const FieldLabel('Name in deinen Kontakten'),
+          Row(
+            children: [
+              Expanded(
+                child: PillField(
+                  key: const ValueKey('bot-name'),
+                  controller: _botName,
+                  hint: 'Mein Bot',
+                  height: 46,
+                  semanticLabel: 'Name des Bots',
+                  onSubmitted: (_) => vouch(),
+                ),
+              ),
+              const SizedBox(width: 10),
+              PillButton(
+                label: 'Bot bestätigen',
+                icon: TrairIcons.bot,
+                height: 46,
+                onPressed: _botBusy || state.serverStatus != ServerStatus.connected ? null : vouch,
+              ),
+            ],
+          ),
+          if (state.botMessage.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                state.botMessage,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: state.botMessage.startsWith('Bestätigt') ? TrairColors.mint : TrairColors.amber,
+                ),
+              ),
+            ),
+          if (mine.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            const FieldLabel('Deine Bots'),
+            for (final b in mine)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Row(
+                  children: [
+                    const BotChip(),
+                    const SizedBox(width: 8),
+                    Flexible(child: Text(state.displayName(b.user), overflow: TextOverflow.ellipsis)),
+                    const SizedBox(width: 8),
+                    Text('nennt sich „${b.name}“', style: TrairText.small),
+                  ],
+                ),
+              ),
+          ],
+          const SizedBox(height: 10),
+          const Text(
+            'Einen Bot anlegen: trair-bot neu --daten MEIN-BOT --name "Wetterbot", dann den Code hier einfügen. '
+            'Anleitung und Beispiele in Python und JavaScript: LIESMICH und README.',
             style: TrairText.small,
           ),
         ],

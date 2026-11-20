@@ -62,7 +62,7 @@
 //! | `channel_history` | `chat`, `user`         | `body`, `to`, or `none`          |
 //! | `delete_channel_message` | `chat`, `id`    | `body`, `to`                     |
 //! | `bot_request`     |                        | `code` (`trairbot1:…`), `hash`   |
-//! | `vouch_bot`       | `code`                 | `cert`, `secret` (hex)           |
+//! | `vouch_bot`       | `code`                 | `cert`, `secret` (hex), `bot`, `contact_code` |
 //! | `check_bot`       | `user`, `owner_key`    | `valid`                          |
 //!
 //! Bots (M9): a bot hands the server `bot_request`'s `hash` and shows the
@@ -565,7 +565,15 @@ fn run(state: &mut State, req: Request) -> Value {
         Request::VouchBot { code } => match state.vault.as_ref() {
             Some(v) => match trair_core::bots::vouch(v.account(), &code, unix_now()) {
                 Ok((cert, secret)) => {
-                    json!({"ok": true, "cert": cert, "secret": hex::encode(secret)})
+                    let contact = hex::decode(&cert.bot_key).ok().map(|k| {
+                        trair_core::ContactCode {
+                            user: cert.bot.clone(),
+                            fingerprint: trair_core::Fingerprint::of(&k),
+                        }
+                        .text()
+                    });
+                    json!({"ok": true, "secret": hex::encode(secret), "bot": cert.bot,
+                        "contact_code": contact, "cert": cert})
                 }
                 Err(_) => fail("rejected"),
             },

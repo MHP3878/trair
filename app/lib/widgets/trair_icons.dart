@@ -12,6 +12,7 @@ abstract final class TrairIcons {
   static const arrowRight = IconData(0xE049, fontFamily: _font);
   static const arrowUp = IconData(0xE04A, fontFamily: _font);
   static const badgeCheck = IconData(0xE241, fontFamily: _font);
+  static const bot = IconData(0xE1BB, fontFamily: _font);
   static const check = IconData(0xE06C, fontFamily: _font);
   static const chevronDown = IconData(0xE06D, fontFamily: _font);
   static const chevronLeft = IconData(0xE06E, fontFamily: _font);

@@ -145,6 +145,11 @@ class FakeDoor implements CoreDoor {
   /// Profiles of other accounts, as the core's `profiles` answers.
   final List<Map<String, Object?>> peerProfiles = [];
 
+  /// Bots (M9): bots whose certificate does not hold against the owner's
+  /// key, and bots whose owner is a contact (checked against that key).
+  final Set<String> forgedBots = {};
+  final Set<String> contactOwnedBots = {};
+
   /// The own profile as the app last shared it.
   Map<String, Object?>? shared;
 
@@ -1087,6 +1092,29 @@ class FakeDoor implements CoreDoor {
           'channel_history' ||
           'delete_channel_message':
         return _chatOp(op, r);
+      // ----- bots (M9) -----
+      case 'vouch_bot':
+        if (!unlocked) return _fail('locked');
+        final parts = (r['code'] as String).trim().split(':');
+        if (parts.length != 4 || parts[0] != 'trairbot1' || parts[1] == 'local-julian') return _fail('rejected');
+        return {
+          'ok': true,
+          'cert': {'bot': parts[1], 'bot_key': parts[2], 'owner': 'local-julian', 'made': 1, 'sig': 'ab'},
+          'secret': parts[3],
+          'bot': parts[1],
+          'contact_code': 'trair1:${parts[1]}:${'b7' * 16}:beef',
+        };
+      case 'check_bot':
+        if (!unlocked) return _fail('locked');
+        final p = peerProfiles.where((p) => p['user'] == r['user'] && p['bot'] != null).firstOrNull;
+        if (p == null) return _fail('not_found');
+        final valid = !forgedBots.contains(r['user']);
+        return {
+          'ok': true,
+          'valid': valid,
+          'owner': (p['bot'] as Map)['owner'],
+          'contact': valid && contactOwnedBots.contains(r['user']),
+        };
       case 'notfall_list' ||
           'notfall_add' ||
           'notfall_remove' ||

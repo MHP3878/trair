@@ -2072,6 +2072,10 @@ fn d28_bot_codes_and_vouching_through_the_door() {
     let v = call(json!({"op": "vouch_bot", "code": code}));
     assert_eq!(v["ok"], true, "{v}");
     let cert: BotCert = serde_json::from_value(v["cert"].clone()).unwrap();
+    assert_eq!(v["bot"], "wetterbot");
+    let contact = trair_core::ContactCode::parse(v["contact_code"].as_str().unwrap()).unwrap();
+    assert_eq!(contact.user, "wetterbot");
+    assert_eq!(contact.fingerprint, bot.fingerprint());
     verify(&cert, &owner_key, Some("wetterbot"), Some(bot.public_key())).unwrap();
     assert_eq!(
         secret_hash(&hex::decode(v["secret"].as_str().unwrap()).unwrap()),

@@ -25,6 +25,7 @@ import 'package:trair_app/theme.dart';
 void main() {
   final lib = Platform.environment['TRAIR_FFI_LIB'];
   final serverBin = Platform.environment['TRAIR_SERVER_BIN'];
+  final botBin = Platform.environment['TRAIR_BOT_BIN'];
 
   test(
     'a second device pairs through the real server, and loses access when withdrawn',
@@ -522,6 +523,109 @@ void main() {
     },
     skip: lib == null || serverBin == null ? 'TRAIR_FFI_LIB und TRAIR_SERVER_BIN fehlen' : false,
     timeout: const Timeout(Duration(minutes: 4)),
+  );
+
+  test(
+    'a bot through the real server: its owner vouches in the app, the bot answers, everyone sees whose it is',
+    () async {
+      final tmp = await Directory.systemTemp.createTemp('trair-bot-');
+      final port = 20000 + (pid + 23) % 20000;
+      final url = 'http://127.0.0.1:$port';
+      final server = await Process.start(serverBin!, ['--adresse', '127.0.0.1:$port', '--daten', '${tmp.path}/server.db']);
+      final log = StringBuffer();
+      server.stdout.transform(const SystemEncoding().decoder).listen(log.write);
+      server.stderr.transform(const SystemEncoding().decoder).listen(log.write);
+      Process? bot;
+      addTearDown(() async {
+        bot?.kill();
+        await bot?.exitCode;
+        server.kill();
+        await server.exitCode;
+        await tmp.delete(recursive: true);
+      });
+      final api = ServerApi(HttpTransport(Uri.parse(url)));
+      for (var i = 0; i < 100 && !(await api.health()).ok; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      expect((await api.health()).ok, isTrue, reason: 'server did not start: $log');
+
+      final v = TrairVault(NativeDoor.load(lib!));
+      expect((await v.init('${tmp.path}/olga')).ok, isTrue);
+      final olga = AppState(DemoBackend(), v, accountsBase: '${tmp.path}/olga');
+      expect((await olga.createAccount(name: 'Olga', glowColor: TrairColors.accentLight, password: _randomWords())).ok, isTrue);
+      olga.serverUrl = url;
+      await olga.connect();
+      expect(olga.serverStatus, ServerStatus.connected, reason: '${olga.serverMessage} | $log');
+      await olga.refreshChats();
+
+      // The bot is made by trair-bot; Olga vouches with its code in the app.
+      final env = {'TRAIR_BOT_PASSWORT': _randomWords()};
+      final made = await Process.run(botBin!, [
+        'neu', '--daten', '${tmp.path}/bot', '--name', 'Wetterbot', '--server', url,
+      ], environment: env);
+      expect(made.exitCode, 0, reason: '${made.stderr}');
+      final code = (made.stdout as String).trim();
+      expect(await olga.vouchBot('trairbot1:kaputt', 'X'), isFalse);
+      expect(await olga.vouchBot(code, 'Wetter'), isTrue, reason: olga.botMessage);
+      final botUser = code.split(':')[1];
+      expect(olga.contacts.map((c) => (c.user, c.name)), contains((botUser, 'Wetter')));
+      expect(await olga.vouchBot(code, 'Wetter'), isFalse, reason: 'the code works once');
+
+      // The bot runs; it speaks JSON lines with this test as its program.
+      final running = await Process.start(botBin!, ['start', '--daten', '${tmp.path}/bot', '--server', url], environment: env);
+      bot = running;
+      final events = StreamController<Map<String, Object?>>.broadcast();
+      running.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen(
+        (line) => events.add((jsonDecode(line) as Map).cast<String, Object?>()),
+      );
+      running.stderr.transform(utf8.decoder).listen(log.write);
+      Future<Map<String, Object?>> next(String what, bool Function(Map<String, Object?>) fits) =>
+          events.stream.firstWhere(fits).timeout(const Duration(seconds: 60), onTimeout: () => throw 'no $what | $log');
+      void command(Map<String, Object?> c) => running.stdin.writeln(jsonEncode(c));
+      final ready = await next('ready', (e) => e['event'] == 'ready');
+      expect(ready['owner'], olga.ownUser);
+
+      final request = next('request', (e) => e['event'] == 'request');
+      final chat = await olga.startChat(botUser);
+      expect(chat, isNotNull, reason: olga.chatMessage);
+      expect((await request)['from'], olga.ownUser);
+      command({'id': 1, 'op': 'accept', 'chat': chat});
+      expect((await next('accepted', (e) => e['id'] == 1))['ok'], true);
+
+      Future<void> until(bool Function() done, String what) async {
+        for (var i = 0; i < 300 && !done(); i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+        expect(done(), isTrue, reason: '$what | ${olga.chatMessage} | $log');
+      }
+
+      // Its profile came, the certificate holds: "Dein Bot".
+      await until(() => olga.botLine(botUser) == 'Dein Bot', 'the bot is shown as Olga\'s');
+      expect(olga.peerProfiles[botUser]!.name, 'Wetterbot');
+      expect(olga.ownBots.map((p) => p.user), [botUser]);
+
+      // Olga writes, the bot hears it and answers.
+      final heard = next('the text', (e) => e['event'] == 'message');
+      expect(await olga.sendReal(chat!, 'Wie wird das Wetter?'), isTrue, reason: olga.chatMessage);
+      final m = await heard;
+      expect((m['text'], m['from'], m['chat']), ('Wie wird das Wetter?', olga.ownUser, chat));
+      command({'id': 2, 'op': 'send', 'chat': chat, 'text': 'Sonnig, 21 Grad.'});
+      expect((await next('sent', (e) => e['id'] == 2))['ok'], true);
+      await olga.loadMessages(chat);
+      await until(() {
+        unawaited(olga.loadMessages(chat));
+        return olga.realMessages[chat]?.any((x) => x.text == 'Sonnig, 21 Grad.') ?? false;
+      }, 'the answer');
+
+      command({'id': 3, 'op': 'stop'});
+      expect(await running.exitCode.timeout(const Duration(seconds: 20)), 0);
+      bot = null;
+      await olga.lock();
+    },
+    skip: lib == null || serverBin == null || botBin == null
+        ? 'TRAIR_FFI_LIB, TRAIR_SERVER_BIN und TRAIR_BOT_BIN fehlen'
+        : false,
+    timeout: const Timeout(Duration(minutes: 3)),
   );
 }
 

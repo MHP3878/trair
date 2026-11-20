@@ -258,6 +258,52 @@ void main() {
     await _shot(tester, '24-profil-eines-kontakts');
   });
 
+  testWidgets('screenshots of a bot', (tester) async {
+    final server = FakeServer();
+    final door = FakeDoor(password: _pw, profile: {'name': 'Julian', 'glow': 0xFFA18DFF})..chatsEnabled = true;
+    door.contacts.add({'user': 'local-wetter', 'name': 'Wetter', 'fingerprint': 'b7' * 16, 'confirmed': false});
+    door.chats.add({'id': 'b1', 'peer': 'local-wetter', 'name': 'Wetter', 'state': 'active', 'last': 0});
+    await _start(tester, const Size(1440, 900), door: door, server: server);
+    await _unlock(tester);
+    await tester.tap(find.text('Strenger Modus an'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Verbinden'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Verbinden'));
+    await tester.pumpAndSettle();
+    server.deliver(
+      FakeDoor.wire({
+        'kind': 'profile',
+        'user': 'local-wetter',
+        'profile': {
+          'rev': 2,
+          'name': 'Wetterbot',
+          'glow': 0xFF5CC8FF,
+          'about': 'Sagt dir jeden Morgen das Wetter. Schreib „morgen“ oder einen Ort.',
+          'badges': const <Object?>[],
+          'name_warning': false,
+          'bot': {'owner': 'local-julian', 'made': 1},
+        },
+      }),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Deine Bots'));
+    await tester.pumpAndSettle();
+    await _shot(tester, '35-einstellungen-bots');
+    await tester.tap(find.text('Chats'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Wetter').first);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('real-composer')), 'Wie wird das Wetter morgen in Köln?');
+    await tester.tap(find.byTooltip('Senden'));
+    await tester.pumpAndSettle();
+    server.deliver(
+      FakeDoor.wire({'kind': 'message', 'chat': 'b1', 'text': 'Morgen in Köln: sonnig, bis 21 °C, kaum Wind. ☀️'}),
+    );
+    await tester.pumpAndSettle();
+    await _shot(tester, '34-bot-chat');
+  });
+
   testWidgets('screenshots of the account list and a profile picture', (tester) async {
     tester.view.physicalSize = const Size(1440, 900);
     tester.view.devicePixelRatio = 1;
