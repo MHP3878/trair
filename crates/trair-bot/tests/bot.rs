@@ -17,7 +17,16 @@ use serde_json::{Value, json};
 use trair_bot::client::{Client, open_vault};
 use trair_bot::door::call;
 
-const PW: &str = "ein langes bot passwort";
+/// A random password for the vaults of this test run (never a fixed one
+/// in the code).
+fn pw() -> &'static str {
+    static PW: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    PW.get_or_init(|| {
+        let mut b = [0u8; 16];
+        getrandom::fill(&mut b).unwrap();
+        b.iter().map(|x| format!("{x:02x}")).collect()
+    })
+}
 /// The door holds one account per process: the tests take turns.
 static TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
 const BOT: &str = env!("CARGO_BIN_EXE_trair-bot");
@@ -68,7 +77,7 @@ fn server(dir: &Path) -> String {
 /// `trair-bot` with the password in its environment.
 fn bot_command(args: &[&str]) -> Command {
     let mut c = Command::new(BOT);
-    c.args(args).env("TRAIR_BOT_PASSWORT", PW);
+    c.args(args).env("TRAIR_BOT_PASSWORT", pw());
     c
 }
 
@@ -177,7 +186,7 @@ fn t01_a_bot_its_owner_and_a_chat_through_the_real_server() {
     let bot_dir = tmp.0.join("wetterbot");
 
     // Julian: a person, in this process.
-    open_vault(&tmp.0.join("julian"), PW, Some(json!({"name": "Julian"}))).unwrap();
+    open_vault(&tmp.0.join("julian"), pw(), Some(json!({"name": "Julian"}))).unwrap();
     let mut julian = Client::connect(&url, false).unwrap();
     julian.online();
 
@@ -348,7 +357,7 @@ fn t02_the_example_bots_answer_in_python_and_javascript() {
         let tmp = TempDir::new();
         let url = server(&tmp.0);
         let bot_dir = tmp.0.join("echo");
-        open_vault(&tmp.0.join("ada"), PW, Some(json!({"name": "Ada"}))).unwrap();
+        open_vault(&tmp.0.join("ada"), pw(), Some(json!({"name": "Ada"}))).unwrap();
         let mut ada = Client::connect(&url, false).unwrap();
         ada.online();
         let made = bot_command(&[
