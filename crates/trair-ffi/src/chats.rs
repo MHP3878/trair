@@ -511,22 +511,16 @@ pub(crate) fn profiles(m: &Messenger) -> Value {
 /// account key (hex, from the server). If the owner is a contact, the key
 /// must also be the contact's: then `contact` is true.
 pub(crate) fn check_bot(m: &Messenger, user: &str, owner_key: &str) -> Value {
-    let Ok(Some(p)) = m.profile(user) else {
-        return fail("not_found");
-    };
-    let Some(cert) = p.profile.bot.as_ref() else {
-        return fail("not_found");
-    };
     let Ok(key) = hex::decode(owner_key) else {
         return fail("bad_request");
     };
-    let contact = match m.contact(&cert.owner) {
-        Ok(Some(c)) => Some(c.fingerprint == trair_core::Fingerprint::of(&key)),
-        _ => None,
-    };
-    let valid = contact != Some(false)
-        && trair_core::bots::verify(cert, &key, Some(user), Some(&p.account_key)).is_ok();
-    json!({"ok": true, "valid": valid, "owner": cert.owner, "contact": valid && contact == Some(true)})
+    match m.check_bot(user, &key) {
+        Ok(Some((valid, contact, owner))) => {
+            json!({"ok": true, "valid": valid, "owner": owner, "contact": contact})
+        }
+        Ok(None) => fail("not_found"),
+        Err(e) => core_error(e),
+    }
 }
 
 pub(crate) fn accept_request(m: &mut Messenger, chat: &str, name: &str) -> Value {

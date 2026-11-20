@@ -1472,6 +1472,30 @@ impl Messenger {
         }
     }
 
+    /// Check the bot certificate `user`'s profile came with against the
+    /// owner's account key (from the server). If the owner is a contact,
+    /// the key must also be that contact's: a server that swapped the
+    /// owner's key cannot make a bot look like theirs. `None` if `user`
+    /// sent no certificate; else (valid, owner is a contact, owner).
+    pub fn check_bot(&self, user: &str, owner_key: &[u8]) -> Result<Option<(bool, bool, String)>> {
+        let Some(p) = self.profile(user)? else {
+            return Ok(None);
+        };
+        let Some(cert) = p.profile.bot.as_ref() else {
+            return Ok(None);
+        };
+        let contact = self
+            .contact(&cert.owner)?
+            .map(|c| c.fingerprint == crate::account::Fingerprint::of(owner_key));
+        let valid = contact != Some(false)
+            && crate::bots::verify(cert, owner_key, Some(user), Some(&p.account_key)).is_ok();
+        Ok(Some((
+            valid,
+            valid && contact == Some(true),
+            cert.owner.clone(),
+        )))
+    }
+
     /// Every stored profile.
     pub fn profiles(&self) -> Result<Vec<PeerProfile>> {
         let mut st = self

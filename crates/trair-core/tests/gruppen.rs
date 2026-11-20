@@ -1142,15 +1142,34 @@ fn a_bot_shows_its_owner_and_nobody_borrows_its_certificate() {
     )
     .unwrap();
     assert!(chat.id.len() == 32);
+    assert_eq!(
+        olga.m()
+            .check_bot("wetterbot", julian.public_key())
+            .unwrap(),
+        Some((true, false, "julian".into()))
+    );
+    assert_eq!(
+        olga.m().check_bot("olga", julian.public_key()).unwrap(),
+        None
+    );
 
-    // The bot's Trair does not send someone else's certificate.
+    // The bot's Trair does not send someone else's certificate, nor one
+    // naming another account with its own key.
     let robo = Account::generate("robo").unwrap();
     let (robo_cert, _) = vouch(&julian, &request_code(&robo).unwrap().0, NOW).unwrap();
-    assert!(
-        bot.m()
-            .share_profile(&bot_profile(2, "Wetterbot", Some(&robo_cert)), false)
-            .is_err()
+    let other_name = format!(
+        "trairbot1:robo:{}:{}",
+        hex::encode(bot.account.public_key()),
+        "ab".repeat(16)
     );
+    let (named_other, _) = vouch(&julian, &other_name, NOW).unwrap();
+    for c in [&robo_cert, &named_other] {
+        assert!(
+            bot.m()
+                .share_profile(&bot_profile(2, "Wetterbot", Some(c)), false)
+                .is_err()
+        );
+    }
     // Mallory sends the bot's certificate, or one about herself with the
     // bot's key: Olga keeps neither profile.
     let to = mal.recipients(&chat.id).unwrap();
@@ -1176,10 +1195,48 @@ fn a_bot_shows_its_owner_and_nobody_borrows_its_certificate() {
     let m = olga.m().profile("mallory").unwrap().unwrap();
     assert!(m.profile.bot.is_none());
 
+    // A server that swaps Julian's key for its own and signs a certificate
+    // with it: believable to someone who does not know Julian, not to Olga
+    // once Julian is her contact.
+    let fake_julian = Account::generate("julian").unwrap();
+    let (forged, _) = vouch(&fake_julian, &request_code(&bot.account).unwrap().0, NOW).unwrap();
+    let out = bot
+        .m()
+        .share_profile(&bot_profile(4, "Wetterbot", Some(&forged)), false)
+        .unwrap();
+    net.send(&id, &out[0].to, &out[0].bytes);
+    poll_ok(&mut net, &mut olga);
+    assert_eq!(
+        olga.m()
+            .check_bot("wetterbot", fake_julian.public_key())
+            .unwrap(),
+        Some((true, false, "julian".into())),
+        "without knowing Julian, the server's key is all there is"
+    );
+    let julian_code = trair_core::ContactCode {
+        user: "julian".into(),
+        fingerprint: julian.fingerprint(),
+    }
+    .text();
+    olga.m().add_contact(&julian_code, "Julian", NOW).unwrap();
+    assert_eq!(
+        olga.m()
+            .check_bot("wetterbot", fake_julian.public_key())
+            .unwrap(),
+        Some((false, false, "julian".into()))
+    );
+    assert_eq!(
+        olga.m()
+            .check_bot("wetterbot", julian.public_key())
+            .unwrap(),
+        Some((false, false, "julian".into())),
+        "the real key does not fit a certificate the fake key signed"
+    );
+
     // A newer profile without a certificate: no longer shown as a bot.
     let out = bot
         .m()
-        .share_profile(&bot_profile(3, "Wetterbot", None), false)
+        .share_profile(&bot_profile(5, "Wetterbot", None), false)
         .unwrap();
     net.send(&id, &out[0].to, &out[0].bytes);
     poll_ok(&mut net, &mut olga);
