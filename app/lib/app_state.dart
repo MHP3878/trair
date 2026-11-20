@@ -1173,6 +1173,7 @@ class AppState extends ChangeNotifier {
     final r = await api.vouchBot(v.raw['cert'], v.raw['secret'] as String);
     if (!r.ok) {
       botMessage = switch (r.error) {
+        // pragma: allowlist nextline secret (ein Fehlercode des Servers, kein Geheimnis)
         'bad_secret' => 'Dieser Code gilt nicht mehr: schon benutzt, oder der Bot hat einen neueren gemacht.',
         'unknown_bot' => 'Diesen Bot kennt der Server nicht.',
         'too_many_bots' => 'Du hast schon 10 Bots.',

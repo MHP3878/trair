@@ -2028,7 +2028,7 @@ void main() {
   });
 
   group('Bots', () {
-    const botCode = 'trairbot1:local-wetter:${'f3' * 32}:${'5e' * 16}';
+    final botCode = 'trairbot1:local-wetter:${'f3' * 32}:${'5e' * 16}';
 
     Future<(FakeDoor, FakeServer)> online(WidgetTester tester, {void Function(FakeDoor, FakeServer)? setup}) async {
       final server = FakeServer();

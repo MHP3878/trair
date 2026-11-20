@@ -44,6 +44,7 @@ pub fn open_vault(dir: &Path, password: &str, create: Option<Value>) -> Result<V
     if !ok(&opened) {
         return Err(match door::error(&opened).as_str() {
             "wrong_password" | "wait" => "Passwort falsch.".into(),
+            // pragma: allowlist nextline secret (ein Fehlercode, kein Passwort)
             "weak_password" => "Das Passwort ist zu kurz (mindestens 12 Zeichen).".into(),
             e => format!("Tresor ließ sich nicht öffnen ({e})."),
         });

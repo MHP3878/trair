@@ -572,7 +572,7 @@ void main() {
       expect(await olga.vouchBot(code, 'Wetter'), isFalse, reason: 'the code works once');
 
       // The bot runs; it speaks JSON lines with this test as its program.
-      final running = await Process.start(botBin!, ['start', '--daten', '${tmp.path}/bot', '--server', url], environment: env);
+      final running = await Process.start(botBin, ['start', '--daten', '${tmp.path}/bot', '--server', url], environment: env);
       bot = running;
       final events = StreamController<Map<String, Object?>>.broadcast();
       running.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen(
